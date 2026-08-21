@@ -1,15 +1,26 @@
 # Goark ORM
 
-Goark ORM 是 Goark 生态的数据映射模块，目标是提供 Go 原生实体映射、查询构建、事务集成和可测试数据访问边界。
+Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 生态。目标是提供 Go 原生实体映射、查询构建、事务集成和可测试数据访问边界。
 
 ## 当前状态
 
-本仓库已完成基础工程初始化，当前尚未承诺稳定公共 API。后续实现应按小步提交推进，每次功能变更都需要对应的 Go 测试或清晰的验证记录。
+本仓库已落地第一版 ORM 元数据与生成器基础能力，当前尚未承诺稳定公共 API。已支持：
+
+- 实体 `//goark-orm:entity` 与严格 `goark-orm` struct tag 解析。
+- Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete` 方法注解扫描。
+- XML Mapper 静态语句、动态 SQL 基础节点、`resultMap`、namespace 一致性校验。
+- XML 与注解在同一个 Mapper 接口中混用。
+- 生成 `RegisterGoarkORMMetadata`、Mapper 实现和 `orm.Session` 调用代码。
+- 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码。
+- `database/sql` Session、`Dialect`、`#{name}` 安全参数编译和基础结果扫描。
+- XML 动态 SQL 支持 `sql/include`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`。
+
+`goark-database` 事务对接仍按设计文档分阶段推进。
 
 ## 模块路径
 
 ```text
-module github.com/goark-projects/goark-orm
+module goark.dev/orm
 ```
 
 ## 规划边界
@@ -27,8 +38,20 @@ module github.com/goark-projects/goark-orm
 ## 快速检查
 
 ```bash
-go test ./...
-go vet ./...
+GOWORK=off go test ./...
+GOWORK=off go vet ./...
+```
+
+生成示例：
+
+```bash
+goark-orm generate orm --dir internal/user --output internal/user/zz_goark_orm_user_gen.go
+```
+
+如果项目已经使用 Goark 主 CLI，也可以使用可选包装：
+
+```bash
+goark generate orm --dir internal/user --output internal/user/zz_goark_orm_user_gen.go
 ```
 
 ## 工程约定

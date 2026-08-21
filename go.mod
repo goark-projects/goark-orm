@@ -1,3 +1,3 @@
-module github.com/goark-projects/goark-orm
+module goark.dev/orm
 
 go 1.25

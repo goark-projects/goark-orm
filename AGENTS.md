@@ -4,7 +4,7 @@
 
 保持 ORM 模块定位：优先显式映射、可生成代码和清晰事务边界，避免反射重度运行时魔法。
 
-- Module path: `github.com/goark-projects/goark-orm`.
+- Module path: `goark.dev/orm`.
 - Keep this repository Go-native: explicit APIs, deterministic setup, small runtime contracts, and testable adapters.
 - Do not import Java/Spring runtime scanning, reflection-heavy proxy models, or broad framework behavior unless a written design explicitly justifies it.
 - Use UTF-8 and LF for all generated files. Go comments must be concise standard Simplified Chinese.
