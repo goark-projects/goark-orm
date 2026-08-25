@@ -42,6 +42,7 @@ type ColumnModel struct {
 	SoftDelete    bool
 	CreatedAt     bool
 	UpdatedAt     bool
+	Fill          orm.FieldFill
 	Transient     bool
 }
 

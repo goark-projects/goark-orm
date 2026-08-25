@@ -254,6 +254,7 @@ func writeColumnMeta(builder *bytes.Buffer, column ColumnModel) {
 	writeBoolField(builder, "SoftDelete", column.SoftDelete)
 	writeBoolField(builder, "CreatedAt", column.CreatedAt)
 	writeBoolField(builder, "UpdatedAt", column.UpdatedAt)
+	writeFieldFillField(builder, column.Fill)
 	builder.WriteString("}")
 }
 
@@ -644,6 +645,28 @@ func writeIDTypeField(builder *bytes.Buffer, value orm.IDType) {
 	builder.WriteString("IDType:")
 	builder.WriteString(idTypeExpression(value))
 	builder.WriteByte(',')
+}
+
+func writeFieldFillField(builder *bytes.Buffer, value orm.FieldFill) {
+	if value == orm.FieldFillDefault {
+		return
+	}
+	builder.WriteString("Fill:")
+	builder.WriteString(fieldFillExpression(value))
+	builder.WriteByte(',')
+}
+
+func fieldFillExpression(value orm.FieldFill) string {
+	switch value {
+	case orm.FieldFillInsert:
+		return "orm.FieldFillInsert"
+	case orm.FieldFillUpdate:
+		return "orm.FieldFillUpdate"
+	case orm.FieldFillInsertUpdate:
+		return "orm.FieldFillInsertUpdate"
+	default:
+		return "orm.FieldFill(" + strconv.Quote(string(value)) + ")"
+	}
 }
 
 func idTypeExpression(value orm.IDType) string {

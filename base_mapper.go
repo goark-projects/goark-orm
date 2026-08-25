@@ -30,10 +30,15 @@ type identifierGeneratorProvider interface {
 	IdentifierGenerator() IdentifierGenerator
 }
 
+type metaObjectHandlerProvider interface {
+	MetaObjectHandler() MetaObjectHandler
+}
+
 type baseMapperOptions struct {
 	dialect             Dialect
 	clock               func() time.Time
 	identifierGenerator IdentifierGenerator
+	metaObjectHandler   MetaObjectHandler
 }
 
 // BaseMapperOption 配置 BaseMapper。
@@ -62,6 +67,13 @@ func WithBaseMapperIdentifierGenerator(generator IdentifierGenerator) BaseMapper
 	}
 }
 
+// WithBaseMapperMetaObjectHandler 指定 BaseMapper 自动填充处理器。
+func WithBaseMapperMetaObjectHandler(handler MetaObjectHandler) BaseMapperOption {
+	return func(options *baseMapperOptions) {
+		options.metaObjectHandler = handler
+	}
+}
+
 // BaseMapper 提供 MyBatis-Plus 风格的实体通用 CRUD。
 type BaseMapper[T any, ID any] struct {
 	session             StatementSession
@@ -69,6 +81,7 @@ type BaseMapper[T any, ID any] struct {
 	dialect             Dialect
 	clock               func() time.Time
 	identifierGenerator IdentifierGenerator
+	metaObjectHandler   MetaObjectHandler
 	primary             ColumnMeta
 	softDeleteColumn    ColumnMeta
 	hasSoftDelete       bool
@@ -109,6 +122,12 @@ func NewBaseMapper[T any, ID any](session StatementSession, entity EntityMeta, o
 	if identifierGenerator == nil {
 		identifierGenerator = NewDefaultIdentifierGenerator()
 	}
+	metaObjectHandler := opts.metaObjectHandler
+	if metaObjectHandler == nil {
+		if provider, ok := session.(metaObjectHandlerProvider); ok {
+			metaObjectHandler = provider.MetaObjectHandler()
+		}
+	}
 	copied := copyEntityMeta(entity)
 	primary, err := singlePrimaryColumn(copied)
 	if err != nil {
@@ -135,6 +154,7 @@ func NewBaseMapper[T any, ID any](session StatementSession, entity EntityMeta, o
 		dialect:             dialect,
 		clock:               opts.clock,
 		identifierGenerator: identifierGenerator,
+		metaObjectHandler:   metaObjectHandler,
 		primary:             primary,
 		softDeleteColumn:    columns.softDeleteColumn,
 		hasSoftDelete:       columns.hasSoftDelete,
@@ -291,6 +311,9 @@ func (m *BaseMapper[T, ID]) Insert(ctx context.Context, entity *T) (Result, erro
 	if err := m.fillInsertTimeFields(value); err != nil {
 		return Result{}, err
 	}
+	if err := applyMetaObjectHandler(ctx, m.metaObjectHandler, StatementCommandInsert, m.entity, value, nil); err != nil {
+		return Result{}, err
+	}
 	table, columns, fields, err := m.insertColumns()
 	if err != nil {
 		return Result{}, err
@@ -379,6 +402,9 @@ func (m *BaseMapper[T, ID]) UpdateByID(ctx context.Context, entity *T) (int64, e
 	if err := m.fillUpdateTimeFields(value); err != nil {
 		return 0, err
 	}
+	if err := applyMetaObjectHandler(ctx, m.metaObjectHandler, StatementCommandUpdate, m.entity, value, nil); err != nil {
+		return 0, err
+	}
 	var versionValue any
 	if m.hasVersion {
 		versionValue, err = fieldValue(value, m.version)
@@ -446,6 +472,9 @@ func (m *BaseMapper[T, ID]) Update(ctx context.Context, entity *T, wrapper *Quer
 		return 0, err
 	}
 	if err := m.fillUpdateTimeFields(value); err != nil {
+		return 0, err
+	}
+	if err := applyMetaObjectHandler(ctx, m.metaObjectHandler, StatementCommandUpdate, m.entity, value, nil); err != nil {
 		return 0, err
 	}
 	sets, fields, err := m.updateSetColumns(false)

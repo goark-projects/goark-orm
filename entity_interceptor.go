@@ -69,25 +69,7 @@ func (i *entitySemanticInterceptor) Intercept(ctx context.Context, invocation *S
 }
 
 func (i *entitySemanticInterceptor) statementEntity(statement StatementMeta) (EntityMeta, bool) {
-	for _, candidate := range []string{statement.ParameterType, statement.ResultType} {
-		if entity, ok := i.registry.Entity(normalizeTypeIdentifier(candidate)); ok {
-			return entity, true
-		}
-	}
-	if statement.ResultMap == "" {
-		return EntityMeta{}, false
-	}
-	mapper, ok := i.registry.Mapper(statement.Namespace)
-	if !ok {
-		return EntityMeta{}, false
-	}
-	for _, resultMap := range mapper.ResultMaps {
-		if resultMap.ID != statement.ResultMap {
-			continue
-		}
-		return i.registry.Entity(normalizeTypeIdentifier(resultMap.TypeName))
-	}
-	return EntityMeta{}, false
+	return statementEntityFromRegistry(i.registry, statement)
 }
 
 func (i *entitySemanticInterceptor) applyAutoFill(statement *StatementRuntime, entity EntityMeta, columns baseMapperSemanticColumns) error {
@@ -222,7 +204,7 @@ func entityValueFromArgs(args NamedArgs, entity EntityMeta) (reflect.Value, bool
 func syncEntityFieldArg(args NamedArgs, entity reflect.Value, column ColumnMeta) {
 	value, err := fieldValue(entity, column)
 	if err == nil {
-		args[column.FieldName] = value
+		setMetaObjectArgs(args, column, value)
 	}
 }
 
@@ -306,4 +288,29 @@ func sqlWhereContainsColumn(query string, column string) bool {
 
 func containsSQLColumn(query string, column string) bool {
 	return strings.Contains(normalizeColumnKey(query), normalizeColumnKey(column))
+}
+
+func statementEntityFromRegistry(registry *Registry, statement StatementMeta) (EntityMeta, bool) {
+	if registry == nil {
+		return EntityMeta{}, false
+	}
+	for _, candidate := range []string{statement.ParameterType, statement.ResultType} {
+		if entity, ok := registry.Entity(normalizeTypeIdentifier(candidate)); ok {
+			return entity, true
+		}
+	}
+	if statement.ResultMap == "" {
+		return EntityMeta{}, false
+	}
+	mapper, ok := registry.Mapper(statement.Namespace)
+	if !ok {
+		return EntityMeta{}, false
+	}
+	for _, resultMap := range mapper.ResultMaps {
+		if resultMap.ID != statement.ResultMap {
+			continue
+		}
+		return registry.Entity(normalizeTypeIdentifier(resultMap.TypeName))
+	}
+	return EntityMeta{}, false
 }

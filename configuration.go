@@ -41,6 +41,7 @@ type Configuration struct {
 	DefaultExecutorType      ExecutorType
 	DefaultStatementTimeout  time.Duration
 	DefaultFetchSize         int
+	MetaObjectHandler        MetaObjectHandler
 }
 
 // DefaultConfiguration 返回独立 ORM 的默认运行期配置。
@@ -88,6 +89,7 @@ func WithConfiguration(config Configuration) SQLSessionOption {
 		session.localCacheScope = normalized.LocalCacheScope
 		session.cacheEnabled = boolValue(normalized.CacheEnabled, true)
 		session.mapUnderscoreToCamelCase = normalized.MapUnderscoreToCamelCase
+		session.metaObjectHandler = normalized.MetaObjectHandler
 		if boolValue(normalized.LocalCacheEnabled, true) {
 			if session.localCache == nil {
 				session.localCache = newLocalCache()

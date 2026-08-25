@@ -48,6 +48,20 @@ const (
 	SelectKeyOrderAfter SelectKeyOrder = "AFTER"
 )
 
+// FieldFill 描述 MyBatis-Plus 风格字段自动填充时机。
+type FieldFill string
+
+const (
+	// FieldFillDefault 表示字段不参与严格自动填充。
+	FieldFillDefault FieldFill = ""
+	// FieldFillInsert 表示字段仅在 INSERT 时参与自动填充。
+	FieldFillInsert FieldFill = "INSERT"
+	// FieldFillUpdate 表示字段仅在 UPDATE 时参与自动填充。
+	FieldFillUpdate FieldFill = "UPDATE"
+	// FieldFillInsertUpdate 表示字段在 INSERT 和 UPDATE 时都参与自动填充。
+	FieldFillInsertUpdate FieldFill = "INSERT_UPDATE"
+)
+
 // ColumnMeta 描述实体字段与数据库列的静态映射。
 type ColumnMeta struct {
 	FieldName     string
@@ -65,6 +79,7 @@ type ColumnMeta struct {
 	SoftDelete    bool
 	CreatedAt     bool
 	UpdatedAt     bool
+	Fill          FieldFill
 }
 
 // EntityMeta 描述一个实体类型的 ORM 映射。

@@ -3,7 +3,7 @@ package ormgen
 import "testing"
 
 func TestParseFieldTag_whenValid_shouldParseTypedAttributes(t *testing.T) {
-	tag, err := ParseFieldTag("column='id';primary-key=true;auto-increment=true;size=64")
+	tag, err := ParseFieldTag("column='id';primary-key=true;auto-increment=true;size=64;fill='insert_update'")
 	if err != nil {
 		t.Fatalf("parse tag failed: %v", err)
 	}
@@ -28,6 +28,13 @@ func TestParseFieldTag_whenValid_shouldParseTypedAttributes(t *testing.T) {
 	if !ok || size != 64 {
 		t.Fatalf("unexpected size: ok=%v value=%d", ok, size)
 	}
+	fill, ok, err := tagString(tag, "fill")
+	if err != nil {
+		t.Fatalf("read fill failed: %v", err)
+	}
+	if !ok || fill != "insert_update" {
+		t.Fatalf("unexpected fill: ok=%v value=%q", ok, fill)
+	}
 }
 
 func TestParseFieldTag_whenInvalid_shouldReject(t *testing.T) {
@@ -37,6 +44,7 @@ func TestParseFieldTag_whenInvalid_shouldReject(t *testing.T) {
 		"column='id';primary-key",
 		"column='id',primary-key=true",
 		"column='id';size='64'",
+		"column='id';fill=true",
 	}
 	for _, item := range cases {
 		if _, err := ParseFieldTag(item); err == nil {

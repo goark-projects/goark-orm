@@ -237,6 +237,15 @@ func buildColumn(entityName string, fieldName string, fieldType string, tag fiel
 		}
 		column.IDType = idType
 	}
+	if value, ok, err := tagString(tag, "fill"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else if ok {
+		fill, err := orm.ParseFieldFill(value)
+		if err != nil {
+			return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+		}
+		column.Fill = fill
+	}
 	if value, ok, err := tagBool(tag, "nullable"); err != nil {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
 	} else if ok {

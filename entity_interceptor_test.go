@@ -15,6 +15,8 @@ type entitySemanticUser struct {
 	Deleted   bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	CreatedBy string
+	UpdatedBy string
 }
 
 func TestEntitySemanticInterceptor_whenInsertEntity_shouldAutoFillTimeFields(t *testing.T) {
@@ -149,6 +151,52 @@ func TestEntitySemanticInterceptor_whenUpdateEntityHasVersion_shouldInjectVersio
 	}
 }
 
+func TestSQLSession_Exec_whenMetaObjectHandlerConfigured_shouldFillMapperEntityArgs(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newEntitySemanticRegistry(t, StatementMeta{
+		ID:            "InsertAudit",
+		Namespace:     "system.semantic.UserMapper",
+		FullName:      "system.semantic.UserMapper.InsertAudit",
+		Command:       StatementCommandInsert,
+		Source:        StatementSourceAnnotation,
+		SQL:           "insert into sys_user(name, created_by, updated_by) values(#{Name}, #{createdBy}, #{updatedBy})",
+		ParameterType: "entitySemanticUser",
+	})
+	config := DefaultConfiguration()
+	config.MetaObjectHandler = auditMetaObjectHandler{user: "system"}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	user := &entitySemanticUser{Name: "Alice"}
+
+	_, err = session.Exec(context.Background(), "system.semantic.UserMapper.InsertAudit", NamedArgs{
+		"user":      user,
+		"Name":      user.Name,
+		"createdBy": user.CreatedBy,
+		"updatedBy": user.UpdatedBy,
+	})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if user.CreatedBy != "system" || user.UpdatedBy != "system" {
+		t.Fatalf("expected meta object fields to be filled, got %#v", user)
+	}
+	if state.exec != "insert into sys_user(name, created_by, updated_by) values($1, $2, $3)" {
+		t.Fatalf("unexpected SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: "Alice"},
+		{Ordinal: 2, Value: "system"},
+		{Ordinal: 3, Value: "system"},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected args %#v", state.execArgs)
+	}
+}
+
 func TestEntitySemanticInterceptor_whenDeleteEntityHasSoftDelete_shouldRewriteToUpdate(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1}
@@ -198,6 +246,8 @@ func newEntitySemanticRegistry(t *testing.T, statements ...StatementMeta) *Regis
 			{FieldName: "Deleted", ColumnName: "deleted", SoftDelete: true},
 			{FieldName: "CreatedAt", ColumnName: "created_at", CreatedAt: true},
 			{FieldName: "UpdatedAt", ColumnName: "updated_at", UpdatedAt: true},
+			{FieldName: "CreatedBy", ColumnName: "created_by", Fill: FieldFillInsert},
+			{FieldName: "UpdatedBy", ColumnName: "updated_by", Fill: FieldFillInsertUpdate},
 		},
 	}); err != nil {
 		t.Fatalf("register entity failed: %v", err)

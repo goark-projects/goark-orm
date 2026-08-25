@@ -28,6 +28,7 @@ type SQLSession struct {
 	parameterHandler         ParameterHandler
 	resultSetHandler         ResultSetHandler
 	identifierGenerator      IdentifierGenerator
+	metaObjectHandler        MetaObjectHandler
 	localCache               *localCache
 	localCacheScope          LocalCacheScope
 	cacheEnabled             bool
@@ -98,6 +99,7 @@ func NewSQLSession(registry *Registry, executor SQLExecutor, dialect Dialect, op
 		localCacheScope:     LocalCacheScopeSession,
 		cacheEnabled:        true,
 		identifierGenerator: NewDefaultIdentifierGenerator(),
+		metaObjectHandler:   configuration.MetaObjectHandler,
 	}
 	session.statementExecutor = defaultStatementExecutor{}
 	session.statementHandler = &defaultStatementHandler{session: session}
@@ -132,6 +134,14 @@ func (s *SQLSession) Dialect() Dialect {
 		return NewQuestionDialect()
 	}
 	return s.dialect
+}
+
+// MetaObjectHandler 返回当前 Session 使用的自动填充处理器。
+func (s *SQLSession) MetaObjectHandler() MetaObjectHandler {
+	if s == nil {
+		return nil
+	}
+	return s.metaObjectHandler
 }
 
 // Query 执行查询语句并扫描多行结果。
@@ -241,8 +251,12 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 	if s == nil {
 		return nil, fmt.Errorf("goark-orm: session is nil")
 	}
+	renderArgs := copyNamedArgs(args)
+	if renderArgs == nil {
+		renderArgs = NamedArgs{}
+	}
 	if strings.TrimSpace(meta.Provider) != "" {
-		source, err := s.invokeSQLProvider(ctx, meta, args)
+		source, err := s.invokeSQLProvider(ctx, meta, renderArgs)
 		if err != nil {
 			return nil, err
 		}
@@ -250,9 +264,8 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 		meta.DynamicSQL = source.DynamicSQL
 	}
 	sqlText := meta.SQL
-	renderArgs := args
 	if len(meta.DynamicSQL) > 0 {
-		rendered, err := RenderDynamicSQL(meta.DynamicSQL, args)
+		rendered, err := RenderDynamicSQL(meta.DynamicSQL, renderArgs)
 		if err != nil {
 			return nil, fmt.Errorf("goark-orm: render dynamic statement %s failed: %w", meta.FullName, err)
 		}
@@ -274,7 +287,22 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 			return nil, fmt.Errorf("goark-orm: intercept statement %s failed: %w", meta.FullName, err)
 		}
 	}
+	if err := s.applyMetaObjectFill(ctx, runtime); err != nil {
+		return nil, err
+	}
 	return runtime, nil
+}
+
+func (s *SQLSession) applyMetaObjectFill(ctx context.Context, runtime *StatementRuntime) error {
+	if s == nil || runtime == nil || s.metaObjectHandler == nil || runtime.Meta.Source == StatementSourceBase {
+		return nil
+	}
+	entity, ok := statementEntityFromRegistry(s.registry, runtime.Meta)
+	if !ok {
+		return nil
+	}
+	value, _ := entityValueFromArgs(runtime.Args, entity)
+	return applyMetaObjectHandler(ctx, s.metaObjectHandler, runtime.Meta.Command, entity, value, runtime.Args)
 }
 
 func (s *SQLSession) invokeSQLProvider(ctx context.Context, meta StatementMeta, args NamedArgs) (SQLSource, error) {

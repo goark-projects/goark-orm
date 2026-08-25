@@ -113,8 +113,8 @@ type User struct {
 	Profile   Profile   `json:"profile" goark-orm:"column='profile';type='jsonb';type-handler='json'"`
 	Version   int64     `json:"version" goark-orm:"column='version';version=true"`
 	Deleted   bool      `json:"deleted" goark-orm:"column='deleted';soft-delete=true"`
-	CreatedAt time.Time `json:"createdAt" goark-orm:"column='created_at';created-at=true"`
-	UpdatedAt time.Time `json:"updatedAt" goark-orm:"column='updated_at';updated-at=true"`
+	CreatedAt time.Time `json:"createdAt" goark-orm:"column='created_at';created-at=true;fill='insert'"`
+	UpdatedAt time.Time `json:"updatedAt" goark-orm:"column='updated_at';updated-at=true;fill='insert_update'"`
 	Temp      string    `json:"-" goark-orm:"transient=true"`
 }
 ```
@@ -131,6 +131,7 @@ type User struct {
 7. version=true 在同一个实体内最多只能出现一次。
 8. soft-delete=true 在同一个实体内最多只能出现一次。
 9. created-at=true 和 updated-at=true 允许各出现一次。
+10. fill 支持 insert、update、insert_update，运行期由 MetaObjectHandler 执行严格填充。
 ```
 
 常用字段属性：
@@ -150,6 +151,7 @@ type User struct {
 | `soft-delete` | bool | 逻辑删除字段 |
 | `created-at` | bool | 创建时间字段 |
 | `updated-at` | bool | 更新时间字段 |
+| `fill` | string | 自动填充策略：insert、update、insert_update |
 | `transient` | bool | 不参与 ORM 映射 |
 
 ## Mapper 声明
@@ -547,7 +549,9 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 `SQLSession` 默认启用 Session 级一级缓存。缓存 key 由最终编译 SQL 和参数组成，写操作、`Commit`、`Rollback` 和 `Close` 会清空缓存。可通过 `WithLocalCache(false)` 关闭，也可以通过 `Configuration.LocalCacheScope` 设置为 `STATEMENT`，使缓存不跨语句复用。
 
-运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时和 fetch size 元数据。
+运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `MetaObjectHandler` 自动填充处理器。
+
+`MetaObjectHandler` 对齐 MyBatis-Plus 字段填充模型，但采用 Go 显式接口。BaseMapper 会在构造写入参数前填充实体；普通 Mapper 写语句会在拦截器改写后、方言占位符编译前填充运行时命名参数。`StrictInsertFill` 和 `StrictUpdateFill` 会读取 `ColumnMeta.Fill`，并兼容旧的 `created-at` / `updated-at` 语义。
 
 Mapper namespace 级二级缓存由 `Cache` SPI 承载，默认实现是并发安全的有界内存 LRU 缓存。XML `<cache>` 会为当前 namespace 创建默认二级缓存，`<cache-ref namespace="...">` 会复用目标 namespace 缓存。`select` 默认 `useCache=true`，insert/update/delete 默认 `flushCache=true`，select 默认 `flushCache=false`；显式 `useCache=false` 或 `flushCache=false` 会覆盖默认策略。
 
@@ -625,6 +629,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持独立 `Configuration` API，用于统一配置方言、缓存策略、下划线转驼峰和默认执行器类型。
 - 已支持 `ExecutorType.REUSE` 预编译语句复用，按最终 SQL 在 Session 内缓存 prepared statement，并在 Session/事务生命周期结束时关闭。
 - 已支持 BaseMapper 逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
+- 已支持 `MetaObjectHandler` 自动填充及 `fill` 字段策略。
 - 已支持 SQLSession 拦截器 SPI、全表更新/删除保护、SQL 观察、租户条件、数据权限条件、动态表名和分页拦截器。
 - 已支持 `UpdateWrapper` 局部更新、常用条件操作符、`TypedField` 字段引用、生成期 `UserTypedFields`、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - 已支持 `IDType` 主键策略、默认 ASSIGN_ID/ASSIGN_UUID 生成器、XML `<bind>` 和 `databaseId` 语句选择。

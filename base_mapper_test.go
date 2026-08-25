@@ -23,6 +23,13 @@ type baseMapperAuditUser struct {
 	UpdatedAt time.Time
 }
 
+type baseMapperFillUser struct {
+	ID        int64
+	Name      string
+	CreatedBy string
+	UpdatedBy string
+}
+
 var (
 	baseMapperUserID     = Field[baseMapperUser]{Column: "id"}
 	baseMapperUserName   = Field[baseMapperUser]{Column: "name"}
@@ -526,6 +533,83 @@ func TestBaseMapper_Insert_whenAutoTimeFieldsPresent_shouldFillCreatedAndUpdated
 	}
 }
 
+func TestBaseMapper_Insert_whenMetaObjectHandlerPresent_shouldFillConfiguredFields(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperFillUser, int64](
+		session,
+		baseMapperFillUserEntity(),
+		WithBaseMapperMetaObjectHandler(auditMetaObjectHandler{user: "system"}),
+	)
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+	user := &baseMapperFillUser{Name: "Alice"}
+
+	_, err = mapper.Insert(context.Background(), user)
+	if err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+
+	if user.CreatedBy != "system" || user.UpdatedBy != "system" {
+		t.Fatalf("expected meta object fields to be filled, got %#v", user)
+	}
+	if state.exec != `INSERT INTO "sys_user" ("name", "created_by", "updated_by") VALUES ($1, $2, $3)` {
+		t.Fatalf("unexpected exec SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: "Alice"},
+		{Ordinal: 2, Value: "system"},
+		{Ordinal: 3, Value: "system"},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected exec args %#v", state.execArgs)
+	}
+}
+
+func TestBaseMapper_UpdateByID_whenMetaObjectHandlerPresent_shouldFillUpdateFields(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperFillUser, int64](
+		session,
+		baseMapperFillUserEntity(),
+		WithBaseMapperMetaObjectHandler(auditMetaObjectHandler{user: "operator"}),
+	)
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+	user := &baseMapperFillUser{ID: 7, Name: "Alice"}
+
+	rows, err := mapper.UpdateByID(context.Background(), user)
+	if err != nil {
+		t.Fatalf("update by id failed: %v", err)
+	}
+
+	if rows != 1 || user.UpdatedBy != "operator" || user.CreatedBy != "" {
+		t.Fatalf("unexpected update result rows=%d user=%#v", rows, user)
+	}
+	if state.exec != `UPDATE "sys_user" SET "name" = $1, "created_by" = $2, "updated_by" = $3 WHERE "id" = $4` {
+		t.Fatalf("unexpected exec SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: "Alice"},
+		{Ordinal: 2, Value: ""},
+		{Ordinal: 3, Value: "operator"},
+		{Ordinal: 4, Value: int64(7)},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected exec args %#v", state.execArgs)
+	}
+}
+
 func TestBaseMapper_UpdateByID_whenEntityProvided_shouldUpdateNonPrimaryColumns(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1}
@@ -780,6 +864,19 @@ func baseMapperAuditUserEntity() EntityMeta {
 	}
 }
 
+func baseMapperFillUserEntity() EntityMeta {
+	return EntityMeta{
+		TypeName: "baseMapperFillUser",
+		Table:    "sys_user",
+		Columns: []ColumnMeta{
+			{FieldName: "ID", FieldType: "int64", ColumnName: "id", PrimaryKey: true, AutoIncrement: true},
+			{FieldName: "Name", FieldType: "string", ColumnName: "name"},
+			{FieldName: "CreatedBy", FieldType: "string", ColumnName: "created_by", Fill: FieldFillInsert},
+			{FieldName: "UpdatedBy", FieldType: "string", ColumnName: "updated_by", Fill: FieldFillInsertUpdate},
+		},
+	}
+}
+
 func baseMapperUserEntity() EntityMeta {
 	return EntityMeta{
 		TypeName: "baseMapperUser",
@@ -790,6 +887,21 @@ func baseMapperUserEntity() EntityMeta {
 			{FieldName: "Status", FieldType: "string", ColumnName: "status"},
 		},
 	}
+}
+
+type auditMetaObjectHandler struct {
+	user string
+}
+
+func (h auditMetaObjectHandler) InsertFill(ctx context.Context, meta *MetaObject) error {
+	if err := meta.StrictInsertFill("CreatedBy", h.user); err != nil {
+		return err
+	}
+	return meta.StrictInsertFill("UpdatedBy", h.user)
+}
+
+func (h auditMetaObjectHandler) UpdateFill(ctx context.Context, meta *MetaObject) error {
+	return meta.StrictUpdateFill("UpdatedBy", h.user)
 }
 
 type fixedIdentifierGenerator struct {

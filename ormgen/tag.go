@@ -121,6 +121,7 @@ var tagValueTypes = map[string]tagValueKind{
 	"type":           tagValueString,
 	"default":        tagValueString,
 	"id-type":        tagValueString,
+	"fill":           tagValueString,
 	"type-handler":   tagValueString,
 	"primary-key":    tagValueBool,
 	"auto-increment": tagValueBool,

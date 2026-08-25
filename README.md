@@ -20,6 +20,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - MyBatis-Plus 风格 `IDType` 主键策略：`AUTO`、`INPUT`、`ASSIGN_ID`、`ASSIGN_UUID`。
 - `BaseMapper` 支持 `SelectCount`、`SelectMaps`、`SelectObjs`、`DeleteBatchIDs` 和 `SaveOrUpdate`。
 - `BaseMapper` 已支持逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
+- MyBatis-Plus 风格 `MetaObjectHandler` 自动填充，支持 `fill='insert'`、`fill='update'`、`fill='insert_update'`，可用于 BaseMapper 和普通 Mapper 写语句。
 - `QueryWrapper` / `UpdateWrapper` 支持嵌套条件、`EXISTS` / `NOT EXISTS`、`Apply`、`Last`、`Between`、`NotBetween`、`NotLike`、`LikeLeft`、`LikeRight`、`NotIn`，查询 Wrapper 额外支持 `GroupBy` / `Having` / `Select` / `AllEq` / 条件化 `OrderBy`。
 - `UpdateWrapper`、`TypedField` 和生成期 `UserTypedFields` 字段常量，支持局部更新、类型化字段引用、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - Registry / Session 级 `TypeHandler` SPI，内建 `json`、`time`、`decimal` 处理器。
@@ -154,10 +155,28 @@ config := orm.DefaultConfiguration().
 config.Dialect = orm.NewPostgresDialect()
 config.LocalCacheScope = orm.LocalCacheScopeSession
 config.DefaultExecutorType = orm.ExecutorTypeReuse
+config.MetaObjectHandler = auditFillHandler{}
 
 session, err := orm.NewSQLSession(registry, db, nil, orm.WithConfiguration(config))
 if err != nil {
 	return err
+}
+```
+
+自动填充处理器面向实体元数据工作，`StrictInsertFill` / `StrictUpdateFill` 会尊重字段 `fill` 策略：
+
+```go
+type auditFillHandler struct{}
+
+func (auditFillHandler) InsertFill(ctx context.Context, meta *orm.MetaObject) error {
+	if err := meta.StrictInsertFill("CreatedBy", currentUserID(ctx)); err != nil {
+		return err
+	}
+	return meta.StrictInsertFill("UpdatedBy", currentUserID(ctx))
+}
+
+func (auditFillHandler) UpdateFill(ctx context.Context, meta *orm.MetaObject) error {
+	return meta.StrictUpdateFill("UpdatedBy", currentUserID(ctx))
 }
 ```
 

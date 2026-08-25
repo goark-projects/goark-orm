@@ -83,6 +83,18 @@ func WithResultSetHandler(handler ResultSetHandler) SQLSessionOption {
 	}
 }
 
+// WithMetaObjectHandler 配置 Session 级自动填充处理器。
+func WithMetaObjectHandler(handler MetaObjectHandler) SQLSessionOption {
+	return func(session *SQLSession) error {
+		if handler == nil {
+			return fmt.Errorf("goark-orm: meta object handler is nil")
+		}
+		session.metaObjectHandler = handler
+		session.configuration.MetaObjectHandler = handler
+		return nil
+	}
+}
+
 type defaultStatementExecutor struct{}
 
 var _ StatementExecutor = defaultStatementExecutor{}

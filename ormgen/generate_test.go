@@ -25,6 +25,7 @@ func TestGenerate_whenXMLAndAnnotationMixed_shouldRenderMetadataAndMapperImpl(t 
 		"SoftDelete: true",
 		"CreatedAt: true",
 		"UpdatedAt: true",
+		"Fill: orm.FieldFillInsertUpdate",
 		"type goarkORMUserFields struct",
 		"var UserFields = goarkORMUserFields",
 		"ID:        orm.NewField[User](\"id\")",
@@ -1195,7 +1196,7 @@ type User struct {
 	Version int64 `+"`"+`json:"version" goark-orm:"column='version';version=true"`+"`"+`
 	Deleted bool `+"`"+`json:"deleted" goark-orm:"column='deleted';soft-delete=true"`+"`"+`
 	CreatedAt time.Time `+"`"+`json:"createdAt" goark-orm:"column='created_at';created-at=true"`+"`"+`
-	UpdatedAt time.Time `+"`"+`json:"updatedAt" goark-orm:"column='updated_at';updated-at=true"`+"`"+`
+	UpdatedAt time.Time `+"`"+`json:"updatedAt" goark-orm:"column='updated_at';updated-at=true;fill='insert_update'"`+"`"+`
 	Temp string `+"`"+`json:"-" goark-orm:"transient=true"`+"`"+`
 }
 
