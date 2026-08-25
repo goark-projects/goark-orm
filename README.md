@@ -27,6 +27,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - Registry / Session 级 `TypeHandler` SPI，内建 `json`、`time`、`decimal` 处理器。
 - `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
 - 独立 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。
+- Go 原生错误层级：`ErrConfiguration`、`ErrRegistry`、`ErrStatementNotFound`、`ErrBinding`、`ErrMapping`、`ErrExecutor`、`ErrTooManyResults` 均可通过 `errors.Is` 归类，通过 `errors.As` 读取结构化上下文。
 - `BatchSession` 批处理执行器、`Flush` / `Clear`、事务内批处理和查询前自动 flush。
 - Session/Statement 级一级缓存配置，写操作、提交、回滚和关闭时自动失效。
 - Mapper namespace 级二级缓存 SPI、默认内存 LRU 缓存、XML `<cache>` / `<cache-ref>`，以及 statement 级 `useCache` / `flushCache` 策略。
@@ -317,6 +318,23 @@ UpdatedAt time.Time `goark-orm:"column='updated_at';updated-at=true"`
 ```
 
 Goark 主 CLI 不包含 ORM 子命令，也不依赖 `goark.dev/orm`。ORM 代码生成统一使用本仓库自带的独立 `goark-orm` 命令。
+
+## 错误分类
+
+运行期错误遵循 Go 原生包装语义。业务代码按分类处理时使用 `errors.Is(err, orm.ErrBinding)`，需要定位信息时使用 `errors.As` 提取 `*orm.BindingError`、`*orm.MappingError`、`*orm.ExecutorError` 等结构体。
+
+```go
+if errors.Is(err, orm.ErrTooManyResults) {
+	return err
+}
+
+var mappingErr *orm.MappingError
+if errors.As(err, &mappingErr) {
+	_ = mappingErr.Statement
+	_ = mappingErr.Column
+	_ = mappingErr.Field
+}
+```
 
 ## 工程约定
 

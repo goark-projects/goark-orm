@@ -2,6 +2,8 @@ package orm
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -43,7 +45,7 @@ type Rows interface {
 func WithStatementExecutor(executor StatementExecutor) SQLSessionOption {
 	return func(session *SQLSession) error {
 		if executor == nil {
-			return fmt.Errorf("goark-orm: statement executor is nil")
+			return configurationErrorf("statement executor is nil")
 		}
 		session.statementExecutor = executor
 		return nil
@@ -54,7 +56,7 @@ func WithStatementExecutor(executor StatementExecutor) SQLSessionOption {
 func WithStatementHandler(handler StatementHandler) SQLSessionOption {
 	return func(session *SQLSession) error {
 		if handler == nil {
-			return fmt.Errorf("goark-orm: statement handler is nil")
+			return configurationErrorf("statement handler is nil")
 		}
 		session.statementHandler = handler
 		return nil
@@ -65,7 +67,7 @@ func WithStatementHandler(handler StatementHandler) SQLSessionOption {
 func WithParameterHandler(handler ParameterHandler) SQLSessionOption {
 	return func(session *SQLSession) error {
 		if handler == nil {
-			return fmt.Errorf("goark-orm: parameter handler is nil")
+			return configurationErrorf("parameter handler is nil")
 		}
 		session.parameterHandler = handler
 		return nil
@@ -76,7 +78,7 @@ func WithParameterHandler(handler ParameterHandler) SQLSessionOption {
 func WithResultSetHandler(handler ResultSetHandler) SQLSessionOption {
 	return func(session *SQLSession) error {
 		if handler == nil {
-			return fmt.Errorf("goark-orm: result set handler is nil")
+			return configurationErrorf("result set handler is nil")
 		}
 		session.resultSetHandler = handler
 		return nil
@@ -87,7 +89,7 @@ func WithResultSetHandler(handler ResultSetHandler) SQLSessionOption {
 func WithMetaObjectHandler(handler MetaObjectHandler) SQLSessionOption {
 	return func(session *SQLSession) error {
 		if handler == nil {
-			return fmt.Errorf("goark-orm: meta object handler is nil")
+			return configurationErrorf("meta object handler is nil")
 		}
 		session.metaObjectHandler = handler
 		session.configuration.MetaObjectHandler = handler
@@ -101,7 +103,7 @@ var _ StatementExecutor = defaultStatementExecutor{}
 
 func (defaultStatementExecutor) Query(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs, dest any) error {
 	if session == nil {
-		return fmt.Errorf("goark-orm: session is nil")
+		return configurationErrorf("session is nil")
 	}
 	compiled, err := session.compileStatement(ctx, meta, args)
 	if err != nil {
@@ -122,15 +124,15 @@ func (defaultStatementExecutor) Query(ctx context.Context, session *SQLSession, 
 	}
 	rows, err := session.querySQL(ctx, compiled)
 	if err != nil {
-		return err
+		return executorFailure(meta, "query", compiled, err)
 	}
 	scanErr := session.resultSetHandler.ScanRows(ctx, rows, meta, dest)
 	closeErr := rows.Close()
 	if scanErr != nil {
-		return scanErr
+		return mappingFailure(meta, scanErr)
 	}
 	if closeErr != nil {
-		return closeErr
+		return executorFailure(meta, "close rows", compiled, closeErr)
 	}
 	if err := session.putLocalCache(cacheKey, dest); err != nil {
 		return err
@@ -140,7 +142,7 @@ func (defaultStatementExecutor) Query(ctx context.Context, session *SQLSession, 
 
 func (defaultStatementExecutor) QueryOne(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs, dest any) error {
 	if session == nil {
-		return fmt.Errorf("goark-orm: session is nil")
+		return configurationErrorf("session is nil")
 	}
 	compiled, err := session.compileStatement(ctx, meta, args)
 	if err != nil {
@@ -161,15 +163,18 @@ func (defaultStatementExecutor) QueryOne(ctx context.Context, session *SQLSessio
 	}
 	rows, err := session.querySQL(ctx, compiled)
 	if err != nil {
-		return err
+		return executorFailure(meta, "query", compiled, err)
 	}
 	scanErr := session.resultSetHandler.ScanOne(ctx, rows, meta, dest)
 	closeErr := rows.Close()
 	if scanErr != nil {
-		return scanErr
+		if errors.Is(scanErr, ErrTooManyResults) || errors.Is(scanErr, sql.ErrNoRows) {
+			return scanErr
+		}
+		return mappingFailure(meta, scanErr)
 	}
 	if closeErr != nil {
-		return closeErr
+		return executorFailure(meta, "close rows", compiled, closeErr)
 	}
 	if err := session.putLocalCache(cacheKey, dest); err != nil {
 		return err
@@ -179,7 +184,7 @@ func (defaultStatementExecutor) QueryOne(ctx context.Context, session *SQLSessio
 
 func (defaultStatementExecutor) Exec(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs) (Result, error) {
 	if session == nil {
-		return Result{}, fmt.Errorf("goark-orm: session is nil")
+		return Result{}, configurationErrorf("session is nil")
 	}
 	if meta.Command == StatementCommandSelect {
 		return Result{}, fmt.Errorf("goark-orm: statement %s is select; use Query or QueryOne", meta.FullName)
@@ -206,7 +211,7 @@ func (defaultStatementExecutor) Exec(ctx context.Context, session *SQLSession, m
 	session.clearLocalCache()
 	sqlResult, err := session.execSQL(ctx, compiled)
 	if err != nil {
-		return Result{}, err
+		return Result{}, executorFailure(meta, "exec", compiled, err)
 	}
 	if shouldFlushStatementCache(meta) {
 		if err := session.flushSecondLevelCache(ctx, meta.Namespace); err != nil {
@@ -215,7 +220,7 @@ func (defaultStatementExecutor) Exec(ctx context.Context, session *SQLSession, m
 	}
 	rowsAffected, err := sqlResult.RowsAffected()
 	if err != nil {
-		return Result{}, err
+		return Result{}, executorFailure(meta, "rows affected", compiled, err)
 	}
 	result := Result{RowsAffected: rowsAffected}
 	if meta.SelectKey.Enabled && normalizeSelectKeyOrder(meta.SelectKey.Order) == SelectKeyOrderAfter {
@@ -237,7 +242,7 @@ func (defaultStatementExecutor) Exec(ctx context.Context, session *SQLSession, m
 	lastInsertID, err := sqlResult.LastInsertId()
 	if err != nil {
 		if meta.UseGeneratedKeys {
-			return Result{}, err
+			return Result{}, executorFailure(meta, "last insert id", compiled, err)
 		}
 		return result, nil
 	}

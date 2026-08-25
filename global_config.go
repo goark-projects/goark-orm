@@ -1,7 +1,6 @@
 package orm
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -52,13 +51,13 @@ func normalizeDbConfig(config DbConfig) (DbConfig, error) {
 		return DbConfig{}, err
 	}
 	if config.Schema != "" && !validIdentifierPart(config.Schema) {
-		return DbConfig{}, fmt.Errorf("goark-orm: dbConfig schema %q is invalid", config.Schema)
+		return DbConfig{}, configurationErrorf("dbConfig schema %q is invalid", config.Schema)
 	}
 	if config.TablePrefix != "" && !validIdentifierPart(config.TablePrefix+"x") {
-		return DbConfig{}, fmt.Errorf("goark-orm: dbConfig tablePrefix %q is invalid", config.TablePrefix)
+		return DbConfig{}, configurationErrorf("dbConfig tablePrefix %q is invalid", config.TablePrefix)
 	}
 	if config.LogicDeleteField != "" && !validIdentifierPart(config.LogicDeleteField) {
-		return DbConfig{}, fmt.Errorf("goark-orm: dbConfig logicDeleteField %q is invalid", config.LogicDeleteField)
+		return DbConfig{}, configurationErrorf("dbConfig logicDeleteField %q is invalid", config.LogicDeleteField)
 	}
 	defaults := DefaultDbConfig()
 	if config.LogicDeleteValue == nil {
@@ -75,7 +74,7 @@ func validateDbConfigIDType(value IDType) error {
 	case IDTypeNone, IDTypeAuto, IDTypeInput, IDTypeAssignID, IDTypeAssignUUID:
 		return nil
 	default:
-		return fmt.Errorf("goark-orm: dbConfig idType %q is invalid", value)
+		return configurationErrorf("dbConfig idType %q is invalid", value)
 	}
 }
 

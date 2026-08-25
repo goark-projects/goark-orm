@@ -32,7 +32,7 @@ func (s *SQLSession) executeSelectKey(ctx context.Context, parent StatementMeta,
 	}
 	rows, err := s.querySQL(ctx, compiled)
 	if err != nil {
-		return nil, err
+		return nil, executorFailure(meta, "query selectKey", compiled, err)
 	}
 	defer rows.Close()
 
@@ -41,7 +41,7 @@ func (s *SQLSession) executeSelectKey(ctx context.Context, parent StatementMeta,
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("goark-orm: selectKey %s returned no rows", parent.FullName)
 		}
-		return nil, err
+		return nil, mappingFailure(meta, err)
 	}
 	return reflect.Indirect(reflect.ValueOf(dest)).Interface(), nil
 }
@@ -52,7 +52,7 @@ func (s *SQLSession) compileSelectKey(ctx context.Context, meta StatementMeta, a
 	if len(meta.DynamicSQL) > 0 {
 		rendered, err := RenderDynamicSQL(meta.DynamicSQL, args)
 		if err != nil {
-			return CompiledSQL{}, fmt.Errorf("goark-orm: render dynamic selectKey %s failed: %w", meta.FullName, err)
+			return CompiledSQL{}, bindingFailure(meta.FullName, "render dynamic selectKey", err)
 		}
 		sqlText = rendered.SQL
 		renderArgs = rendered.Args

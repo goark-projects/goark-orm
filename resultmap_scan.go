@@ -19,7 +19,7 @@ type resultCollectionPlan struct {
 
 func (s *SQLSession) scanRowsWithCollections(ctx context.Context, rows Rows, columns []string, statement StatementMeta, resultMap ResultMapMeta, target reflect.Value) error {
 	if target.Kind() != reflect.Slice {
-		return fmt.Errorf("goark-orm: Query destination must be pointer to slice")
+		return &MappingError{Statement: statement.FullName, ResultMap: resultMap.ID, Message: "Query destination must be pointer to slice"}
 	}
 	elementType := target.Type().Elem()
 	rootPointer := elementType.Kind() == reflect.Pointer
@@ -28,7 +28,7 @@ func (s *SQLSession) scanRowsWithCollections(ctx context.Context, rows Rows, col
 		rootType = elementType.Elem()
 	}
 	if rootType.Kind() != reflect.Struct {
-		return fmt.Errorf("goark-orm: collection resultMap requires struct root type")
+		return &MappingError{Statement: statement.FullName, ResultMap: resultMap.ID, Message: "collection resultMap requires struct root type"}
 	}
 	rootBindings := s.columnBindings(statement, rootType)
 	plans := resultCollectionPlans(rootType, resultMap.Collections, "")
@@ -38,14 +38,14 @@ func (s *SQLSession) scanRowsWithCollections(ctx context.Context, rows Rows, col
 	for rows.Next() {
 		values, err := scanRowValues(rows, len(columns))
 		if err != nil {
-			return err
+			return &MappingError{Statement: statement.FullName, ResultMap: resultMap.ID, Err: err}
 		}
 		rootKey := resultObjectKey(resultMapFieldMetas(resultMap), columnIndexes, values)
 		rootIndex, exists := roots[rootKey]
 		if !exists {
 			root := reflect.New(rootType).Elem()
 			if err := s.applyBindings(ctx, root, rootBindings, columns, values); err != nil {
-				return err
+				return mappingFailure(statement, err)
 			}
 			if rootPointer {
 				pointer := reflect.New(rootType)
@@ -74,22 +74,22 @@ func (s *SQLSession) scanRowsWithCollections(ctx context.Context, rows Rows, col
 			}
 			child := reflect.New(plan.elementType).Elem()
 			if err := s.applyBindings(ctx, child, plan.bindings, columns, values); err != nil {
-				return err
+				return mappingFailure(statement, err)
 			}
 			if err := appendCollectionElement(rootValue, plan, child); err != nil {
-				return err
+				return mappingFailure(statement, err)
 			}
 			seen[childKey] = struct{}{}
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return &ExecutorError{Statement: statement.FullName, Operation: "iterate rows", Err: err}
 	}
 	if resultMapHasNestedSelects(resultMap) {
 		if err := rows.Close(); err != nil {
-			return err
+			return &ExecutorError{Statement: statement.FullName, Operation: "close rows", Err: err}
 		}
-		return s.applyNestedSelects(ctx, statement, resultMap, target)
+		return mappingFailure(statement, s.applyNestedSelects(ctx, statement, resultMap, target))
 	}
 	return nil
 }
@@ -123,6 +123,7 @@ func resultCollectionPlans(rootType reflect.Type, collections []ResultCollection
 			bindings[normalizeColumnKey(column)] = columnBinding{
 				index:       nestedField.Index,
 				typeHandler: item.TypeHandler,
+				fieldName:   nestedField.Name,
 			}
 		}
 		for _, association := range collection.Associations {
@@ -160,7 +161,11 @@ func (s *SQLSession) applyBindings(ctx context.Context, target reflect.Value, bi
 			continue
 		}
 		if err := s.setFieldFromDB(ctx, field, values[index], binding.typeHandler); err != nil {
-			return err
+			return &MappingError{
+				Column: column,
+				Field:  binding.fieldName,
+				Err:    err,
+			}
 		}
 	}
 	return nil
@@ -170,9 +175,15 @@ func (s *SQLSession) setFieldFromDB(ctx context.Context, field reflect.Value, va
 	if typeHandler != "" {
 		handler, ok := s.typeHandlers[typeHandler]
 		if !ok {
-			return fmt.Errorf("goark-orm: type-handler %q is not registered", typeHandler)
+			return mappingErrorf("type-handler %q is not registered", typeHandler)
 		}
-		return handler.FromDB(ctx, value, field.Addr().Interface())
+		if err := handler.FromDB(ctx, value, field.Addr().Interface()); err != nil {
+			return &MappingError{
+				Message: fmt.Sprintf("type-handler %q failed", typeHandler),
+				Err:     err,
+			}
+		}
+		return nil
 	}
 	return setReflectField(field, value)
 }
@@ -238,7 +249,7 @@ func appendCollectionElement(root reflect.Value, plan resultCollectionPlan, chil
 		return nil
 	}
 	if field.Kind() != reflect.Slice {
-		return fmt.Errorf("goark-orm: collection property %s is not slice", plan.property)
+		return mappingErrorf("collection property %s is not slice", plan.property)
 	}
 	if field.IsNil() {
 		field.Set(reflect.MakeSlice(field.Type(), 0, 1))

@@ -1,7 +1,6 @@
 package orm
 
 import (
-	"fmt"
 	"strings"
 	"time"
 )
@@ -86,7 +85,7 @@ func (c Configuration) WithMapUnderscoreToCamelCase(enabled bool) Configuration 
 func WithConfiguration(config Configuration) SQLSessionOption {
 	return func(session *SQLSession) error {
 		if session == nil {
-			return fmt.Errorf("goark-orm: session is nil")
+			return configurationErrorf("session is nil")
 		}
 		normalized, err := normalizeConfiguration(config, session.dialect)
 		if err != nil {
@@ -147,17 +146,17 @@ func normalizeConfiguration(config Configuration, fallbackDialect Dialect) (Conf
 		out.LocalCacheScope = defaults.LocalCacheScope
 	case LocalCacheScopeSession, LocalCacheScopeStatement:
 	default:
-		return Configuration{}, fmt.Errorf("goark-orm: localCacheScope %q is invalid", out.LocalCacheScope)
+		return Configuration{}, configurationErrorf("localCacheScope %q is invalid", out.LocalCacheScope)
 	}
 	switch out.DefaultExecutorType {
 	case "":
 		out.DefaultExecutorType = defaults.DefaultExecutorType
 	case ExecutorTypeSimple, ExecutorTypeReuse, ExecutorTypeBatch:
 	default:
-		return Configuration{}, fmt.Errorf("goark-orm: defaultExecutorType %q is invalid", out.DefaultExecutorType)
+		return Configuration{}, configurationErrorf("defaultExecutorType %q is invalid", out.DefaultExecutorType)
 	}
 	if out.DefaultFetchSize < 0 {
-		return Configuration{}, fmt.Errorf("goark-orm: defaultFetchSize must be >= 0")
+		return Configuration{}, configurationErrorf("defaultFetchSize must be >= 0")
 	}
 	return out, nil
 }

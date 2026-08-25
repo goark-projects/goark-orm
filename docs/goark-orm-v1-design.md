@@ -555,6 +555,8 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 `MetaObjectHandler` 对齐 MyBatis-Plus 字段填充模型，但采用 Go 显式接口。BaseMapper 会在构造写入参数前填充实体；普通 Mapper 写语句会在拦截器改写后、方言占位符编译前填充运行时命名参数。`StrictInsertFill` 和 `StrictUpdateFill` 会读取 `ColumnMeta.Fill`，并兼容旧的 `created-at` / `updated-at` 语义。
 
+运行期错误提供 MyBatis 风格分层语义和 Go 原生判别方式。`ErrORM` 是根分类；配置、元数据、Statement 查找、参数绑定、结果映射、数据库执行和 QueryOne 多行结果分别对应 `ErrConfiguration`、`ErrRegistry`、`ErrStatementNotFound`、`ErrBinding`、`ErrMapping`、`ErrExecutor`、`ErrTooManyResults`。调用方使用 `errors.Is` 按阶段归类，使用 `errors.As` 提取 `ConfigurationError`、`BindingError`、`MappingError`、`ExecutorError` 等结构化上下文，避免依赖错误字符串。
+
 Mapper namespace 级二级缓存由 `Cache` SPI 承载，默认实现是并发安全的有界内存 LRU 缓存。XML `<cache>` 会为当前 namespace 创建默认二级缓存，`<cache-ref namespace="...">` 会复用目标 namespace 缓存。`select` 默认 `useCache=true`，insert/update/delete 默认 `flushCache=true`，select 默认 `flushCache=false`；显式 `useCache=false` 或 `flushCache=false` 会覆盖默认策略。
 
 二级缓存遵循 MyBatis 风格事务发布语义：自动提交 Session 查询后立即写入缓存，写语句成功后立即清理 namespace 缓存；事务 Session 内的查询缓存写入和写语句缓存清理先进入挂起队列，只有事务 `Commit` 成功后才对共享二级缓存生效，`Rollback` 和未完成 `Close` 会丢弃挂起变更。

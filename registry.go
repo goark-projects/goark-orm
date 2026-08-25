@@ -1,7 +1,6 @@
 package orm
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 )
@@ -34,18 +33,18 @@ func NewRegistry() *Registry {
 // RegisterEntity 注册实体元数据。
 func (r *Registry) RegisterEntity(meta EntityMeta) error {
 	if r == nil {
-		return fmt.Errorf("goark-orm: registry is nil")
+		return registryErrorf("registry", "", "registry is nil")
 	}
 	if meta.TypeName == "" {
-		return fmt.Errorf("goark-orm: entity type name is required")
+		return registryErrorf("entity", "", "entity type name is required")
 	}
 	if meta.Table == "" {
-		return fmt.Errorf("goark-orm: entity %s table is required", meta.TypeName)
+		return registryErrorf("entity", meta.TypeName, "entity %s table is required", meta.TypeName)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.entities[meta.TypeName]; exists {
-		return fmt.Errorf("goark-orm: duplicate entity %q", meta.TypeName)
+		return registryErrorf("entity", meta.TypeName, "duplicate entity %q", meta.TypeName)
 	}
 	r.entities[meta.TypeName] = copyEntityMeta(meta)
 	return nil
@@ -54,25 +53,25 @@ func (r *Registry) RegisterEntity(meta EntityMeta) error {
 // RegisterMapper 注册 Mapper 元数据，并同步注册内部 Statement。
 func (r *Registry) RegisterMapper(meta MapperMeta) error {
 	if r == nil {
-		return fmt.Errorf("goark-orm: registry is nil")
+		return registryErrorf("registry", "", "registry is nil")
 	}
 	if meta.TypeName == "" {
-		return fmt.Errorf("goark-orm: mapper type name is required")
+		return registryErrorf("mapper", "", "mapper type name is required")
 	}
 	if meta.Namespace == "" {
-		return fmt.Errorf("goark-orm: mapper %s namespace is required", meta.TypeName)
+		return registryErrorf("mapper", meta.TypeName, "mapper %s namespace is required", meta.TypeName)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.mappers[meta.Namespace]; exists {
-		return fmt.Errorf("goark-orm: duplicate mapper namespace %q", meta.Namespace)
+		return registryErrorf("mapper", meta.Namespace, "duplicate mapper namespace %q", meta.Namespace)
 	}
 	for _, statement := range meta.Statements {
 		if statement.FullName == "" {
-			return fmt.Errorf("goark-orm: mapper %s has statement without full name", meta.TypeName)
+			return registryErrorf("statement", meta.TypeName, "mapper %s has statement without full name", meta.TypeName)
 		}
 		if _, exists := r.statements[statement.FullName]; exists {
-			return fmt.Errorf("goark-orm: duplicate statement %q", statement.FullName)
+			return registryErrorf("statement", statement.FullName, "duplicate statement %q", statement.FullName)
 		}
 	}
 	copied := copyMapperMeta(meta)
@@ -93,14 +92,14 @@ func (r *Registry) RegisterMapper(meta MapperMeta) error {
 // RegisterCache 注册或替换指定 namespace 的二级缓存实现。
 func (r *Registry) RegisterCache(namespace string, cache Cache) error {
 	if r == nil {
-		return fmt.Errorf("goark-orm: registry is nil")
+		return registryErrorf("registry", "", "registry is nil")
 	}
 	namespace = strings.TrimSpace(namespace)
 	if namespace == "" {
-		return fmt.Errorf("goark-orm: cache namespace is required")
+		return registryErrorf("cache", "", "cache namespace is required")
 	}
 	if cache == nil {
-		return fmt.Errorf("goark-orm: cache for namespace %s is nil", namespace)
+		return registryErrorf("cache", namespace, "cache for namespace %s is nil", namespace)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -111,14 +110,14 @@ func (r *Registry) RegisterCache(namespace string, cache Cache) error {
 // RegisterTypeHandler 注册或替换全局 TypeHandler。
 func (r *Registry) RegisterTypeHandler(name string, handler TypeHandler) error {
 	if r == nil {
-		return fmt.Errorf("goark-orm: registry is nil")
+		return registryErrorf("registry", "", "registry is nil")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("goark-orm: type-handler name is required")
+		return registryErrorf("type-handler", "", "type-handler name is required")
 	}
 	if handler == nil {
-		return fmt.Errorf("goark-orm: type-handler %q is nil", name)
+		return registryErrorf("type-handler", name, "type-handler %q is nil", name)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -154,14 +153,14 @@ func (r *Registry) TypeHandlers() map[string]TypeHandler {
 // RegisterSQLProvider 注册或替换全局 SQL Provider。
 func (r *Registry) RegisterSQLProvider(name string, provider SQLProvider) error {
 	if r == nil {
-		return fmt.Errorf("goark-orm: registry is nil")
+		return registryErrorf("registry", "", "registry is nil")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("goark-orm: SQL provider name is required")
+		return registryErrorf("SQL provider", "", "SQL provider name is required")
 	}
 	if provider == nil {
-		return fmt.Errorf("goark-orm: SQL provider %q is nil", name)
+		return registryErrorf("SQL provider", name, "SQL provider %q is nil", name)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

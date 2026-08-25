@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 )
 
 // SQLPreparer 是支持预编译语句的可选执行器能力。
@@ -40,11 +39,11 @@ func (s *SQLSession) usePreparedStatements() bool {
 
 func (s *SQLSession) preparedStatement(ctx context.Context, query string) (*sql.Stmt, error) {
 	if s == nil {
-		return nil, fmt.Errorf("goark-orm: session is nil")
+		return nil, configurationErrorf("session is nil")
 	}
 	preparer, ok := s.executor.(SQLPreparer)
 	if !ok {
-		return nil, fmt.Errorf("goark-orm: executor type REUSE requires PrepareContext support")
+		return nil, configurationErrorf("executor type REUSE requires PrepareContext support")
 	}
 	s.preparedMu.Lock()
 	if statement := s.preparedStatements[query]; statement != nil {
@@ -72,7 +71,7 @@ func (s *SQLSession) preparedStatement(ctx context.Context, query string) (*sql.
 
 func (s *SQLSession) closePreparedStatements() error {
 	if s == nil {
-		return fmt.Errorf("goark-orm: session is nil")
+		return configurationErrorf("session is nil")
 	}
 	s.preparedMu.Lock()
 	statements := s.preparedStatements

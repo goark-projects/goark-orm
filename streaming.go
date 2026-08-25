@@ -24,11 +24,11 @@ type Cursor[T any] struct {
 // QueryCursor 打开类型安全游标。游标查询不写入一级缓存和二级缓存。
 func QueryCursor[T any](ctx context.Context, session Session, statement string, args NamedArgs) (*Cursor[T], error) {
 	if session == nil {
-		return nil, fmt.Errorf("goark-orm: session is nil")
+		return nil, configurationErrorf("session is nil")
 	}
 	cursorSession, ok := session.(CursorQuerySession)
 	if !ok {
-		return nil, fmt.Errorf("goark-orm: session does not support cursor query")
+		return nil, configurationErrorf("session does not support cursor query")
 	}
 	rows, err := cursorSession.QueryCursor(ctx, statement, args)
 	if err != nil {
@@ -40,7 +40,7 @@ func QueryCursor[T any](ctx context.Context, session Session, statement string, 
 // QueryEach 逐条扫描并回调处理查询结果。
 func QueryEach[T any](ctx context.Context, session Session, statement string, args NamedArgs, handler ResultHandler[T]) error {
 	if handler == nil {
-		return fmt.Errorf("goark-orm: result handler is nil")
+		return configurationErrorf("result handler is nil")
 	}
 	cursor, err := QueryCursor[T](ctx, session, statement, args)
 	if err != nil {
@@ -90,19 +90,19 @@ func (c *RowCursor) Scan(ctx context.Context, dest any) error {
 		return err
 	}
 	if c == nil || c.rows == nil || c.session == nil {
-		return fmt.Errorf("goark-orm: cursor is nil")
+		return configurationErrorf("cursor is nil")
 	}
 	target, err := destination(dest)
 	if err != nil {
-		return err
+		return mappingFailure(c.statement, err)
 	}
 	if target.Kind() == reflect.Slice {
-		return fmt.Errorf("goark-orm: cursor destination must not be slice")
+		return &MappingError{Statement: c.statement.FullName, Message: "cursor destination must not be slice"}
 	}
 	if c.hasResultMap {
-		return c.session.scanValueWithResultMap(ctx, c.rows, c.columns, c.statement, c.resultMap, target)
+		return mappingFailure(c.statement, c.session.scanValueWithResultMap(ctx, c.rows, c.columns, c.statement, c.resultMap, target))
 	}
-	return c.session.scanValue(ctx, c.rows, c.columns, c.statement, target)
+	return mappingFailure(c.statement, c.session.scanValue(ctx, c.rows, c.columns, c.statement, target))
 }
 
 // Err 返回底层行集的迭代错误。
@@ -131,11 +131,11 @@ func (c *RowCursor) Close() error {
 func (c *Cursor[T]) Next(ctx context.Context) (T, bool, error) {
 	var zero T
 	if c == nil || c.rows == nil {
-		return zero, false, fmt.Errorf("goark-orm: cursor is nil")
+		return zero, false, configurationErrorf("cursor is nil")
 	}
 	if !c.rows.Next() {
 		if err := c.rows.Err(); err != nil {
-			return zero, false, err
+			return zero, false, &ExecutorError{Operation: "iterate cursor", Err: err}
 		}
 		return zero, false, nil
 	}
@@ -180,7 +180,7 @@ func (s *SQLSession) QueryCursorStatement(ctx context.Context, meta StatementMet
 		return nil, fmt.Errorf("goark-orm: context is nil")
 	}
 	if s == nil {
-		return nil, fmt.Errorf("goark-orm: session is nil")
+		return nil, configurationErrorf("session is nil")
 	}
 	compiled, err := s.compileStatement(ctx, meta, args)
 	if err != nil {
@@ -198,11 +198,11 @@ func (s *SQLSession) QueryCursorStatement(ctx context.Context, meta StatementMet
 	}
 	rows, err := s.querySQL(ctx, compiled)
 	if err != nil {
-		return nil, err
+		return nil, executorFailure(meta, "query cursor", compiled, err)
 	}
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, errors.Join(err, rows.Close())
+		return nil, errors.Join(&ExecutorError{Statement: meta.FullName, Operation: "read columns", Err: err}, rows.Close())
 	}
 	return &RowCursor{
 		session:      s,
@@ -227,7 +227,7 @@ func (s *BatchSession) QueryCursor(ctx context.Context, statement string, args N
 	}
 	cursorSession, ok := s.session.(CursorQuerySession)
 	if !ok {
-		return nil, fmt.Errorf("goark-orm: batch delegate does not support cursor query")
+		return nil, configurationErrorf("batch delegate does not support cursor query")
 	}
 	return cursorSession.QueryCursor(ctx, statement, args)
 }

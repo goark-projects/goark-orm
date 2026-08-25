@@ -20,12 +20,12 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 		dialect = NewQuestionDialect()
 	}
 	if strings.Contains(query, "${") {
-		return CompiledSQL{}, fmt.Errorf("goark-orm: SQL uses forbidden ${}")
+		return CompiledSQL{}, bindingErrorf("SQL uses forbidden ${}")
 	}
 	matches := statementParamPattern.FindAllStringSubmatchIndex(query, -1)
 	if len(matches) == 0 {
 		if strings.Contains(query, "#{") {
-			return CompiledSQL{}, fmt.Errorf("goark-orm: SQL contains invalid parameter placeholder")
+			return CompiledSQL{}, bindingErrorf("SQL contains invalid parameter placeholder")
 		}
 		return CompiledSQL{SQL: query}, nil
 	}
@@ -39,10 +39,13 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 		name := strings.TrimSpace(query[match[2]:match[3]])
 		value, ok, err := resolveNamedArg(args, name)
 		if err != nil {
-			return CompiledSQL{}, err
+			return CompiledSQL{}, &BindingError{Parameter: name, Err: err}
 		}
 		if !ok {
-			return CompiledSQL{}, fmt.Errorf("goark-orm: SQL parameter %q is missing", name)
+			return CompiledSQL{}, &BindingError{
+				Parameter: name,
+				Message:   fmt.Sprintf("SQL parameter %q is missing", name),
+			}
 		}
 		builder.WriteString(dialect.Placeholder(index + 1))
 		compiled.Args = append(compiled.Args, value)
@@ -51,7 +54,7 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 	builder.WriteString(query[offset:])
 	compiled.SQL = builder.String()
 	if strings.Contains(compiled.SQL, "#{") {
-		return CompiledSQL{}, fmt.Errorf("goark-orm: SQL contains invalid parameter placeholder")
+		return CompiledSQL{}, bindingErrorf("SQL contains invalid parameter placeholder")
 	}
 	return compiled, nil
 }
