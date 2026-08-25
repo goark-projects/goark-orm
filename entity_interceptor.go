@@ -301,7 +301,7 @@ func sqlWhereContainsColumn(query string, column string) bool {
 	if whereIndex < 0 {
 		return false
 	}
-	where, _ := splitSQLTail(query[whereIndex+len("where"):])
+	where, _ := splitSQLConditionTail(query[whereIndex+len("where"):])
 	return containsSQLColumn(where, column)
 }
 

@@ -151,3 +151,23 @@ func TestCountSQLBase_whenNestedOrderByProvided_shouldStripOnlyTopLevelTail(t *t
 		t.Fatalf("unexpected count SQL base %q", actual)
 	}
 }
+
+func TestCountSQLBase_whenGroupedQueryProvided_shouldKeepGroupingAndStripOrder(t *testing.T) {
+	t.Parallel()
+
+	query := "select status, count(*) from sys_user where active = #{active} group by status having count(*) > 1 order by status"
+	expected := "select status, count(*) from sys_user where active = #{active} group by status having count(*) > 1"
+	if actual := countSQLBase(query); actual != expected {
+		t.Fatalf("unexpected count SQL base %q", actual)
+	}
+}
+
+func TestCountSQLBase_whenTailKeywordIsPredicateColumn_shouldStripOnlyRealTail(t *testing.T) {
+	t.Parallel()
+
+	query := "select id from sys_user where order = #{order} order by id"
+	expected := "select id from sys_user where order = #{order}"
+	if actual := countSQLBase(query); actual != expected {
+		t.Fatalf("unexpected count SQL base %q", actual)
+	}
+}

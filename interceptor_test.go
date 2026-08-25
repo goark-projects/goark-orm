@@ -161,6 +161,81 @@ func TestAppendSQLCondition_whenKeywordOnlyExistsInPlaceholder_shouldAppendWhere
 	}
 }
 
+func TestAppendSQLCondition_whenOrderTokenIsPredicateColumn_shouldAppendAnd(t *testing.T) {
+	actual := appendSQLCondition(`select id from sys_user where order = #{order}`, `"tenant_id" = #{tenantID}`)
+	expected := `select id from sys_user where order = #{order} AND "tenant_id" = #{tenantID}`
+	if actual != expected {
+		t.Fatalf("unexpected SQL %q", actual)
+	}
+}
+
+func TestAppendSQLCondition_whenTailKeywordsArePredicateColumns_shouldAppendAnd(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		expected string
+	}{
+		{
+			name:     "limit_column",
+			query:    `select id from sys_user where limit = #{limit}`,
+			expected: `select id from sys_user where limit = #{limit} AND "tenant_id" = #{tenantID}`,
+		},
+		{
+			name:     "offset_column",
+			query:    `select id from sys_user where offset between #{begin} and #{end}`,
+			expected: `select id from sys_user where offset between #{begin} and #{end} AND "tenant_id" = #{tenantID}`,
+		},
+		{
+			name:     "having_column",
+			query:    `select id from sys_user where having = #{having}`,
+			expected: `select id from sys_user where having = #{having} AND "tenant_id" = #{tenantID}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := appendSQLCondition(tt.query, `"tenant_id" = #{tenantID}`)
+			if actual != tt.expected {
+				t.Fatalf("unexpected SQL %q", actual)
+			}
+		})
+	}
+}
+
+func TestAppendSQLCondition_whenOrderByTailExists_shouldAppendBeforeTail(t *testing.T) {
+	actual := appendSQLCondition(`select id from sys_user where status = #{status} order by id`, `"tenant_id" = #{tenantID}`)
+	expected := `select id from sys_user where status = #{status} AND "tenant_id" = #{tenantID} order by id`
+	if actual != expected {
+		t.Fatalf("unexpected SQL %q", actual)
+	}
+}
+
+func TestAppendSQLCondition_whenGroupingTailExists_shouldAppendBeforeGrouping(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		expected string
+	}{
+		{
+			name:     "group_by_without_where",
+			query:    `select status, count(*) from sys_user group by status`,
+			expected: `select status, count(*) from sys_user WHERE "tenant_id" = #{tenantID} group by status`,
+		},
+		{
+			name:     "group_by_with_where",
+			query:    `select status, count(*) from sys_user where active = #{active} group by status having count(*) > 1`,
+			expected: `select status, count(*) from sys_user where active = #{active} AND "tenant_id" = #{tenantID} group by status having count(*) > 1`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := appendSQLCondition(tt.query, `"tenant_id" = #{tenantID}`)
+			if actual != tt.expected {
+				t.Fatalf("unexpected SQL %q", actual)
+			}
+		})
+	}
+}
+
 func TestSQLObserverInterceptor_whenStatementRewritten_shouldObserveFinalTemplate(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{columns: []string{"id"}, values: nil}

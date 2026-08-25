@@ -369,7 +369,7 @@ func appendSQLCondition(query string, condition string) string {
 	if condition == "" {
 		return query
 	}
-	head, tail := splitSQLTail(query)
+	head, tail := splitSQLConditionTail(query)
 	operator := " WHERE "
 	if containsSQLKeyword(head, "where") {
 		operator = " AND "
@@ -646,16 +646,111 @@ func findClosingSQLParen(query string, openIndex int) (int, bool) {
 }
 
 func splitSQLTail(query string) (string, string) {
-	index := -1
-	for _, keyword := range []string{"order", "limit", "offset", "fetch", "for"} {
-		if found := findSQLKeyword(query, keyword); found >= 0 && (index < 0 || found < index) {
-			index = found
-		}
-	}
+	index := findSQLTailStart(query, false)
 	if index < 0 {
 		return query, ""
 	}
 	return strings.TrimRight(query[:index], " \t\r\n"), strings.TrimSpace(query[index:])
+}
+
+func splitSQLConditionTail(query string) (string, string) {
+	index := findSQLTailStart(query, true)
+	if index < 0 {
+		return query, ""
+	}
+	return strings.TrimRight(query[:index], " \t\r\n"), strings.TrimSpace(query[index:])
+}
+
+func findSQLTailStart(query string, includeGrouping bool) int {
+	depth := 0
+	for index := 0; index < len(query); {
+		if next, ok := skipSQLComment(query, index); ok {
+			index = next
+			continue
+		}
+		switch query[index] {
+		case '\'':
+			index = skipSQLSingleQuoted(query, index)
+			continue
+		case '#', '$':
+			if next, ok := skipSQLPlaceholder(query, index); ok {
+				index = next
+				continue
+			}
+		case '"', '`':
+			_, _, next, ok := readSQLQuotedIdentifier(query, index)
+			if !ok {
+				return -1
+			}
+			index = next
+			continue
+		case '[':
+			index = skipSQLBracketQuotedIdentifier(query, index)
+			continue
+		case '(':
+			depth++
+			index++
+			continue
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			index++
+			continue
+		}
+		if depth == 0 && isSQLIdentStart(query[index]) {
+			start := index
+			for index < len(query) && isSQLIdentPart(query[index]) {
+				index++
+			}
+			token := strings.ToLower(query[start:index])
+			if isSQLTailClause(query, index, token, includeGrouping) {
+				return start
+			}
+			continue
+		}
+		index++
+	}
+	return -1
+}
+
+func isSQLTailClause(query string, tokenEnd int, token string, includeGrouping bool) bool {
+	next := skipSQLSpacesAndComments(query, tokenEnd)
+	switch token {
+	case "order":
+		return hasSQLKeywordAt(query, next, "by")
+	case "group":
+		return includeGrouping && hasSQLKeywordAt(query, next, "by")
+	case "having":
+		return includeGrouping && !sqlTokenFollowedByPredicateOperator(query, next)
+	case "fetch":
+		return hasSQLKeywordAt(query, next, "first") || hasSQLKeywordAt(query, next, "next")
+	case "for":
+		return hasSQLKeywordAt(query, next, "update") ||
+			hasSQLKeywordAt(query, next, "share") ||
+			hasSQLKeywordAt(query, next, "no") ||
+			hasSQLKeywordAt(query, next, "key")
+	case "limit", "offset":
+		return !sqlTokenFollowedByPredicateOperator(query, next)
+	default:
+		return false
+	}
+}
+
+func sqlTokenFollowedByPredicateOperator(query string, index int) bool {
+	if index >= len(query) {
+		return false
+	}
+	switch query[index] {
+	case '=', '<', '>', '!':
+		return true
+	}
+	return hasSQLKeywordAt(query, index, "is") ||
+		hasSQLKeywordAt(query, index, "in") ||
+		hasSQLKeywordAt(query, index, "like") ||
+		hasSQLKeywordAt(query, index, "ilike") ||
+		hasSQLKeywordAt(query, index, "between") ||
+		hasSQLKeywordAt(query, index, "not")
 }
 
 func nextSQLArgName(args NamedArgs, prefix string) string {

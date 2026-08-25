@@ -172,6 +172,19 @@ func TestEntitySemanticInterceptor_whenSoftDeleteColumnOnlyAppearsOutsideMainWhe
 				{Ordinal: 2, Value: false},
 			},
 		},
+		{
+			name:        "grouping_column",
+			sql:         "select deleted from sys_user where status = #{status} group by deleted having deleted = #{Deleted}",
+			args:        NamedArgs{"status": "ACTIVE", "Deleted": false},
+			columns:     []string{"deleted"},
+			values:      []driver.Value{false},
+			expectedSQL: `select deleted from sys_user where status = $1 AND "deleted" = $2 group by deleted having deleted = $3`,
+			expectedArgs: []driver.NamedValue{
+				{Ordinal: 1, Value: "ACTIVE"},
+				{Ordinal: 2, Value: false},
+				{Ordinal: 3, Value: false},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
