@@ -150,6 +150,130 @@ func TestTenantInterceptor_whenSelectHasWhere_shouldAppendTenantCondition(t *tes
 	}
 }
 
+func TestTenantInterceptor_whenInsertHasColumns_shouldAppendTenantColumnAndValue(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "Insert",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.Insert",
+		Command:   StatementCommandInsert,
+		Source:    StatementSourceAnnotation,
+		SQL:       `insert into sys_user(name, status) values(#{name}, #{status})`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewTenantInterceptor("tenant_id", int64(1001))))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.Insert", NamedArgs{"name": "Alice", "status": "ACTIVE"})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if state.exec != `insert into sys_user(name, status, "tenant_id") values($1, $2, $3)` {
+		t.Fatalf("unexpected SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: "Alice"},
+		{Ordinal: 2, Value: "ACTIVE"},
+		{Ordinal: 3, Value: int64(1001)},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected args %#v", state.execArgs)
+	}
+}
+
+func TestTenantInterceptor_whenInsertAlreadyHasTenantColumn_shouldNotDuplicateTenant(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "Insert",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.Insert",
+		Command:   StatementCommandInsert,
+		Source:    StatementSourceAnnotation,
+		SQL:       `insert into sys_user(name, tenant_id) values(#{name}, #{tenantID})`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewTenantInterceptor("tenant_id", int64(1001))))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.Insert", NamedArgs{"name": "Alice", "tenantID": int64(2002)})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if state.exec != `insert into sys_user(name, tenant_id) values($1, $2)` {
+		t.Fatalf("unexpected SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: "Alice"}, {Ordinal: 2, Value: int64(2002)}}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected args %#v", state.execArgs)
+	}
+}
+
+func TestTenantInterceptor_whenInsertHasMultipleValueRows_shouldAppendTenantValuePerRow(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 2}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "InsertBatch",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.InsertBatch",
+		Command:   StatementCommandInsert,
+		Source:    StatementSourceAnnotation,
+		SQL:       `insert into sys_user(name) values(#{name1}), (#{name2}) returning id`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewTenantInterceptor("tenant_id", int64(1001))))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.InsertBatch", NamedArgs{"name1": "Alice", "name2": "Bob"})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if state.exec != `insert into sys_user(name, "tenant_id") values($1, $2), ($3, $4) returning id` {
+		t.Fatalf("unexpected SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: "Alice"},
+		{Ordinal: 2, Value: int64(1001)},
+		{Ordinal: 3, Value: "Bob"},
+		{Ordinal: 4, Value: int64(1001)},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected args %#v", state.execArgs)
+	}
+}
+
+func TestTenantInterceptor_whenInsertWithoutColumnList_shouldReturnError(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "Insert",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.Insert",
+		Command:   StatementCommandInsert,
+		Source:    StatementSourceAnnotation,
+		SQL:       `insert into sys_user values(#{id}, #{name})`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewTenantInterceptor("tenant_id", int64(1001))))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.Insert", NamedArgs{"id": int64(7), "name": "Alice"})
+	if err == nil || !strings.Contains(err.Error(), "tenant insert requires explicit column list") {
+		t.Fatalf("expected tenant insert error, got %v", err)
+	}
+	if state.exec != "" {
+		t.Fatalf("unsafe insert should not execute, got %q", state.exec)
+	}
+}
+
 func TestDataPermissionInterceptor_whenProviderReturnsCondition_shouldAppendCondition(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{columns: []string{"id"}, values: nil}

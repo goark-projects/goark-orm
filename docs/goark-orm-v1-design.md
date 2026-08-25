@@ -577,13 +577,13 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 ```text
 1. BlockAttackInterceptor：拒绝无 WHERE 的 update/delete。
 2. SQLObserverInterceptor：观察下游改写后的最终 SQL 模板和命名参数。
-3. TenantInterceptor：按列和值注入租户 WHERE 条件。
+3. TenantInterceptor：按列和值注入租户 WHERE 条件，并对显式列清单的 INSERT VALUES 语句追加租户列和值。
 4. DataPermissionInterceptor：由业务 Provider 返回数据权限 SQLCondition。
 5. DynamicTableInterceptor：按映射改写 from/join/update/into 后的表名。
 6. PaginationInterceptor：从 context 读取 PageRequest 并追加方言分页。
 ```
 
-分页拦截器使用 `WithPageRequest(ctx, page)` 传递分页请求。条件注入只覆盖 select/update/delete，insert 的租户字段自动填充属于后续实体填充策略，不在本阶段混入 WHERE 插件。
+分页拦截器使用 `WithPageRequest(ctx, page)` 传递分页请求。租户拦截器覆盖 select/update/delete 的条件注入和 insert 的租户字段注入；无显式列清单或非 VALUES 形态的 insert 会 fail-fast，避免租户字段静默漏写。
 
 ## 分期计划
 

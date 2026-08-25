@@ -24,7 +24,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `QueryWrapper` / `UpdateWrapper` 支持嵌套条件、`EXISTS` / `NOT EXISTS`、`Apply`、`Last`、`Between`、`NotBetween`、`NotLike`、`LikeLeft`、`LikeRight`、`NotIn`，查询 Wrapper 额外支持 `GroupBy` / `Having` / `Select` / `AllEq` / 条件化 `OrderBy`。
 - `UpdateWrapper`、`TypedField` 和生成期 `UserTypedFields` 字段常量，支持局部更新、类型化字段引用、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - Registry / Session 级 `TypeHandler` SPI，内建 `json`、`time`、`decimal` 处理器。
-- `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件、数据权限条件、动态表名、分页和实体语义内置拦截器。
+- `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
 - 独立 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。
 - `BatchSession` 批处理执行器、`Flush` / `Clear`、事务内批处理和查询前自动 flush。
 - Session/Statement 级一级缓存配置，写操作、提交、回滚和关闭时自动失效。

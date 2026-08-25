@@ -198,23 +198,49 @@ func (i *tenantInterceptor) Intercept(ctx context.Context, invocation *Statement
 	if statement == nil {
 		return fmt.Errorf("goark-orm: statement runtime is nil")
 	}
-	if i != nil && statementSupportsCondition(statement.Meta.Command) {
-		column, err := quoteIdentifierPath(statement.Dialect, i.column)
-		if err != nil {
-			return err
+	if i != nil {
+		switch {
+		case statement.Meta.Command == StatementCommandInsert:
+			if err := i.interceptInsert(statement); err != nil {
+				return err
+			}
+		case statementSupportsCondition(statement.Meta.Command):
+			column, err := quoteIdentifierPath(statement.Dialect, i.column)
+			if err != nil {
+				return err
+			}
+			statement.ensureArgs()
+			name := nextSQLArgName(statement.Args, "__goark_orm_tenant")
+			condition := SQLCondition{
+				SQL:  column + " = #{" + name + "}",
+				Args: NamedArgs{name: i.value},
+			}
+			if err := mergeSQLCondition(statement.Args, condition); err != nil {
+				return err
+			}
+			statement.SQL = appendSQLCondition(statement.SQL, condition.SQL)
 		}
-		statement.ensureArgs()
-		name := nextSQLArgName(statement.Args, "__goark_orm_tenant")
-		condition := SQLCondition{
-			SQL:  column + " = #{" + name + "}",
-			Args: NamedArgs{name: i.value},
-		}
-		if err := mergeSQLCondition(statement.Args, condition); err != nil {
-			return err
-		}
-		statement.SQL = appendSQLCondition(statement.SQL, condition.SQL)
 	}
 	return invocation.Proceed(ctx)
+}
+
+func (i *tenantInterceptor) interceptInsert(statement *StatementRuntime) error {
+	column, err := quoteIdentifierPath(statement.Dialect, i.column)
+	if err != nil {
+		return err
+	}
+	statement.ensureArgs()
+	name := nextSQLArgName(statement.Args, "__goark_orm_tenant")
+	rewritten, injected, err := appendTenantInsertColumn(statement.SQL, i.column, column, name)
+	if err != nil {
+		return err
+	}
+	if !injected {
+		return nil
+	}
+	statement.SQL = rewritten
+	statement.Args[name] = i.value
+	return nil
 }
 
 type dynamicTableInterceptor struct {
@@ -352,6 +378,260 @@ func appendSQLCondition(query string, condition string) string {
 		rewritten += " " + tail
 	}
 	return rewritten
+}
+
+func appendTenantInsertColumn(query string, rawColumn string, quotedColumn string, argName string) (string, bool, error) {
+	intoIndex := findSQLKeyword(query, "into")
+	if intoIndex < 0 {
+		return "", false, fmt.Errorf("goark-orm: tenant insert requires INSERT INTO statement")
+	}
+	index := skipSQLSpacesAndComments(query, intoIndex+len("into"))
+	next, ok := readSQLTableReference(query, index)
+	if !ok {
+		return "", false, fmt.Errorf("goark-orm: tenant insert table is missing")
+	}
+	index = skipSQLSpacesAndComments(query, next)
+	if index >= len(query) || query[index] != '(' {
+		return "", false, fmt.Errorf("goark-orm: tenant insert requires explicit column list")
+	}
+	columnsEnd, ok := findClosingSQLParen(query, index)
+	if !ok {
+		return "", false, fmt.Errorf("goark-orm: tenant insert column list is not closed")
+	}
+	columnsText := query[index+1 : columnsEnd]
+	if insertColumnListContains(columnsText, rawColumn) {
+		return query, false, nil
+	}
+	valuesIndex := findSQLKeyword(query[columnsEnd+1:], "values")
+	if valuesIndex < 0 {
+		return "", false, fmt.Errorf("goark-orm: tenant insert supports only VALUES insert")
+	}
+	valuesIndex += columnsEnd + 1
+	valuesSQL, err := appendTenantInsertValues(query, valuesIndex+len("values"), "#{"+argName+"}")
+	if err != nil {
+		return "", false, err
+	}
+	var builder strings.Builder
+	builder.Grow(len(query) + len(quotedColumn) + strings.Count(valuesSQL, "#{"+argName+"}")*len(argName))
+	builder.WriteString(query[:columnsEnd])
+	builder.WriteString(", ")
+	builder.WriteString(quotedColumn)
+	builder.WriteByte(')')
+	builder.WriteString(query[columnsEnd+1 : valuesIndex+len("values")])
+	builder.WriteString(valuesSQL)
+	return builder.String(), true, nil
+}
+
+func appendTenantInsertValues(query string, valuesStart int, placeholder string) (string, error) {
+	var builder strings.Builder
+	cursor := valuesStart
+	expectRow := true
+	rows := 0
+	for cursor <= len(query) {
+		index := skipSQLSpacesAndComments(query, cursor)
+		if expectRow {
+			if index >= len(query) || query[index] != '(' {
+				return "", fmt.Errorf("goark-orm: tenant insert VALUES row is missing")
+			}
+			closeIndex, ok := findClosingSQLParen(query, index)
+			if !ok {
+				return "", fmt.Errorf("goark-orm: tenant insert VALUES row is not closed")
+			}
+			builder.WriteString(query[cursor:closeIndex])
+			builder.WriteString(", ")
+			builder.WriteString(placeholder)
+			builder.WriteByte(')')
+			cursor = closeIndex + 1
+			expectRow = false
+			rows++
+			continue
+		}
+		if index < len(query) && query[index] == ',' {
+			builder.WriteString(query[cursor : index+1])
+			cursor = index + 1
+			expectRow = true
+			continue
+		}
+		builder.WriteString(query[cursor:])
+		if rows == 0 {
+			return "", fmt.Errorf("goark-orm: tenant insert VALUES row is missing")
+		}
+		return builder.String(), nil
+	}
+	return "", fmt.Errorf("goark-orm: tenant insert VALUES row is missing")
+}
+
+func insertColumnListContains(columns string, column string) bool {
+	target := normalizeColumnKey(lastSQLIdentifierPart(column))
+	if target == "" {
+		return false
+	}
+	for _, item := range splitSQLTopLevelComma(columns) {
+		if normalizeColumnKey(lastSQLIdentifierPart(unquoteSQLIdentifier(strings.TrimSpace(item)))) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func splitSQLTopLevelComma(value string) []string {
+	items := make([]string, 0, 4)
+	start := 0
+	depth := 0
+	for index := 0; index < len(value); {
+		if next, ok := skipSQLComment(value, index); ok {
+			index = next
+			continue
+		}
+		switch value[index] {
+		case '\'':
+			index = skipSQLSingleQuoted(value, index)
+			continue
+		case '"', '`':
+			_, _, next, ok := readSQLQuotedIdentifier(value, index)
+			if !ok {
+				index = len(value)
+			} else {
+				index = next
+			}
+			continue
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				items = append(items, value[start:index])
+				start = index + 1
+			}
+		}
+		index++
+	}
+	items = append(items, value[start:])
+	return items
+}
+
+func lastSQLIdentifierPart(identifier string) string {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return ""
+	}
+	if index := strings.LastIndex(identifier, "."); index >= 0 {
+		identifier = identifier[index+1:]
+	}
+	return strings.TrimSpace(identifier)
+}
+
+func unquoteSQLIdentifier(identifier string) string {
+	identifier = strings.TrimSpace(identifier)
+	if len(identifier) < 2 {
+		return identifier
+	}
+	first := identifier[0]
+	last := identifier[len(identifier)-1]
+	switch {
+	case first == '"' && last == '"':
+		return strings.ReplaceAll(identifier[1:len(identifier)-1], `""`, `"`)
+	case first == '`' && last == '`':
+		return strings.ReplaceAll(identifier[1:len(identifier)-1], "``", "`")
+	case first == '[' && last == ']':
+		return identifier[1 : len(identifier)-1]
+	default:
+		return identifier
+	}
+}
+
+func skipSQLSpacesAndComments(query string, index int) int {
+	for index < len(query) {
+		if isSQLSpace(query[index]) {
+			index++
+			continue
+		}
+		if next, ok := skipSQLComment(query, index); ok {
+			index = next
+			continue
+		}
+		return index
+	}
+	return index
+}
+
+func readSQLTableReference(query string, index int) (int, bool) {
+	next, ok := readSQLIdentifierSegment(query, index)
+	if !ok {
+		return index, false
+	}
+	index = next
+	for index < len(query) && query[index] == '.' {
+		next, ok = readSQLIdentifierSegment(query, index+1)
+		if !ok {
+			break
+		}
+		index = next
+	}
+	return index, true
+}
+
+func readSQLIdentifierSegment(query string, index int) (int, bool) {
+	if index >= len(query) {
+		return index, false
+	}
+	switch query[index] {
+	case '"', '`':
+		_, _, next, ok := readSQLQuotedIdentifier(query, index)
+		return next, ok
+	case '[':
+		end := strings.IndexByte(query[index+1:], ']')
+		if end < 0 {
+			return len(query), false
+		}
+		return index + end + 2, true
+	default:
+		if !isSQLIdentStart(query[index]) {
+			return index, false
+		}
+		index++
+		for index < len(query) && isSQLIdentPart(query[index]) {
+			index++
+		}
+		return index, true
+	}
+}
+
+func findClosingSQLParen(query string, openIndex int) (int, bool) {
+	if openIndex >= len(query) || query[openIndex] != '(' {
+		return openIndex, false
+	}
+	depth := 0
+	for index := openIndex; index < len(query); {
+		if next, ok := skipSQLComment(query, index); ok {
+			index = next
+			continue
+		}
+		switch query[index] {
+		case '\'':
+			index = skipSQLSingleQuoted(query, index)
+			continue
+		case '"', '`':
+			_, _, next, ok := readSQLQuotedIdentifier(query, index)
+			if !ok {
+				return len(query), false
+			}
+			index = next
+			continue
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return index, true
+			}
+		}
+		index++
+	}
+	return len(query), false
 }
 
 func splitSQLTail(query string) (string, string) {
