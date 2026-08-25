@@ -19,6 +19,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`；`test` 表达式支持括号、`and/or`、`not/!`、`==/!=/>/>=/</<=`、数值/字符串比较和集合 `size/length`。
 - MyBatis-Plus 风格 `BaseMapper` 通用 CRUD、`QueryWrapper` 条件构造器和 `Page` 分页模型。
 - MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作。
+- MyBatis-Plus 风格 `SQLInjector`、`Db` 快捷门面和 `EnumValuer` 枚举入库值接口。
 - MyBatis-Plus 风格 `IDType` 主键策略：`AUTO`、`INPUT`、`ASSIGN_ID`、`ASSIGN_UUID`。
 - `DbConfig` 支持全局主键策略、tablePrefix、schema、logicDeleteField、logicDeleteValue 和 logicNotDeleteValue。
 - `BaseMapper` 支持 `SelectCount`、`SelectMaps`、`SelectObjs`、`DeleteBatchIDs` 和 `SaveOrUpdate`。
@@ -124,6 +125,48 @@ if err != nil {
 	return err
 }
 _ = users
+```
+
+`Db` 提供无实体生成代码时的显式 Session 快捷入口：
+
+```go
+dbKit, err := orm.NewDb(session)
+if err != nil {
+	return err
+}
+result, err := dbKit.Exec(ctx, "system.user.UserMapper.UpdateName", orm.NamedArgs{
+	"id":   int64(7),
+	"name": "Alice",
+})
+if err != nil {
+	return err
+}
+_ = result
+```
+
+自定义通用 SQL 可以通过 `SQLInjector` 显式注入到 Registry：
+
+```go
+err := orm.RegisterInjectedStatements(
+	registry,
+	"system.user.UserExtraMapper",
+	userEntityMeta,
+	orm.LogicDeleteByIDInjector{},
+	orm.WithInjectDialect(orm.NewPostgresDialect()),
+)
+if err != nil {
+	return err
+}
+```
+
+枚举字段可实现 `EnumValuer` 暴露入库值：
+
+```go
+type UserStatus string
+
+func (s UserStatus) EnumValue() any {
+	return string(s)
+}
 ```
 
 通用 SQLSession 可以按需启用 MP 风格插件：

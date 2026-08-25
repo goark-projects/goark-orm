@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -49,6 +50,10 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 				Parameter: name,
 				Message:   fmt.Sprintf("SQL parameter %q is missing", name),
 			}
+		}
+		value, err = databaseEnumValue(context.Background(), value)
+		if err != nil {
+			return CompiledSQL{}, &BindingError{Parameter: name, Err: err}
 		}
 		builder.WriteString(dialect.Placeholder(index + 1))
 		compiled.Args = append(compiled.Args, value)
