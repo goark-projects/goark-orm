@@ -116,7 +116,10 @@ func (i *entitySemanticInterceptor) applyAutoFill(statement *StatementRuntime, e
 }
 
 func (i *entitySemanticInterceptor) applyLogicDelete(statement *StatementRuntime, entity EntityMeta, columns baseMapperSemanticColumns) error {
-	if !columns.hasSoftDelete || statement.Meta.Command == StatementCommandInsert || containsSQLColumn(statement.SQL, columns.softDeleteColumn.ColumnName) {
+	if !columns.hasSoftDelete || statement.Meta.Command == StatementCommandInsert {
+		return nil
+	}
+	if logicDeleteAlreadyConstrained(statement, columns.softDeleteColumn.ColumnName) {
 		return nil
 	}
 	statement.ensureArgs()
@@ -144,6 +147,20 @@ func (i *entitySemanticInterceptor) applyLogicDelete(statement *StatementRuntime
 	statement.Args[liveArg] = logicNotDeleteValue(statement.Configuration.GlobalConfig.DbConfig)
 	statement.SQL = appendSQLCondition(statement.SQL, deletedColumn+" = #{"+liveArg+"}")
 	return nil
+}
+
+func logicDeleteAlreadyConstrained(statement *StatementRuntime, column string) bool {
+	if statement == nil {
+		return false
+	}
+	switch statement.Meta.Command {
+	case StatementCommandSelect:
+		return sqlWhereContainsColumn(statement.SQL, column)
+	case StatementCommandUpdate:
+		return sqlSetContainsColumn(statement.SQL, column) || sqlWhereContainsColumn(statement.SQL, column)
+	default:
+		return false
+	}
 }
 
 func (i *entitySemanticInterceptor) applyOptimisticLock(statement *StatementRuntime, entity EntityMeta, columns baseMapperSemanticColumns) error {
@@ -240,7 +257,8 @@ func versionValueFromArgs(args NamedArgs, entity EntityMeta, column ColumnMeta) 
 }
 
 func simpleDeleteWhere(query string) (string, bool) {
-	if findSQLKeyword(query, "delete") != 0 || findSQLKeyword(query, "from") < 0 {
+	deleteIndex := findSQLKeyword(query, "delete")
+	if deleteIndex < 0 || deleteIndex != skipSQLSpacesAndComments(query, 0) || findSQLKeyword(query, "from") < 0 {
 		return "", false
 	}
 	whereIndex := findSQLKeyword(query, "where")
@@ -283,11 +301,57 @@ func sqlWhereContainsColumn(query string, column string) bool {
 	if whereIndex < 0 {
 		return false
 	}
-	return containsSQLColumn(query[whereIndex+len("where"):], column)
+	where, _ := splitSQLTail(query[whereIndex+len("where"):])
+	return containsSQLColumn(where, column)
 }
 
 func containsSQLColumn(query string, column string) bool {
-	return strings.Contains(normalizeColumnKey(query), normalizeColumnKey(column))
+	target := normalizeColumnKey(lastSQLIdentifierPart(column))
+	if target == "" {
+		return false
+	}
+	for index := 0; index < len(query); {
+		if next, ok := skipSQLComment(query, index); ok {
+			index = next
+			continue
+		}
+		switch query[index] {
+		case '\'':
+			index = skipSQLSingleQuoted(query, index)
+			continue
+		case '#', '$':
+			if next, ok := skipSQLPlaceholder(query, index); ok {
+				index = next
+				continue
+			}
+		case '(':
+			if sqlParenStartsSubquery(query, index) {
+				next, ok := findClosingSQLParen(query, index)
+				if !ok {
+					return false
+				}
+				index = next + 1
+				continue
+			}
+		}
+		if name, next, ok := readSQLIdentifierNamePath(query, index); ok {
+			if normalizeColumnKey(name) == target {
+				return true
+			}
+			index = next
+			continue
+		}
+		index++
+	}
+	return false
+}
+
+func sqlParenStartsSubquery(query string, index int) bool {
+	if index >= len(query) || query[index] != '(' {
+		return false
+	}
+	next := skipSQLSpacesAndComments(query, index+1)
+	return hasSQLKeywordAt(query, next, "select") || hasSQLKeywordAt(query, next, "with")
 }
 
 func statementEntityFromRegistry(registry *Registry, statement StatementMeta) (EntityMeta, bool) {

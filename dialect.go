@@ -233,6 +233,11 @@ func containsOrderBy(query string) bool {
 		case '\'':
 			index = skipSQLSingleQuoted(query, index)
 			continue
+		case '#', '$':
+			if next, ok := skipSQLPlaceholder(query, index); ok {
+				index = next
+				continue
+			}
 		case '"', '`':
 			_, _, next, ok := readSQLQuotedIdentifier(query, index)
 			if !ok {

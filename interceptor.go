@@ -488,6 +488,11 @@ func splitSQLTopLevelComma(value string) []string {
 		case '\'':
 			index = skipSQLSingleQuoted(value, index)
 			continue
+		case '#', '$':
+			if next, ok := skipSQLPlaceholder(value, index); ok {
+				index = next
+				continue
+			}
 		case '"', '`':
 			_, _, next, ok := readSQLQuotedIdentifier(value, index)
 			if !ok {
@@ -495,6 +500,9 @@ func splitSQLTopLevelComma(value string) []string {
 			} else {
 				index = next
 			}
+			continue
+		case '[':
+			index = skipSQLBracketQuotedIdentifier(value, index)
 			continue
 		case '(':
 			depth++
@@ -584,11 +592,8 @@ func readSQLIdentifierSegment(query string, index int) (int, bool) {
 		_, _, next, ok := readSQLQuotedIdentifier(query, index)
 		return next, ok
 	case '[':
-		end := strings.IndexByte(query[index+1:], ']')
-		if end < 0 {
-			return len(query), false
-		}
-		return index + end + 2, true
+		_, next, ok := readSQLBracketQuotedIdentifier(query, index)
+		return next, ok
 	default:
 		if !isSQLIdentStart(query[index]) {
 			return index, false
@@ -615,6 +620,11 @@ func findClosingSQLParen(query string, openIndex int) (int, bool) {
 		case '\'':
 			index = skipSQLSingleQuoted(query, index)
 			continue
+		case '#', '$':
+			if next, ok := skipSQLPlaceholder(query, index); ok {
+				index = next
+				continue
+			}
 		case '"', '`':
 			_, _, next, ok := readSQLQuotedIdentifier(query, index)
 			if !ok {
@@ -784,6 +794,7 @@ func findSQLKeyword(query string, keyword string) int {
 	if keyword == "" {
 		return -1
 	}
+	depth := 0
 	for index := 0; index < len(query); {
 		if next, ok := skipSQLComment(query, index); ok {
 			index = next
@@ -793,6 +804,11 @@ func findSQLKeyword(query string, keyword string) int {
 		case '\'':
 			index = skipSQLSingleQuoted(query, index)
 			continue
+		case '#', '$':
+			if next, ok := skipSQLPlaceholder(query, index); ok {
+				index = next
+				continue
+			}
 		case '"', '`':
 			_, _, next, ok := readSQLQuotedIdentifier(query, index)
 			if !ok {
@@ -803,8 +819,18 @@ func findSQLKeyword(query string, keyword string) int {
 		case '[':
 			index = skipSQLBracketQuotedIdentifier(query, index)
 			continue
+		case '(':
+			depth++
+			index++
+			continue
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			index++
+			continue
 		}
-		if isSQLIdentStart(query[index]) {
+		if depth == 0 && isSQLIdentStart(query[index]) {
 			start := index
 			for index < len(query) && isSQLIdentPart(query[index]) {
 				index++
@@ -843,20 +869,42 @@ func skipSQLComment(query string, index int) (int, bool) {
 	return index, false
 }
 
+func skipSQLPlaceholder(query string, index int) (int, bool) {
+	if index+1 >= len(query) || (query[index] != '#' && query[index] != '$') || query[index+1] != '{' {
+		return index, false
+	}
+	index += 2
+	for index < len(query) {
+		if query[index] == '}' {
+			return index + 1, true
+		}
+		index++
+	}
+	return len(query), true
+}
+
 func skipSQLBracketQuotedIdentifier(query string, index int) int {
+	_, next, _ := readSQLBracketQuotedIdentifier(query, index)
+	return next
+}
+
+func readSQLBracketQuotedIdentifier(query string, index int) (string, int, bool) {
 	index++
+	var identifier strings.Builder
 	for index < len(query) {
 		if query[index] != ']' {
+			identifier.WriteByte(query[index])
 			index++
 			continue
 		}
 		if index+1 < len(query) && query[index+1] == ']' {
+			identifier.WriteByte(']')
 			index += 2
 			continue
 		}
-		return index + 1
+		return identifier.String(), index + 1, true
 	}
-	return len(query)
+	return "", len(query), false
 }
 
 func hasSQLKeywordAt(query string, index int, keyword string) bool {
@@ -923,6 +971,46 @@ func readSQLIdentifierPath(query string, index int) (string, int) {
 		index++
 	}
 	return query[start:index], index
+}
+
+func readSQLIdentifierNamePath(query string, index int) (string, int, bool) {
+	name, next, ok := readSQLIdentifierNameSegment(query, index)
+	if !ok {
+		return "", index, false
+	}
+	last := name
+	for next < len(query) && query[next] == '.' {
+		name, after, ok := readSQLIdentifierNameSegment(query, next+1)
+		if !ok {
+			break
+		}
+		last = name
+		next = after
+	}
+	return last, next, true
+}
+
+func readSQLIdentifierNameSegment(query string, index int) (string, int, bool) {
+	if index >= len(query) {
+		return "", index, false
+	}
+	switch query[index] {
+	case '"', '`':
+		_, identifier, next, ok := readSQLQuotedIdentifier(query, index)
+		return identifier, next, ok
+	case '[':
+		return readSQLBracketQuotedIdentifier(query, index)
+	default:
+		if !isSQLIdentStart(query[index]) {
+			return "", index, false
+		}
+		start := index
+		index++
+		for index < len(query) && isSQLIdentPart(query[index]) {
+			index++
+		}
+		return query[start:index], index, true
+	}
 }
 
 func isSQLIdentStart(ch byte) bool {

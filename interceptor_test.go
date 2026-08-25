@@ -105,6 +105,62 @@ func TestBlockAttackInterceptor_whenWhereKeywordIsQuotedIdentifier_shouldReject(
 	}
 }
 
+func TestBlockAttackInterceptor_whenWhereOnlyExistsInSubquery_shouldReject(t *testing.T) {
+	state := openTestSQLState(t)
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "UnsafeUpdate",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.UnsafeUpdate",
+		Command:   StatementCommandUpdate,
+		Source:    StatementSourceAnnotation,
+		SQL:       `update sys_user set role_id = (select id from sys_role where code = #{code})`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewBlockAttackInterceptor()))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.UnsafeUpdate", NamedArgs{"code": "admin"})
+	if err == nil || !strings.Contains(err.Error(), "blocked full-table update") {
+		t.Fatalf("expected block attack error, got %v", err)
+	}
+	if state.exec != "" {
+		t.Fatalf("unsafe SQL should not execute, got %q", state.exec)
+	}
+}
+
+func TestBlockAttackInterceptor_whenWhereOnlyExistsInPlaceholder_shouldReject(t *testing.T) {
+	state := openTestSQLState(t)
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "UnsafeUpdate",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.UnsafeUpdate",
+		Command:   StatementCommandUpdate,
+		Source:    StatementSourceAnnotation,
+		SQL:       `update sys_user set name = #{where}`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewBlockAttackInterceptor()))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.UnsafeUpdate", NamedArgs{"where": "Alice"})
+	if err == nil || !strings.Contains(err.Error(), "blocked full-table update") {
+		t.Fatalf("expected block attack error, got %v", err)
+	}
+	if state.exec != "" {
+		t.Fatalf("unsafe SQL should not execute, got %q", state.exec)
+	}
+}
+
+func TestAppendSQLCondition_whenKeywordOnlyExistsInPlaceholder_shouldAppendWhere(t *testing.T) {
+	actual := appendSQLCondition(`select #{where} as marker from sys_user`, `"tenant_id" = #{tenantID}`)
+	expected := `select #{where} as marker from sys_user WHERE "tenant_id" = #{tenantID}`
+	if actual != expected {
+		t.Fatalf("unexpected SQL %q", actual)
+	}
+}
+
 func TestSQLObserverInterceptor_whenStatementRewritten_shouldObserveFinalTemplate(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{columns: []string{"id"}, values: nil}
@@ -169,6 +225,37 @@ func TestTenantInterceptor_whenSelectHasWhere_shouldAppendTenantCondition(t *tes
 		t.Fatalf("unexpected query %q", state.query)
 	}
 	expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: "ACTIVE"}, {Ordinal: 2, Value: int64(1001)}}
+	if !reflect.DeepEqual(state.queryArgs, expectedArgs) {
+		t.Fatalf("unexpected args %#v", state.queryArgs)
+	}
+}
+
+func TestTenantInterceptor_whenOnlySubqueryHasWhere_shouldAppendTopLevelWhere(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{columns: []string{"role_id"}, values: nil}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "List",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.List",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       `select (select max(id) from sys_role where code = #{code}) as role_id from sys_user`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewTenantInterceptor("tenant_id", int64(1001))))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var users []sqlSessionUser
+	if err := session.Query(context.Background(), "system.user.UserMapper.List", NamedArgs{"code": "admin"}, &users); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	expectedSQL := `select (select max(id) from sys_role where code = $1) as role_id from sys_user WHERE "tenant_id" = $2`
+	if state.query != expectedSQL {
+		t.Fatalf("unexpected query %q", state.query)
+	}
+	expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: "admin"}, {Ordinal: 2, Value: int64(1001)}}
 	if !reflect.DeepEqual(state.queryArgs, expectedArgs) {
 		t.Fatalf("unexpected args %#v", state.queryArgs)
 	}

@@ -101,6 +101,169 @@ func TestEntitySemanticInterceptor_whenSelectEntityHasSoftDelete_shouldAppendLiv
 	}
 }
 
+func TestEntitySemanticInterceptor_whenSoftDeleteColumnOnlyAppearsOutsideMainWhere_shouldAppendLiveCondition(t *testing.T) {
+	tests := []struct {
+		name         string
+		sql          string
+		args         NamedArgs
+		columns      []string
+		values       []driver.Value
+		expectedSQL  string
+		expectedArgs []driver.NamedValue
+	}{
+		{
+			name:        "similar_column_in_where",
+			sql:         "select id from sys_user where deleted_at is null and id = #{ID}",
+			args:        NamedArgs{"ID": int64(7)},
+			columns:     []string{"id"},
+			values:      []driver.Value{int64(7)},
+			expectedSQL: `select id from sys_user where deleted_at is null and id = $1 AND "deleted" = $2`,
+			expectedArgs: []driver.NamedValue{
+				{Ordinal: 1, Value: int64(7)},
+				{Ordinal: 2, Value: false},
+			},
+		},
+		{
+			name:        "projection_column",
+			sql:         "select id, deleted from sys_user where id = #{ID}",
+			args:        NamedArgs{"ID": int64(7)},
+			columns:     []string{"id", "deleted"},
+			values:      []driver.Value{int64(7), false},
+			expectedSQL: `select id, deleted from sys_user where id = $1 AND "deleted" = $2`,
+			expectedArgs: []driver.NamedValue{
+				{Ordinal: 1, Value: int64(7)},
+				{Ordinal: 2, Value: false},
+			},
+		},
+		{
+			name:        "placeholder_named_soft_delete",
+			sql:         "select id from sys_user where status = #{deleted}",
+			args:        NamedArgs{"deleted": "ACTIVE"},
+			columns:     []string{"id"},
+			values:      []driver.Value{int64(7)},
+			expectedSQL: `select id from sys_user where status = $1 AND "deleted" = $2`,
+			expectedArgs: []driver.NamedValue{
+				{Ordinal: 1, Value: "ACTIVE"},
+				{Ordinal: 2, Value: false},
+			},
+		},
+		{
+			name:        "subquery_column",
+			sql:         "select id from sys_user where exists (select 1 from audit_log where audit_log.deleted = #{AuditDeleted}) and id = #{ID}",
+			args:        NamedArgs{"AuditDeleted": true, "ID": int64(7)},
+			columns:     []string{"id"},
+			values:      []driver.Value{int64(7)},
+			expectedSQL: `select id from sys_user where exists (select 1 from audit_log where audit_log.deleted = $1) and id = $2 AND "deleted" = $3`,
+			expectedArgs: []driver.NamedValue{
+				{Ordinal: 1, Value: true},
+				{Ordinal: 2, Value: int64(7)},
+				{Ordinal: 3, Value: false},
+			},
+		},
+		{
+			name:        "order_by_column",
+			sql:         "select id from sys_user where id = #{ID} order by deleted",
+			args:        NamedArgs{"ID": int64(7)},
+			columns:     []string{"id"},
+			values:      []driver.Value{int64(7)},
+			expectedSQL: `select id from sys_user where id = $1 AND "deleted" = $2 order by deleted`,
+			expectedArgs: []driver.NamedValue{
+				{Ordinal: 1, Value: int64(7)},
+				{Ordinal: 2, Value: false},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := openTestSQLState(t)
+			state.queryRows = testRowsData{
+				columns: tt.columns,
+				values:  [][]driver.Value{tt.values},
+			}
+			registry := newEntitySemanticRegistry(t, StatementMeta{
+				ID:         "List",
+				Namespace:  "system.semantic.UserMapper",
+				FullName:   "system.semantic.UserMapper.List",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceAnnotation,
+				SQL:        tt.sql,
+				ResultType: "entitySemanticUser",
+			})
+			session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewEntitySemanticInterceptor(registry)))
+			if err != nil {
+				t.Fatalf("new SQL session failed: %v", err)
+			}
+
+			var users []entitySemanticUser
+			if err := session.Query(context.Background(), "system.semantic.UserMapper.List", tt.args, &users); err != nil {
+				t.Fatalf("query failed: %v", err)
+			}
+			if state.query != tt.expectedSQL {
+				t.Fatalf("unexpected query %q", state.query)
+			}
+			if !reflect.DeepEqual(state.queryArgs, tt.expectedArgs) {
+				t.Fatalf("unexpected args %#v", state.queryArgs)
+			}
+		})
+	}
+}
+
+func TestEntitySemanticInterceptor_whenSoftDeleteColumnAlreadyConstrained_shouldNotAppendDuplicate(t *testing.T) {
+	tests := []struct {
+		name        string
+		dialect     Dialect
+		sql         string
+		expectedSQL string
+	}{
+		{
+			name:        "double_quoted",
+			dialect:     NewPostgresDialect(),
+			sql:         `select id from sys_user where "deleted" = #{Deleted}`,
+			expectedSQL: `select id from sys_user where "deleted" = $1`,
+		},
+		{
+			name:        "bracket_quoted",
+			dialect:     NewSQLServerDialect(),
+			sql:         `select id from sys_user where [deleted] = #{Deleted}`,
+			expectedSQL: `select id from sys_user where [deleted] = @p1`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := openTestSQLState(t)
+			state.queryRows = testRowsData{
+				columns: []string{"id"},
+				values:  [][]driver.Value{{int64(7)}},
+			}
+			registry := newEntitySemanticRegistry(t, StatementMeta{
+				ID:         "FindByDeleted",
+				Namespace:  "system.semantic.UserMapper",
+				FullName:   "system.semantic.UserMapper.FindByDeleted",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceAnnotation,
+				SQL:        tt.sql,
+				ResultType: "entitySemanticUser",
+			})
+			session, err := NewSQLSession(registry, state.db, tt.dialect, WithInterceptors(NewEntitySemanticInterceptor(registry)))
+			if err != nil {
+				t.Fatalf("new SQL session failed: %v", err)
+			}
+
+			var user entitySemanticUser
+			if err := session.QueryOne(context.Background(), "system.semantic.UserMapper.FindByDeleted", NamedArgs{"Deleted": false}, &user); err != nil {
+				t.Fatalf("query failed: %v", err)
+			}
+			if state.query != tt.expectedSQL {
+				t.Fatalf("unexpected query %q", state.query)
+			}
+			expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: false}}
+			if !reflect.DeepEqual(state.queryArgs, expectedArgs) {
+				t.Fatalf("unexpected args %#v", state.queryArgs)
+			}
+		})
+	}
+}
+
 func TestEntitySemanticInterceptor_whenUpdateEntityHasVersion_shouldInjectVersionAndLiveCondition(t *testing.T) {
 	fixed := time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC)
 	state := openTestSQLState(t)
@@ -148,6 +311,46 @@ func TestEntitySemanticInterceptor_whenUpdateEntityHasVersion_shouldInjectVersio
 	}
 	if !user.UpdatedAt.Equal(fixed) {
 		t.Fatalf("expected updated time to be filled, got %#v", user)
+	}
+}
+
+func TestEntitySemanticInterceptor_whenUpdateSetHasSimilarSoftDeleteColumn_shouldAppendLiveCondition(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newEntitySemanticRegistry(t, StatementMeta{
+		ID:            "MarkDeletedAt",
+		Namespace:     "system.semantic.UserMapper",
+		FullName:      "system.semantic.UserMapper.MarkDeletedAt",
+		Command:       StatementCommandUpdate,
+		Source:        StatementSourceAnnotation,
+		SQL:           "update sys_user set deleted_at = #{deleted} where id = #{ID}",
+		ParameterType: "entitySemanticUser",
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewEntitySemanticInterceptor(registry)))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	deletedAt := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	_, err = session.Exec(context.Background(), "system.semantic.UserMapper.MarkDeletedAt", NamedArgs{
+		"ID":      int64(7),
+		"deleted": deletedAt,
+	})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	expectedSQL := `update sys_user set deleted_at = $1 where id = $2 AND "deleted" = $3`
+	if state.exec != expectedSQL {
+		t.Fatalf("unexpected SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: deletedAt},
+		{Ordinal: 2, Value: int64(7)},
+		{Ordinal: 3, Value: false},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected args %#v", state.execArgs)
 	}
 }
 
@@ -230,6 +433,34 @@ func TestEntitySemanticInterceptor_whenDeleteEntityHasSoftDelete_shouldRewriteTo
 	}
 	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
 		t.Fatalf("unexpected args %#v", state.execArgs)
+	}
+}
+
+func TestEntitySemanticInterceptor_whenDeleteHasLeadingWhitespace_shouldRewriteToUpdate(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newEntitySemanticRegistry(t, StatementMeta{
+		ID:            "DeleteByID",
+		Namespace:     "system.semantic.UserMapper",
+		FullName:      "system.semantic.UserMapper.DeleteByID",
+		Command:       StatementCommandDelete,
+		Source:        StatementSourceAnnotation,
+		SQL:           "\n\tdelete from sys_user where id = #{ID}",
+		ParameterType: "entitySemanticUser",
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewEntitySemanticInterceptor(registry)))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.semantic.UserMapper.DeleteByID", NamedArgs{"ID": int64(7)})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	expectedSQL := `UPDATE "sys_user" SET "deleted" = $1 WHERE id = $2 AND "deleted" = $3`
+	if state.exec != expectedSQL {
+		t.Fatalf("unexpected SQL %q", state.exec)
 	}
 }
 

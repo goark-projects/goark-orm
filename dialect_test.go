@@ -141,3 +141,13 @@ func TestSQLServerDialect_LimitOffsetSQL_whenOrderIdentifierQuoted_shouldAppendF
 		t.Fatalf("unexpected paged SQL %q", paged)
 	}
 }
+
+func TestCountSQLBase_whenNestedOrderByProvided_shouldStripOnlyTopLevelTail(t *testing.T) {
+	t.Parallel()
+
+	query := "select * from (select id from audit_log order by id) audit where audit.id > #{id} order by audit.id"
+	expected := "select * from (select id from audit_log order by id) audit where audit.id > #{id}"
+	if actual := countSQLBase(query); actual != expected {
+		t.Fatalf("unexpected count SQL base %q", actual)
+	}
+}
