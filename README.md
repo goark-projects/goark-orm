@@ -64,7 +64,10 @@ module goark.dev/orm
 ```bash
 GOWORK=off go test ./...
 GOWORK=off go vet ./...
+GOWORK=off go test -run '^$' -bench . -benchmem ./
 ```
+
+真实数据库 smoke 默认跳过；需要时设置 `GOARK_ORM_INTEGRATION_DRIVER` 和 `GOARK_ORM_INTEGRATION_DSN`。数据库方言和验证矩阵见 `docs/database-matrix.md`。
 
 生成示例：
 

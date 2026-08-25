@@ -1781,11 +1781,11 @@ func TestSQLSession_Exec_whenWriteOccurs_shouldClearLocalCache(t *testing.T) {
 	}
 }
 
-func newSQLSessionRegistry(t *testing.T, statements ...StatementMeta) *Registry {
+func newSQLSessionRegistry(t testing.TB, statements ...StatementMeta) *Registry {
 	return newCachedSQLSessionRegistry(t, CacheMeta{}, statements...)
 }
 
-func newCachedSQLSessionRegistry(t *testing.T, cache CacheMeta, statements ...StatementMeta) *Registry {
+func newCachedSQLSessionRegistry(t testing.TB, cache CacheMeta, statements ...StatementMeta) *Registry {
 	t.Helper()
 	if len(statements) == 0 {
 		t.Fatalf("test registry requires at least one statement")
@@ -2348,10 +2348,11 @@ type testRowsData struct {
 
 var testSQLDrivers sync.Map
 
-func openTestSQLState(t *testing.T) *testSQLState {
+func openTestSQLState(t testing.TB) *testSQLState {
 	t.Helper()
-	name := "goark_orm_sqlsession_" + strings.ReplaceAll(t.Name(), "/", "_")
-	dsn := name + "_" + strconv.FormatInt(int64(testNameCounter.Add(1)), 10)
+	id := strconv.FormatInt(int64(testNameCounter.Add(1)), 10)
+	name := "goark_orm_sqlsession_" + strings.ReplaceAll(t.Name(), "/", "_") + "_" + id
+	dsn := name
 	sql.Register(name, testDriver{})
 	state := &testSQLState{}
 	testSQLDrivers.Store(dsn, state)
