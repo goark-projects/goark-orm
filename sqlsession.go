@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 // SQLExecutor 是 *sql.DB 和 *sql.Tx 共同满足的最小执行接口。
@@ -16,10 +17,28 @@ type SQLExecutor interface {
 
 // SQLSession 基于 database/sql 执行已经注册的 Statement。
 type SQLSession struct {
-	registry     *Registry
-	executor     SQLExecutor
-	dialect      Dialect
-	typeHandlers map[string]TypeHandler
+	registry                 *Registry
+	executor                 SQLExecutor
+	dialect                  Dialect
+	configuration            Configuration
+	typeHandlers             map[string]TypeHandler
+	interceptors             []StatementInterceptor
+	statementExecutor        StatementExecutor
+	statementHandler         StatementHandler
+	parameterHandler         ParameterHandler
+	resultSetHandler         ResultSetHandler
+	identifierGenerator      IdentifierGenerator
+	localCache               *localCache
+	localCacheScope          LocalCacheScope
+	cacheEnabled             bool
+	mapUnderscoreToCamelCase bool
+	preparedMu               sync.Mutex
+	preparedStatements       map[string]*sql.Stmt
+
+	transactionalCache           bool
+	secondLevelCacheMu           sync.Mutex
+	pendingSecondLevelCacheFlush map[string]struct{}
+	pendingSecondLevelCachePuts  map[string]map[string]reflect.Value
 }
 
 // SQLSessionOption 配置 SQLSession。
@@ -42,6 +61,19 @@ func WithTypeHandler(name string, handler TypeHandler) SQLSessionOption {
 	}
 }
 
+// WithLocalCache 配置 Session 级一级缓存。
+func WithLocalCache(enabled bool) SQLSessionOption {
+	return func(session *SQLSession) error {
+		session.configuration.LocalCacheEnabled = boolPointer(enabled)
+		if enabled {
+			session.localCache = newLocalCache()
+		} else {
+			session.localCache = nil
+		}
+		return nil
+	}
+}
+
 // NewSQLSession 创建可独立使用的 database/sql ORM Session。
 func NewSQLSession(registry *Registry, executor SQLExecutor, dialect Dialect, options ...SQLSessionOption) (*SQLSession, error) {
 	if registry == nil {
@@ -53,11 +85,26 @@ func NewSQLSession(registry *Registry, executor SQLExecutor, dialect Dialect, op
 	if dialect == nil {
 		dialect = NewQuestionDialect()
 	}
+	configuration := DefaultConfiguration()
+	configuration.Dialect = dialect
 	session := &SQLSession{
-		registry:     registry,
-		executor:     executor,
-		dialect:      dialect,
-		typeHandlers: make(map[string]TypeHandler),
+		registry:            registry,
+		executor:            executor,
+		dialect:             dialect,
+		configuration:       cloneConfiguration(configuration),
+		typeHandlers:        registry.TypeHandlers(),
+		interceptors:        make([]StatementInterceptor, 0),
+		localCache:          newLocalCache(),
+		localCacheScope:     LocalCacheScopeSession,
+		cacheEnabled:        true,
+		identifierGenerator: NewDefaultIdentifierGenerator(),
+	}
+	session.statementExecutor = defaultStatementExecutor{}
+	session.statementHandler = &defaultStatementHandler{session: session}
+	session.parameterHandler = &defaultParameterHandler{session: session}
+	session.resultSetHandler = &defaultResultSetHandler{session: session}
+	if session.typeHandlers == nil {
+		session.typeHandlers = make(map[string]TypeHandler)
 	}
 	for _, option := range options {
 		if option == nil {
@@ -70,28 +117,41 @@ func NewSQLSession(registry *Registry, executor SQLExecutor, dialect Dialect, op
 	return session, nil
 }
 
+// Configuration 返回当前 Session 使用的配置快照。
+func (s *SQLSession) Configuration() Configuration {
+	if s == nil {
+		config, _ := normalizeConfiguration(Configuration{}, nil)
+		return config
+	}
+	return cloneConfiguration(s.configuration)
+}
+
+// Dialect 返回当前 Session 使用的数据库方言。
+func (s *SQLSession) Dialect() Dialect {
+	if s == nil || s.dialect == nil {
+		return NewQuestionDialect()
+	}
+	return s.dialect
+}
+
 // Query 执行查询语句并扫描多行结果。
 func (s *SQLSession) Query(ctx context.Context, statement string, args NamedArgs, dest any) error {
 	if ctx == nil {
 		return fmt.Errorf("goark-orm: context is nil")
 	}
-	meta, compiled, err := s.compile(ctx, statement, args)
+	meta, err := s.lookupStatement(statement)
 	if err != nil {
 		return err
 	}
-	if meta.Command != StatementCommandSelect {
-		return fmt.Errorf("goark-orm: statement %s is %s, not select", meta.FullName, meta.Command)
+	return s.QueryStatement(ctx, meta, args, dest)
+}
+
+// QueryStatement 执行查询语句元数据并扫描多行结果。
+func (s *SQLSession) QueryStatement(ctx context.Context, meta StatementMeta, args NamedArgs, dest any) error {
+	if ctx == nil {
+		return fmt.Errorf("goark-orm: context is nil")
 	}
-	rows, err := s.executor.QueryContext(ctx, compiled.SQL, compiled.Args...)
-	if err != nil {
-		return err
-	}
-	scanErr := s.scanRows(ctx, rows, meta, dest)
-	closeErr := rows.Close()
-	if scanErr != nil {
-		return scanErr
-	}
-	return closeErr
+	return s.statementExecutor.Query(ctx, s, meta, args, dest)
 }
 
 // QueryOne 执行查询语句并要求最多返回一行。
@@ -99,23 +159,19 @@ func (s *SQLSession) QueryOne(ctx context.Context, statement string, args NamedA
 	if ctx == nil {
 		return fmt.Errorf("goark-orm: context is nil")
 	}
-	meta, compiled, err := s.compile(ctx, statement, args)
+	meta, err := s.lookupStatement(statement)
 	if err != nil {
 		return err
 	}
-	if meta.Command != StatementCommandSelect {
-		return fmt.Errorf("goark-orm: statement %s is %s, not select", meta.FullName, meta.Command)
+	return s.QueryOneStatement(ctx, meta, args, dest)
+}
+
+// QueryOneStatement 执行查询语句元数据并要求最多返回一行。
+func (s *SQLSession) QueryOneStatement(ctx context.Context, meta StatementMeta, args NamedArgs, dest any) error {
+	if ctx == nil {
+		return fmt.Errorf("goark-orm: context is nil")
 	}
-	rows, err := s.executor.QueryContext(ctx, compiled.SQL, compiled.Args...)
-	if err != nil {
-		return err
-	}
-	scanErr := s.scanOne(ctx, rows, meta, dest)
-	closeErr := rows.Close()
-	if scanErr != nil {
-		return scanErr
-	}
-	return closeErr
+	return s.statementExecutor.QueryOne(ctx, s, meta, args, dest)
 }
 
 // Exec 执行 insert、update、delete 语句。
@@ -123,60 +179,152 @@ func (s *SQLSession) Exec(ctx context.Context, statement string, args NamedArgs)
 	if ctx == nil {
 		return Result{}, fmt.Errorf("goark-orm: context is nil")
 	}
-	meta, compiled, err := s.compile(ctx, statement, args)
+	meta, err := s.lookupStatement(statement)
 	if err != nil {
 		return Result{}, err
 	}
-	if meta.Command == StatementCommandSelect {
-		return Result{}, fmt.Errorf("goark-orm: statement %s is select; use Query or QueryOne", meta.FullName)
-	}
-	sqlResult, err := s.executor.ExecContext(ctx, compiled.SQL, compiled.Args...)
-	if err != nil {
-		return Result{}, err
-	}
-	rowsAffected, err := sqlResult.RowsAffected()
-	if err != nil {
-		return Result{}, err
-	}
-	result := Result{RowsAffected: rowsAffected}
-	lastInsertID, err := sqlResult.LastInsertId()
-	if err != nil {
-		if meta.UseGeneratedKeys {
-			return Result{}, err
-		}
-		return result, nil
-	}
-	result.LastInsertID = lastInsertID
-	return result, nil
+	return s.ExecStatement(ctx, meta, args)
 }
 
-func (s *SQLSession) compile(ctx context.Context, statement string, args NamedArgs) (StatementMeta, CompiledSQL, error) {
+// ExecStatement 执行写入语句元数据。
+func (s *SQLSession) ExecStatement(ctx context.Context, meta StatementMeta, args NamedArgs) (Result, error) {
+	if ctx == nil {
+		return Result{}, fmt.Errorf("goark-orm: context is nil")
+	}
+	return s.statementExecutor.Exec(ctx, s, meta, args)
+}
+
+func (s *SQLSession) clearLocalCache() {
 	if s == nil {
-		return StatementMeta{}, CompiledSQL{}, fmt.Errorf("goark-orm: session is nil")
+		return
+	}
+	s.localCache.clear()
+}
+
+func (s *SQLSession) getLocalCache(key string, dest any) (bool, error) {
+	if s == nil || s.localCacheScope != LocalCacheScopeSession {
+		return false, nil
+	}
+	return s.localCache.get(key, dest)
+}
+
+func (s *SQLSession) putLocalCache(key string, dest any) error {
+	if s == nil || s.localCacheScope != LocalCacheScopeSession {
+		return nil
+	}
+	return s.localCache.put(key, dest)
+}
+
+func (s *SQLSession) lookupStatement(statement string) (StatementMeta, error) {
+	if s == nil {
+		return StatementMeta{}, fmt.Errorf("goark-orm: session is nil")
 	}
 	meta, ok := s.registry.Statement(statement)
 	if !ok {
-		return StatementMeta{}, CompiledSQL{}, fmt.Errorf("goark-orm: statement %q is not registered", statement)
+		return StatementMeta{}, fmt.Errorf("goark-orm: statement %q is not registered", statement)
+	}
+	return meta, nil
+}
+
+func (s *SQLSession) compileStatement(ctx context.Context, meta StatementMeta, args NamedArgs) (CompiledSQL, error) {
+	if s == nil {
+		return CompiledSQL{}, fmt.Errorf("goark-orm: session is nil")
+	}
+	runtime, err := s.statementHandler.Prepare(ctx, meta, args)
+	if err != nil {
+		return CompiledSQL{}, err
+	}
+	return s.statementHandler.Compile(ctx, runtime)
+}
+
+func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta StatementMeta, args NamedArgs) (*StatementRuntime, error) {
+	if s == nil {
+		return nil, fmt.Errorf("goark-orm: session is nil")
+	}
+	if strings.TrimSpace(meta.Provider) != "" {
+		source, err := s.invokeSQLProvider(ctx, meta, args)
+		if err != nil {
+			return nil, err
+		}
+		meta.SQL = source.SQL
+		meta.DynamicSQL = source.DynamicSQL
 	}
 	sqlText := meta.SQL
 	renderArgs := args
 	if len(meta.DynamicSQL) > 0 {
 		rendered, err := RenderDynamicSQL(meta.DynamicSQL, args)
 		if err != nil {
-			return StatementMeta{}, CompiledSQL{}, fmt.Errorf("goark-orm: render dynamic statement %s failed: %w", meta.FullName, err)
+			return nil, fmt.Errorf("goark-orm: render dynamic statement %s failed: %w", meta.FullName, err)
 		}
 		sqlText = rendered.SQL
 		renderArgs = rendered.Args
 	}
-	boundArgs, err := s.bindArgs(ctx, meta, renderArgs)
-	if err != nil {
-		return StatementMeta{}, CompiledSQL{}, fmt.Errorf("goark-orm: bind statement %s failed: %w", meta.FullName, err)
+	runtime := &StatementRuntime{
+		Meta:    meta,
+		SQL:     sqlText,
+		Args:    copyNamedArgs(renderArgs),
+		Dialect: s.Dialect(),
 	}
-	compiled, err := CompileSQL(sqlText, boundArgs, s.dialect)
-	if err != nil {
-		return StatementMeta{}, CompiledSQL{}, fmt.Errorf("goark-orm: compile statement %s failed: %w", meta.FullName, err)
+	if len(s.interceptors) > 0 {
+		invocation := &StatementInvocation{
+			statement:    runtime,
+			interceptors: s.interceptors,
+		}
+		if err := invocation.Proceed(ctx); err != nil {
+			return nil, fmt.Errorf("goark-orm: intercept statement %s failed: %w", meta.FullName, err)
+		}
 	}
-	return meta, compiled, nil
+	return runtime, nil
+}
+
+func (s *SQLSession) invokeSQLProvider(ctx context.Context, meta StatementMeta, args NamedArgs) (SQLSource, error) {
+	name := strings.TrimSpace(meta.Provider)
+	provider, ok := s.registry.SQLProvider(name)
+	if !ok {
+		return SQLSource{}, fmt.Errorf("goark-orm: SQL provider %q is not registered", name)
+	}
+	source, err := provider(ctx, meta, copyNamedArgs(args))
+	if err != nil {
+		return SQLSource{}, fmt.Errorf("goark-orm: SQL provider %q for statement %s failed: %w", name, meta.FullName, err)
+	}
+	source.SQL = strings.TrimSpace(source.SQL)
+	if source.SQL != "" && len(source.DynamicSQL) > 0 {
+		return SQLSource{}, fmt.Errorf("goark-orm: SQL provider %q for statement %s returned both SQL and DynamicSQL", name, meta.FullName)
+	}
+	if source.SQL == "" && len(source.DynamicSQL) == 0 {
+		return SQLSource{}, fmt.Errorf("goark-orm: SQL provider %q for statement %s returned empty SQL", name, meta.FullName)
+	}
+	if strings.Contains(source.SQL, "${") || dynamicSQLContainsForbiddenSubstitution(source.DynamicSQL) {
+		return SQLSource{}, fmt.Errorf("goark-orm: SQL provider %q for statement %s uses forbidden ${}", name, meta.FullName)
+	}
+	return source, nil
+}
+
+func dynamicSQLContainsForbiddenSubstitution(nodes []DynamicSQLNode) bool {
+	for _, node := range nodes {
+		if strings.Contains(node.Text, "${") || strings.Contains(node.Value, "${") {
+			return true
+		}
+		if dynamicSQLContainsForbiddenSubstitution(node.Children) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *SQLSession) compileRuntime(ctx context.Context, runtime *StatementRuntime) (CompiledSQL, error) {
+	if runtime == nil {
+		return CompiledSQL{}, fmt.Errorf("goark-orm: statement runtime is nil")
+	}
+	boundArgs, err := s.parameterHandler.Bind(ctx, runtime.Meta, runtime.Args)
+	if err != nil {
+		return CompiledSQL{}, fmt.Errorf("goark-orm: bind statement %s failed: %w", runtime.Meta.FullName, err)
+	}
+	compiled, err := CompileSQL(runtime.SQL, boundArgs, runtime.Dialect)
+	if err != nil {
+		return CompiledSQL{}, fmt.Errorf("goark-orm: compile statement %s failed: %w", runtime.Meta.FullName, err)
+	}
+	return compiled, nil
 }
 
 func (s *SQLSession) bindArgs(ctx context.Context, statement StatementMeta, args NamedArgs) (NamedArgs, error) {
@@ -191,28 +339,150 @@ func (s *SQLSession) bindArgs(ctx context.Context, statement StatementMeta, args
 	for key, value := range args {
 		bound[key] = value
 	}
+	usedParameters := statementParameterSet(statement)
 	for _, column := range entity.Columns {
-		if column.TypeHandler == "" {
+		for _, name := range columnParameterNames(column) {
+			if !statementUsesParameter(usedParameters, name) {
+				continue
+			}
+			value, ok := args[name]
+			if !ok {
+				continue
+			}
+			converted, err := s.convertColumnArgument(ctx, column, value)
+			if err != nil {
+				return nil, err
+			}
+			bound[name] = converted
+		}
+	}
+	for root, value := range args {
+		if root == "" || !valueMatchesEntity(value, entity) {
 			continue
 		}
-		value, ok := args[column.FieldName]
-		if !ok {
-			continue
+		for _, column := range entity.Columns {
+			if !statementUsesColumnPath(usedParameters, root, column) {
+				continue
+			}
+			field, ok, err := parameterProperty(value, column.FieldName)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				if alias := parameterPropertyAlias(column.FieldName); alias != "" && alias != column.FieldName {
+					field, ok, err = parameterProperty(value, alias)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+			if !ok {
+				continue
+			}
+			converted, err := s.convertColumnArgument(ctx, column, field)
+			if err != nil {
+				return nil, err
+			}
+			for _, name := range columnParameterNames(column) {
+				bound[root+"."+name] = converted
+			}
 		}
-		handler, ok := s.typeHandlers[column.TypeHandler]
-		if !ok {
-			return nil, fmt.Errorf("type-handler %q is not registered", column.TypeHandler)
-		}
-		converted, err := handler.ToDB(ctx, value)
-		if err != nil {
-			return nil, fmt.Errorf("type-handler %q failed: %w", column.TypeHandler, err)
-		}
-		bound[column.FieldName] = converted
 	}
 	return bound, nil
 }
 
-func (s *SQLSession) scanRows(ctx context.Context, rows *sql.Rows, statement StatementMeta, dest any) error {
+func statementParameterSet(statement StatementMeta) map[string]struct{} {
+	parameters := make(map[string]struct{})
+	for _, name := range statement.Parameters {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			parameters[name] = struct{}{}
+		}
+	}
+	collectSQLParameterSet(statement.SQL, parameters)
+	collectDynamicSQLParameterSet(statement.DynamicSQL, parameters)
+	return parameters
+}
+
+func collectSQLParameterSet(sqlText string, parameters map[string]struct{}) {
+	matches := statementParamPattern.FindAllStringSubmatch(sqlText, -1)
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		name := strings.TrimSpace(match[1])
+		if name != "" {
+			parameters[name] = struct{}{}
+		}
+	}
+}
+
+func collectDynamicSQLParameterSet(nodes []DynamicSQLNode, parameters map[string]struct{}) {
+	for _, node := range nodes {
+		collectSQLParameterSet(node.Text, parameters)
+		collectSQLParameterSet(node.Value, parameters)
+		collectDynamicSQLParameterSet(node.Children, parameters)
+	}
+}
+
+func statementUsesParameter(parameters map[string]struct{}, name string) bool {
+	if len(parameters) == 0 {
+		return false
+	}
+	_, ok := parameters[name]
+	return ok
+}
+
+func statementUsesColumnPath(parameters map[string]struct{}, root string, column ColumnMeta) bool {
+	for _, name := range columnParameterNames(column) {
+		if statementUsesParameter(parameters, root+"."+name) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *SQLSession) convertColumnArgument(ctx context.Context, column ColumnMeta, value any) (any, error) {
+	if column.TypeHandler == "" {
+		return value, nil
+	}
+	handler, ok := s.typeHandlers[column.TypeHandler]
+	if !ok {
+		return nil, fmt.Errorf("type-handler %q is not registered", column.TypeHandler)
+	}
+	converted, err := handler.ToDB(ctx, value)
+	if err != nil {
+		return nil, fmt.Errorf("type-handler %q failed: %w", column.TypeHandler, err)
+	}
+	return converted, nil
+}
+
+func columnParameterNames(column ColumnMeta) []string {
+	names := []string{column.FieldName}
+	if alias := parameterPropertyAlias(column.FieldName); alias != "" && alias != column.FieldName {
+		names = append(names, alias)
+	}
+	return names
+}
+
+func valueMatchesEntity(value any, entity EntityMeta) bool {
+	if value == nil {
+		return false
+	}
+	rv := reflect.ValueOf(value)
+	for rv.IsValid() && (rv.Kind() == reflect.Interface || rv.Kind() == reflect.Pointer) {
+		if rv.IsNil() {
+			return false
+		}
+		rv = rv.Elem()
+	}
+	if !rv.IsValid() || rv.Kind() != reflect.Struct {
+		return false
+	}
+	return rv.Type().Name() == normalizeTypeIdentifier(entity.TypeName)
+}
+
+func (s *SQLSession) scanRows(ctx context.Context, rows Rows, statement StatementMeta, dest any) error {
 	target, err := destination(dest)
 	if err != nil {
 		return err
@@ -227,6 +497,34 @@ func (s *SQLSession) scanRows(ctx context.Context, rows *sql.Rows, statement Sta
 	if target.IsNil() {
 		target.Set(reflect.MakeSlice(target.Type(), 0, 0))
 	}
+	if resultMap, ok := s.resultMap(statement); ok {
+		if len(resultMap.Collections) > 0 {
+			return s.scanRowsWithCollections(ctx, rows, columns, statement, resultMap, target)
+		}
+		defer func() {
+			if resultMapHasNestedSelects(resultMap) {
+				_ = rows.Close()
+			}
+		}()
+		elementType := target.Type().Elem()
+		for rows.Next() {
+			element, err := s.scanSliceElementWithResultMap(ctx, rows, columns, statement, resultMap, elementType)
+			if err != nil {
+				return err
+			}
+			target.Set(reflect.Append(target, element))
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if resultMapHasNestedSelects(resultMap) {
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			return s.applyNestedSelects(ctx, statement, resultMap, target)
+		}
+		return nil
+	}
 	elementType := target.Type().Elem()
 	for rows.Next() {
 		element, err := s.scanSliceElement(ctx, rows, columns, statement, elementType)
@@ -238,7 +536,7 @@ func (s *SQLSession) scanRows(ctx context.Context, rows *sql.Rows, statement Sta
 	return rows.Err()
 }
 
-func (s *SQLSession) scanOne(ctx context.Context, rows *sql.Rows, statement StatementMeta, dest any) error {
+func (s *SQLSession) scanOne(ctx context.Context, rows Rows, statement StatementMeta, dest any) error {
 	target, err := destination(dest)
 	if err != nil {
 		return err
@@ -249,6 +547,49 @@ func (s *SQLSession) scanOne(ctx context.Context, rows *sql.Rows, statement Stat
 	columns, err := rows.Columns()
 	if err != nil {
 		return err
+	}
+	if resultMap, ok := s.resultMap(statement); ok {
+		if len(resultMap.Collections) > 0 {
+			slice := reflect.New(reflect.SliceOf(target.Type())).Elem()
+			if err := s.scanRowsWithCollections(ctx, rows, columns, statement, resultMap, slice); err != nil {
+				return err
+			}
+			if slice.Len() == 0 {
+				return sql.ErrNoRows
+			}
+			if slice.Len() > 1 {
+				return fmt.Errorf("goark-orm: statement %s returned more than one row", statement.FullName)
+			}
+			target.Set(slice.Index(0))
+			return nil
+		}
+		defer func() {
+			if resultMapHasNestedSelects(resultMap) {
+				_ = rows.Close()
+			}
+		}()
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			return sql.ErrNoRows
+		}
+		if err := s.scanValueWithResultMap(ctx, rows, columns, statement, resultMap, target); err != nil {
+			return err
+		}
+		if rows.Next() {
+			return fmt.Errorf("goark-orm: statement %s returned more than one row", statement.FullName)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if resultMapHasNestedSelects(resultMap) {
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			return s.applyNestedSelects(ctx, statement, resultMap, target)
+		}
+		return nil
 	}
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
@@ -265,7 +606,7 @@ func (s *SQLSession) scanOne(ctx context.Context, rows *sql.Rows, statement Stat
 	return rows.Err()
 }
 
-func (s *SQLSession) scanSliceElement(ctx context.Context, rows *sql.Rows, columns []string, statement StatementMeta, elementType reflect.Type) (reflect.Value, error) {
+func (s *SQLSession) scanSliceElement(ctx context.Context, rows Rows, columns []string, statement StatementMeta, elementType reflect.Type) (reflect.Value, error) {
 	if elementType.Kind() == reflect.Pointer {
 		element := reflect.New(elementType.Elem())
 		if err := s.scanValue(ctx, rows, columns, statement, element); err != nil {
@@ -275,6 +616,21 @@ func (s *SQLSession) scanSliceElement(ctx context.Context, rows *sql.Rows, colum
 	}
 	element := reflect.New(elementType).Elem()
 	if err := s.scanValue(ctx, rows, columns, statement, element); err != nil {
+		return reflect.Value{}, err
+	}
+	return element, nil
+}
+
+func (s *SQLSession) scanSliceElementWithResultMap(ctx context.Context, rows Rows, columns []string, statement StatementMeta, resultMap ResultMapMeta, elementType reflect.Type) (reflect.Value, error) {
+	if elementType.Kind() == reflect.Pointer {
+		element := reflect.New(elementType.Elem())
+		if err := s.scanValueWithResultMap(ctx, rows, columns, statement, resultMap, element); err != nil {
+			return reflect.Value{}, err
+		}
+		return element, nil
+	}
+	element := reflect.New(elementType).Elem()
+	if err := s.scanValueWithResultMap(ctx, rows, columns, statement, resultMap, element); err != nil {
 		return reflect.Value{}, err
 	}
 	return element, nil
@@ -293,6 +649,9 @@ func (s *SQLSession) scanValue(ctx context.Context, scanner interface{ Scan(dest
 	if target.Kind() == reflect.Struct {
 		return s.scanStruct(ctx, scanner, columns, statement, target)
 	}
+	if target.Kind() == reflect.Map {
+		return scanMap(scanner, columns, target)
+	}
 	if len(columns) != 1 {
 		return fmt.Errorf("goark-orm: scalar destination requires exactly one column, got %d", len(columns))
 	}
@@ -302,9 +661,67 @@ func (s *SQLSession) scanValue(ctx context.Context, scanner interface{ Scan(dest
 	return scanner.Scan(target.Addr().Interface())
 }
 
+func (s *SQLSession) scanValueWithResultMap(ctx context.Context, scanner interface{ Scan(dest ...any) error }, columns []string, statement StatementMeta, resultMap ResultMapMeta, target reflect.Value) error {
+	if !target.IsValid() {
+		return fmt.Errorf("goark-orm: destination is invalid")
+	}
+	if target.Kind() == reflect.Pointer {
+		if target.IsNil() {
+			target.Set(reflect.New(target.Type().Elem()))
+		}
+		return s.scanValueWithResultMap(ctx, scanner, columns, statement, resultMap, target.Elem())
+	}
+	if target.Kind() != reflect.Struct {
+		return s.scanValue(ctx, scanner, columns, statement, target)
+	}
+	values, err := scanRowValues(scanner, len(columns))
+	if err != nil {
+		return err
+	}
+	effective := resultMap
+	if resultMapHasDiscriminator(resultMap) {
+		columnIndexes := resultColumnIndexes(columns)
+		selected, err := s.effectiveResultMapForRow(ctx, statement, resultMap, columnIndexes, values, target.Type())
+		if err != nil {
+			return err
+		}
+		effective = selected
+	}
+	bindings := s.columnBindingsForResultMap(statement, target.Type(), effective)
+	return s.applyBindings(ctx, target, bindings, columns, values)
+}
+
+func scanMap(scanner interface{ Scan(dest ...any) error }, columns []string, target reflect.Value) error {
+	if target.Type().Key().Kind() != reflect.String || target.Type().Elem().Kind() != reflect.Interface {
+		return fmt.Errorf("goark-orm: map destination must be map[string]any")
+	}
+	values := make([]any, len(columns))
+	scanTargets := make([]any, len(columns))
+	for index := range values {
+		scanTargets[index] = &values[index]
+	}
+	if err := scanner.Scan(scanTargets...); err != nil {
+		return err
+	}
+	if target.IsNil() {
+		target.Set(reflect.MakeMapWithSize(target.Type(), len(columns)))
+	}
+	for index, column := range columns {
+		value := reflect.ValueOf(values[index])
+		if !value.IsValid() {
+			value = reflect.Zero(target.Type().Elem())
+		}
+		target.SetMapIndex(reflect.ValueOf(column), value)
+	}
+	return nil
+}
+
 type columnBinding struct {
-	index       []int
-	typeHandler string
+	index           []int
+	typeHandler     string
+	presenceColumns []string
+	auto            bool
+	fieldName       string
 }
 
 func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(dest ...any) error }, columns []string, statement StatementMeta, target reflect.Value) error {
@@ -312,13 +729,18 @@ func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(des
 	targets := make([]any, len(columns))
 	postScan := make([]func() error, 0)
 	for index, column := range columns {
-		binding, ok := bindings[normalizeColumnKey(column)]
+		binding, ok := s.lookupColumnBinding(bindings, column)
 		if !ok {
 			var discard any
 			targets[index] = &discard
 			continue
 		}
-		field := target.FieldByIndex(binding.index)
+		field, ok := fieldByIndexAlloc(target, binding.index)
+		if !ok {
+			var discard any
+			targets[index] = &discard
+			continue
+		}
 		if !field.IsValid() || !field.CanSet() || !field.CanAddr() {
 			var discard any
 			targets[index] = &discard
@@ -355,28 +777,122 @@ func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(des
 }
 
 func (s *SQLSession) columnBindings(statement StatementMeta, typ reflect.Type) map[string]columnBinding {
-	bindings := exportedFieldBindings(typ)
-	if entity, ok := s.registry.Entity(typ.Name()); ok {
-		for _, column := range entity.Columns {
-			if field, ok := typ.FieldByName(column.FieldName); ok && field.PkgPath == "" {
-				bindings[normalizeColumnKey(column.ColumnName)] = columnBinding{
-					index:       field.Index,
-					typeHandler: column.TypeHandler,
-				}
-			}
+	if resultMap, ok := s.resultMap(statement); ok {
+		return s.columnBindingsForResultMap(statement, typ, resultMap)
+	}
+	return s.columnBindingsWithResultMap(statement, typ, ResultMapMeta{}, false)
+}
+
+func (s *SQLSession) columnBindingsForResultMap(statement StatementMeta, typ reflect.Type, resultMap ResultMapMeta) map[string]columnBinding {
+	return s.columnBindingsWithResultMap(statement, typ, resultMap, true)
+}
+
+func (s *SQLSession) columnBindingsWithResultMap(statement StatementMeta, typ reflect.Type, resultMap ResultMapMeta, hasResultMap bool) map[string]columnBinding {
+	autoMapping := true
+	if hasResultMap && resultMap.AutoMapping != nil {
+		autoMapping = *resultMap.AutoMapping
+	}
+	bindings := make(map[string]columnBinding)
+	if !hasResultMap || autoMapping {
+		bindings = exportedFieldBindings(typ)
+	}
+	if (!hasResultMap || autoMapping) && s != nil && s.registry != nil {
+		if entity, ok := s.registry.Entity(typ.Name()); ok {
+			addEntityColumnBindings(bindings, typ, entity)
 		}
 	}
-	if resultMap, ok := s.resultMap(statement); ok {
-		for _, item := range resultMap.Fields {
-			if field, ok := typ.FieldByName(item.Property); ok && field.PkgPath == "" {
-				bindings[normalizeColumnKey(item.Column)] = columnBinding{
-					index:       field.Index,
-					typeHandler: item.TypeHandler,
-				}
-			}
+	if hasResultMap {
+		for _, item := range resultMapFieldMetas(resultMap) {
+			addDirectFieldBinding(bindings, typ, item, nil)
+		}
+		for _, association := range resultMap.Associations {
+			addAssociationBindings(bindings, typ, nil, association, "")
 		}
 	}
 	return bindings
+}
+
+func addEntityColumnBindings(bindings map[string]columnBinding, typ reflect.Type, entity EntityMeta) {
+	for _, column := range entity.Columns {
+		if field, ok := typ.FieldByName(column.FieldName); ok && field.PkgPath == "" {
+			bindings[normalizeColumnKey(column.ColumnName)] = columnBinding{
+				index:       field.Index,
+				typeHandler: column.TypeHandler,
+			}
+		}
+	}
+}
+
+func addDirectFieldBinding(bindings map[string]columnBinding, typ reflect.Type, item ResultFieldMeta, presenceColumns []string) {
+	if item.Column == "" {
+		return
+	}
+	field, ok := typ.FieldByName(item.Property)
+	if !ok || field.PkgPath != "" {
+		return
+	}
+	bindings[normalizeColumnKey(item.Column)] = columnBinding{
+		index:           field.Index,
+		typeHandler:     item.TypeHandler,
+		presenceColumns: append([]string(nil), presenceColumns...),
+	}
+}
+
+func addAssociationBindings(bindings map[string]columnBinding, typ reflect.Type, path []int, association ResultAssociationMeta, inheritedPrefix string) {
+	field, ok := typ.FieldByName(association.Property)
+	if !ok || field.PkgPath != "" {
+		return
+	}
+	nestedType := field.Type
+	for nestedType.Kind() == reflect.Pointer {
+		nestedType = nestedType.Elem()
+	}
+	if nestedType.Kind() != reflect.Struct {
+		return
+	}
+	fieldPath := append(append([]int(nil), path...), field.Index...)
+	prefix := inheritedPrefix + association.ColumnPrefix
+	presenceColumns := prefixedColumns(association.NotNullColumns, prefix)
+	for _, item := range association.Fields {
+		nestedField, ok := nestedType.FieldByName(item.Property)
+		if !ok || nestedField.PkgPath != "" {
+			continue
+		}
+		column := prefixColumn(prefix, item.Column)
+		if column == "" {
+			continue
+		}
+		bindings[normalizeColumnKey(column)] = columnBinding{
+			index:           append(append([]int(nil), fieldPath...), nestedField.Index...),
+			typeHandler:     item.TypeHandler,
+			presenceColumns: presenceColumns,
+		}
+	}
+	for _, child := range association.Associations {
+		addAssociationBindings(bindings, nestedType, fieldPath, child, prefix)
+	}
+}
+
+func prefixColumn(prefix string, column string) string {
+	column = strings.TrimSpace(column)
+	if column == "" {
+		return ""
+	}
+	return strings.TrimSpace(prefix) + column
+}
+
+func prefixedColumns(columns []string, prefix string) []string {
+	if len(columns) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(columns))
+	for _, column := range columns {
+		column = prefixColumn(prefix, column)
+		if column != "" {
+			out = append(out, column)
+		}
+	}
+	return out
 }
 
 func exportedFieldBindings(typ reflect.Type) map[string]columnBinding {
@@ -386,25 +902,61 @@ func exportedFieldBindings(typ reflect.Type) map[string]columnBinding {
 		if field.PkgPath != "" {
 			continue
 		}
-		bindings[normalizeColumnKey(field.Name)] = columnBinding{index: field.Index}
+		bindings[normalizeColumnKey(field.Name)] = columnBinding{
+			index:     field.Index,
+			auto:      true,
+			fieldName: field.Name,
+		}
 	}
 	return bindings
+}
+
+func (s *SQLSession) lookupColumnBinding(bindings map[string]columnBinding, column string) (columnBinding, bool) {
+	binding, ok := bindings[normalizeColumnKey(column)]
+	if !ok {
+		return columnBinding{}, false
+	}
+	if !binding.auto || s == nil || s.mapUnderscoreToCamelCase {
+		return binding, true
+	}
+	if strictColumnKey(column) != strictColumnKey(binding.fieldName) {
+		return columnBinding{}, false
+	}
+	return binding, true
 }
 
 func (s *SQLSession) resultMap(statement StatementMeta) (ResultMapMeta, bool) {
 	if statement.ResultMap == "" {
 		return ResultMapMeta{}, false
 	}
-	mapper, ok := s.registry.Mapper(statement.Namespace)
+	return s.lookupResultMap(statement.Namespace, statement.ResultMap)
+}
+
+func (s *SQLSession) lookupResultMap(namespace string, id string) (ResultMapMeta, bool) {
+	id = normalizeRuntimeResultMapID(namespace, id)
+	if id == "" {
+		return ResultMapMeta{}, false
+	}
+	mapper, ok := s.registry.Mapper(namespace)
 	if !ok {
 		return ResultMapMeta{}, false
 	}
 	for _, resultMap := range mapper.ResultMaps {
-		if resultMap.ID == statement.ResultMap {
+		if resultMap.ID == id {
 			return resultMap, true
 		}
 	}
 	return ResultMapMeta{}, false
+}
+
+func normalizeRuntimeResultMapID(namespace string, id string) string {
+	id = strings.TrimSpace(id)
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return id
+	}
+	prefix := namespace + "."
+	return strings.TrimPrefix(id, prefix)
 }
 
 func destination(dest any) (reflect.Value, error) {
@@ -431,6 +983,10 @@ func normalizeColumnKey(value string) string {
 		}
 	}
 	return strings.ToLower(builder.String())
+}
+
+func strictColumnKey(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func normalizeTypeIdentifier(value string) string {

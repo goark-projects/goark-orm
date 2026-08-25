@@ -20,8 +20,50 @@ type sqlSessionUser struct {
 	Profile sqlSessionProfile
 }
 
+type sqlSessionOrder struct {
+	ID       int64
+	UserID   int64
+	UserKind string
+	Name     string
+	User     sqlSessionUser
+	Items    []sqlSessionOrderItem
+}
+
+type sqlSessionLazyOrder struct {
+	ID     int64
+	UserID int64
+	Name   string
+	User   Lazy[sqlSessionUser]
+	Items  LazySlice[sqlSessionOrderItem]
+}
+
+type sqlSessionOrderItem struct {
+	ID  int64
+	SKU string
+}
+
+type sqlSessionInvoice struct {
+	ID      int64
+	Name    string
+	Ignored string
+	User    *sqlSessionUser
+	Items   []sqlSessionOrderItem
+}
+
 type sqlSessionProfile struct {
 	Text string
+}
+
+type sqlSessionAccount struct {
+	ID    int64
+	Kind  string
+	Name  string
+	Level int64
+	Phone string
+}
+
+type sqlSessionConfigUser struct {
+	UserName string
 }
 
 func TestSQLSession_QueryOne_whenStructPointerDestination_shouldScanEntityColumns(t *testing.T) {
@@ -93,6 +135,95 @@ func TestSQLSession_Query_whenSliceDestination_shouldScanRows(t *testing.T) {
 	}
 }
 
+func TestQueryCursor_whenRowsExist_shouldScanOneByOne(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values: [][]driver.Value{
+			{int64(7), "Alice"},
+			{int64(8), "Bob"},
+		},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "List",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.List",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user",
+	})
+	session, err := NewSQLSession(registry, state.db, NewQuestionDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	cursor, err := QueryCursor[sqlSessionUser](context.Background(), session, "system.user.UserMapper.List", nil)
+	if err != nil {
+		t.Fatalf("query cursor failed: %v", err)
+	}
+	first, ok, err := cursor.Next(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("scan first cursor row failed, ok=%v err=%v", ok, err)
+	}
+	second, ok, err := cursor.Next(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("scan second cursor row failed, ok=%v err=%v", ok, err)
+	}
+	_, ok, err = cursor.Next(context.Background())
+	if err != nil || ok {
+		t.Fatalf("expected cursor exhausted, ok=%v err=%v", ok, err)
+	}
+	if err := cursor.Close(); err != nil {
+		t.Fatalf("close cursor failed: %v", err)
+	}
+
+	if first.ID != 7 || first.Name != "Alice" || second.ID != 8 || second.Name != "Bob" {
+		t.Fatalf("unexpected cursor rows %#v %#v", first, second)
+	}
+	if state.rowsClosed != 1 {
+		t.Fatalf("expected cursor to close rows once, got %d", state.rowsClosed)
+	}
+}
+
+func TestQueryEach_whenHandlerReturnsError_shouldStopAndCloseRows(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values: [][]driver.Value{
+			{int64(7), "Alice"},
+			{int64(8), "Bob"},
+		},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "List",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.List",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user",
+	})
+	session, err := NewSQLSession(registry, state.db, NewQuestionDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	stop := errors.New("stop")
+	seen := make([]sqlSessionUser, 0)
+
+	err = QueryEach[sqlSessionUser](context.Background(), session, "system.user.UserMapper.List", nil, func(ctx context.Context, user sqlSessionUser) error {
+		seen = append(seen, user)
+		return stop
+	})
+	if !errors.Is(err, stop) {
+		t.Fatalf("expected handler error, got %v", err)
+	}
+	if len(seen) != 1 || seen[0].ID != 7 {
+		t.Fatalf("unexpected handled rows %#v", seen)
+	}
+	if state.rowsClosed != 1 {
+		t.Fatalf("expected handler error to close rows once, got %d", state.rowsClosed)
+	}
+}
+
 func TestSQLSession_QueryOne_whenNoRows_shouldReturnSQLNoRows(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{columns: []string{"id"}, values: nil}
@@ -146,6 +277,447 @@ func TestSQLSession_QueryOne_whenResultMapUsesTypeHandler_shouldConvertField(t *
 	}
 }
 
+func TestSQLSession_QueryOne_whenResultMapUsesAssociation_shouldScanNestedStruct(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"order_id", "order_name", "user_id", "user_name"},
+		values:  [][]driver.Value{{int64(100), "Order-100", int64(7), "Alice"}},
+	}
+	registry := newOrderSessionRegistry(t)
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var order sqlSessionOrder
+	err = session.QueryOne(context.Background(), "system.order.OrderMapper.FindByID", NamedArgs{"id": int64(100)}, &order)
+	if err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if order.ID != 100 || order.Name != "Order-100" || order.User.ID != 7 || order.User.Name != "Alice" {
+		t.Fatalf("unexpected order %#v", order)
+	}
+}
+
+func TestSQLSession_Query_whenResultMapDiscriminatorUsesInlineCase_shouldScanCaseFields(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "kind", "name", "admin_level"},
+		values: [][]driver.Value{
+			{int64(7), "admin", "Alice", int64(9)},
+			{int64(8), "normal", "Bob", int64(0)},
+		},
+	}
+	registry := newDiscriminatorAccountRegistry(t)
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var accounts []sqlSessionAccount
+	err = session.Query(context.Background(), "system.account.AccountMapper.List", nil, &accounts)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(accounts) != 2 {
+		t.Fatalf("expected two accounts, got %#v", accounts)
+	}
+	if accounts[0].ID != 7 || accounts[0].Kind != "admin" || accounts[0].Level != 9 {
+		t.Fatalf("unexpected admin account %#v", accounts[0])
+	}
+	if accounts[1].ID != 8 || accounts[1].Kind != "normal" || accounts[1].Level != 0 {
+		t.Fatalf("unexpected normal account %#v", accounts[1])
+	}
+}
+
+func TestSQLSession_Query_whenResultMapDiscriminatorUsesReferencedResultMap_shouldScanReferencedFields(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "kind", "name", "phone_number"},
+		values: [][]driver.Value{
+			{int64(7), "vip", "Alice", "13800000000"},
+			{int64(8), "normal", "Bob", "13900000000"},
+		},
+	}
+	registry := newDiscriminatorAccountRegistry(t)
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var accounts []sqlSessionAccount
+	err = session.Query(context.Background(), "system.account.AccountMapper.List", nil, &accounts)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(accounts) != 2 {
+		t.Fatalf("expected two accounts, got %#v", accounts)
+	}
+	if accounts[0].ID != 7 || accounts[0].Kind != "vip" || accounts[0].Phone != "13800000000" {
+		t.Fatalf("unexpected vip account %#v", accounts[0])
+	}
+	if accounts[1].ID != 8 || accounts[1].Kind != "normal" || accounts[1].Phone != "" {
+		t.Fatalf("unexpected normal account %#v", accounts[1])
+	}
+}
+
+func TestSQLSession_Query_whenResultMapDiscriminatorUsesDifferentResultType_shouldReturnError(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "kind", "name"},
+		values:  [][]driver.Value{{int64(7), "admin", "Alice"}},
+	}
+	registry := newMismatchedDiscriminatorAccountRegistry(t)
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var accounts []sqlSessionAccount
+	err = session.Query(context.Background(), "system.account.AccountMapper.List", nil, &accounts)
+	if err == nil || !strings.Contains(err.Error(), `discriminator resultType "sqlSessionAdminAccount"`) {
+		t.Fatalf("expected discriminator resultType error, got %v", err)
+	}
+}
+
+func TestSQLSession_Query_whenResultMapUsesCollection_shouldAggregateRowsByRootID(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"order_id", "order_name", "user_id", "user_name", "item_id", "item_sku"},
+		values: [][]driver.Value{
+			{int64(100), "Order-100", int64(7), "Alice", int64(501), "SKU-1"},
+			{int64(100), "Order-100", int64(7), "Alice", int64(502), "SKU-2"},
+		},
+	}
+	registry := newOrderSessionRegistry(t)
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var orders []sqlSessionOrder
+	err = session.Query(context.Background(), "system.order.OrderMapper.FindByID", NamedArgs{"id": int64(100)}, &orders)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(orders) != 1 {
+		t.Fatalf("expected one root order, got %#v", orders)
+	}
+	if orders[0].User.ID != 7 || orders[0].User.Name != "Alice" {
+		t.Fatalf("unexpected association %#v", orders[0].User)
+	}
+	if len(orders[0].Items) != 2 || orders[0].Items[0].SKU != "SKU-1" || orders[0].Items[1].ID != 502 {
+		t.Fatalf("unexpected collection %#v", orders[0].Items)
+	}
+}
+
+func TestSQLSession_Query_whenResultMapUsesConstructorPrefixNotNullAndAutoMappingFalse_shouldScanExplicitGraph(t *testing.T) {
+	disabled := false
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"invoice_id", "invoice_name", "ignored", "user_id", "user_name", "item_id", "item_sku"},
+		values: [][]driver.Value{
+			{int64(200), "Invoice-200", "auto-value", int64(7), "Alice", nil, nil},
+			{int64(200), "Invoice-200", "auto-value", int64(7), "Alice", int64(501), "SKU-1"},
+		},
+	}
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "InvoiceMapper",
+		Namespace: "system.invoice.InvoiceMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:          "InvoiceResult",
+				TypeName:    "sqlSessionInvoice",
+				AutoMapping: &disabled,
+				Constructor: ResultConstructorMeta{
+					Args: []ResultArgMeta{
+						{Name: "ID", Column: "invoice_id", ID: true},
+					},
+				},
+				Fields: []ResultFieldMeta{
+					{Property: "Name", Column: "invoice_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property:       "User",
+						TypeName:       "sqlSessionUser",
+						ColumnPrefix:   "user_",
+						NotNullColumns: []string{"id"},
+						Fields: []ResultFieldMeta{
+							{Property: "ID", Column: "id", ID: true},
+							{Property: "Name", Column: "name"},
+						},
+					},
+				},
+				Collections: []ResultCollectionMeta{
+					{
+						Property:       "Items",
+						TypeName:       "sqlSessionOrderItem",
+						ColumnPrefix:   "item_",
+						NotNullColumns: []string{"id"},
+						Fields: []ResultFieldMeta{
+							{Property: "ID", Column: "id", ID: true},
+							{Property: "SKU", Column: "sku"},
+						},
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:        "List",
+				Namespace: "system.invoice.InvoiceMapper",
+				FullName:  "system.invoice.InvoiceMapper.List",
+				Command:   StatementCommandSelect,
+				Source:    StatementSourceXML,
+				SQL:       "select * from invoice",
+				ResultMap: "InvoiceResult",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register invoice mapper failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var invoices []sqlSessionInvoice
+	err = session.Query(context.Background(), "system.invoice.InvoiceMapper.List", nil, &invoices)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(invoices) != 1 {
+		t.Fatalf("expected one invoice, got %#v", invoices)
+	}
+	invoice := invoices[0]
+	if invoice.ID != 200 || invoice.Name != "Invoice-200" || invoice.Ignored != "" {
+		t.Fatalf("unexpected root mapping %#v", invoice)
+	}
+	if invoice.User == nil || invoice.User.ID != 7 || invoice.User.Name != "Alice" {
+		t.Fatalf("unexpected prefixed association %#v", invoice.User)
+	}
+	if len(invoice.Items) != 1 || invoice.Items[0].ID != 501 || invoice.Items[0].SKU != "SKU-1" {
+		t.Fatalf("unexpected notNull collection %#v", invoice.Items)
+	}
+}
+
+func TestSQLSession_QueryOne_whenResultMapUsesNestedSelects_shouldLoadAssociationAndCollection(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{
+			columns: []string{"order_id", "user_id", "order_name"},
+			values:  [][]driver.Value{{int64(100), int64(7), "Order-100"}},
+		},
+		{
+			columns: []string{"id", "name"},
+			values:  [][]driver.Value{{int64(7), "Alice"}},
+		},
+		{
+			columns: []string{"id", "sku"},
+			values: [][]driver.Value{
+				{int64(501), "SKU-1"},
+				{int64(502), "SKU-2"},
+			},
+		},
+	}
+	registry := newNestedSelectOrderRegistry(t)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var order sqlSessionOrder
+	err = session.QueryOne(context.Background(), "system.order.OrderMapper.FindWithNested", NamedArgs{"id": int64(100)}, &order)
+	if err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if order.ID != 100 || order.UserID != 7 || order.User.ID != 7 || order.User.Name != "Alice" {
+		t.Fatalf("unexpected nested association %#v", order)
+	}
+	if len(order.Items) != 2 || order.Items[0].ID != 501 || order.Items[1].SKU != "SKU-2" {
+		t.Fatalf("unexpected nested collection %#v", order.Items)
+	}
+	expectedQueries := []string{
+		"select order_id, user_id, order_name from orders where order_id = $1",
+		"select id, name from sys_user where id = $1",
+		"select id, sku from order_item where order_id = $1",
+	}
+	if !reflect.DeepEqual(state.queries, expectedQueries) {
+		t.Fatalf("unexpected queries %#v", state.queries)
+	}
+	expectedArgs := [][]driver.NamedValue{
+		{{Ordinal: 1, Value: int64(100)}},
+		{{Ordinal: 1, Value: int64(7)}},
+		{{Ordinal: 1, Value: int64(100)}},
+	}
+	if !reflect.DeepEqual(state.queryArgsList, expectedArgs) {
+		t.Fatalf("unexpected query args %#v", state.queryArgsList)
+	}
+}
+
+func TestSQLSession_QueryOne_whenNestedSelectUsesCompositeColumn_shouldBindNamedArguments(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{
+			columns: []string{"order_id", "user_id", "user_kind", "order_name"},
+			values:  [][]driver.Value{{int64(100), int64(7), "internal", "Order-100"}},
+		},
+		{
+			columns: []string{"id", "name"},
+			values:  [][]driver.Value{{int64(7), "Alice"}},
+		},
+	}
+	registry := newCompositeNestedSelectOrderRegistry(t)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var order sqlSessionOrder
+	err = session.QueryOne(context.Background(), "system.order.OrderMapper.FindWithCompositeNested", NamedArgs{"id": int64(100)}, &order)
+	if err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if order.ID != 100 || order.UserID != 7 || order.UserKind != "internal" || order.User.ID != 7 || order.User.Name != "Alice" {
+		t.Fatalf("unexpected composite nested association %#v", order)
+	}
+	expectedQueries := []string{
+		"select order_id, user_id, user_kind, order_name from orders where order_id = $1",
+		"select id, name from sys_user where id = $1 and kind = $2",
+	}
+	if !reflect.DeepEqual(state.queries, expectedQueries) {
+		t.Fatalf("unexpected queries %#v", state.queries)
+	}
+	expectedArgs := [][]driver.NamedValue{
+		{{Ordinal: 1, Value: int64(100)}},
+		{{Ordinal: 1, Value: int64(7)}, {Ordinal: 2, Value: "internal"}},
+	}
+	if !reflect.DeepEqual(state.queryArgsList, expectedArgs) {
+		t.Fatalf("unexpected query args %#v", state.queryArgsList)
+	}
+}
+
+func TestSQLSession_QueryOne_whenNestedSelectFetchTypeLazyUsesExplicitLazyLoader(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{
+			columns: []string{"order_id", "user_id", "order_name"},
+			values:  [][]driver.Value{{int64(100), int64(7), "Order-100"}},
+		},
+		{
+			columns: []string{"id", "name"},
+			values:  [][]driver.Value{{int64(7), "Alice"}},
+		},
+		{
+			columns: []string{"id", "sku"},
+			values: [][]driver.Value{
+				{int64(501), "SKU-1"},
+				{int64(502), "SKU-2"},
+			},
+		},
+	}
+	registry := newLazyNestedSelectOrderRegistry(t)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var order sqlSessionLazyOrder
+	err = session.QueryOne(context.Background(), "system.order.OrderMapper.FindWithLazy", NamedArgs{"id": int64(100)}, &order)
+	if err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+	if order.ID != 100 || order.UserID != 7 || order.Name != "Order-100" {
+		t.Fatalf("unexpected root order id=%d userID=%d name=%q", order.ID, order.UserID, order.Name)
+	}
+	if order.User.Loaded() || order.Items.Loaded() {
+		t.Fatalf("lazy fields must not be loaded by parent query")
+	}
+	if len(state.queries) != 1 {
+		t.Fatalf("expected only parent query before lazy load, got %#v", state.queries)
+	}
+
+	user, err := order.User.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load lazy user failed: %v", err)
+	}
+	if user.ID != 7 || user.Name != "Alice" {
+		t.Fatalf("unexpected lazy user %#v", user)
+	}
+	again, err := order.User.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load cached lazy user failed: %v", err)
+	}
+	if again.ID != 7 || len(state.queries) != 2 {
+		t.Fatalf("expected lazy association cache hit, user=%#v queries=%#v", again, state.queries)
+	}
+
+	items, err := order.Items.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load lazy items failed: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != 501 || items[1].SKU != "SKU-2" {
+		t.Fatalf("unexpected lazy items %#v", items)
+	}
+	expectedQueries := []string{
+		"select order_id, user_id, order_name from orders where order_id = $1",
+		"select id, name from sys_user where id = $1",
+		"select id, sku from order_item where order_id = $1",
+	}
+	if !reflect.DeepEqual(state.queries, expectedQueries) {
+		t.Fatalf("unexpected queries %#v", state.queries)
+	}
+}
+
+func TestSQLSession_Query_whenNestedSelectSeesSameArguments_shouldReuseQueryLocalResult(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{
+			columns: []string{"order_id", "user_id", "order_name"},
+			values: [][]driver.Value{
+				{int64(100), int64(7), "Order-100"},
+				{int64(101), int64(7), "Order-101"},
+			},
+		},
+		{
+			columns: []string{"id", "name"},
+			values:  [][]driver.Value{{int64(7), "Alice"}},
+		},
+	}
+	registry := newDedupNestedSelectOrderRegistry(t)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithLocalCache(false))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var orders []sqlSessionOrder
+	err = session.Query(context.Background(), "system.order.OrderMapper.ListWithNested", nil, &orders)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(orders) != 2 || orders[0].User.Name != "Alice" || orders[1].User.Name != "Alice" {
+		t.Fatalf("unexpected nested association reuse result %#v", orders)
+	}
+	expectedQueries := []string{
+		"select order_id, user_id, order_name from orders",
+		"select id, name from sys_user where id = $1",
+	}
+	if !reflect.DeepEqual(state.queries, expectedQueries) {
+		t.Fatalf("unexpected queries %#v", state.queries)
+	}
+}
+
 func TestSQLSession_Exec_whenGeneratedKeys_shouldReturnLastInsertID(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1, lastInsertID: 42}
@@ -175,6 +747,246 @@ func TestSQLSession_Exec_whenGeneratedKeys_shouldReturnLastInsertID(t *testing.T
 	}
 }
 
+func TestSQLSession_Query_whenExecutorTypeReuse_shouldPrepareSQLOnce(t *testing.T) {
+	state := openTestSQLState(t)
+	state.db.SetMaxOpenConns(1)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(8), "Bob"}}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:         "ListByStatus",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.ListByStatus",
+		Command:    StatementCommandSelect,
+		Source:     StatementSourceAnnotation,
+		SQL:        "select id, name from sys_user where status = #{status}",
+		Parameters: []string{"status"},
+	})
+	session, err := NewSQLSession(
+		registry,
+		state.db,
+		NewPostgresDialect(),
+		WithConfiguration(Configuration{DefaultExecutorType: ExecutorTypeReuse}),
+	)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var active []sqlSessionUser
+	if err := session.Query(context.Background(), "system.user.UserMapper.ListByStatus", NamedArgs{"status": "ACTIVE"}, &active); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	var locked []sqlSessionUser
+	if err := session.Query(context.Background(), "system.user.UserMapper.ListByStatus", NamedArgs{"status": "LOCKED"}, &locked); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close session failed: %v", err)
+	}
+
+	if len(active) != 1 || active[0].Name != "Alice" || len(locked) != 1 || locked[0].Name != "Bob" {
+		t.Fatalf("unexpected reuse query results active=%#v locked=%#v", active, locked)
+	}
+	if state.prepareCount != 1 {
+		t.Fatalf("expected one prepared statement, got %d queries=%#v", state.prepareCount, state.prepareQueries)
+	}
+	if state.prepareQueries[0] != "select id, name from sys_user where status = $1" {
+		t.Fatalf("unexpected prepared SQL %q", state.prepareQueries[0])
+	}
+	if len(state.queries) != 2 {
+		t.Fatalf("expected two statement executions, got %#v", state.queries)
+	}
+	if state.stmtClosed != 1 {
+		t.Fatalf("expected prepared statement close once, got %d", state.stmtClosed)
+	}
+}
+
+func TestSQLSession_Exec_whenExecutorTypeReuse_shouldReusePreparedStatement(t *testing.T) {
+	state := openTestSQLState(t)
+	state.db.SetMaxOpenConns(1)
+	state.execResults = []driver.Result{
+		testResult{rowsAffected: 1},
+		testResult{rowsAffected: 1},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:         "UpdateName",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.UpdateName",
+		Command:    StatementCommandUpdate,
+		Source:     StatementSourceAnnotation,
+		SQL:        "update sys_user set name = #{name} where id = #{id}",
+		Parameters: []string{"id", "name"},
+	})
+	session, err := NewSQLSession(
+		registry,
+		state.db,
+		NewPostgresDialect(),
+		WithConfiguration(Configuration{DefaultExecutorType: ExecutorTypeReuse}),
+	)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	if _, err := session.Exec(context.Background(), "system.user.UserMapper.UpdateName", NamedArgs{"id": int64(7), "name": "Alice"}); err != nil {
+		t.Fatalf("first exec failed: %v", err)
+	}
+	if _, err := session.Exec(context.Background(), "system.user.UserMapper.UpdateName", NamedArgs{"id": int64(8), "name": "Bob"}); err != nil {
+		t.Fatalf("second exec failed: %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close session failed: %v", err)
+	}
+
+	if state.prepareCount != 1 {
+		t.Fatalf("expected one prepared statement, got %d queries=%#v", state.prepareCount, state.prepareQueries)
+	}
+	if state.prepareQueries[0] != "update sys_user set name = $1 where id = $2" {
+		t.Fatalf("unexpected prepared SQL %q", state.prepareQueries[0])
+	}
+	if len(state.execs) != 2 {
+		t.Fatalf("expected two statement executions, got %#v", state.execs)
+	}
+	if state.stmtClosed != 1 {
+		t.Fatalf("expected prepared statement close once, got %d", state.stmtClosed)
+	}
+}
+
+func TestSQLSession_Exec_whenGeneratedKeysHasKeyProperty_shouldBackfillEntityField(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1, lastInsertID: 42}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:               "Insert",
+		Namespace:        "system.user.UserMapper",
+		FullName:         "system.user.UserMapper.Insert",
+		Command:          StatementCommandInsert,
+		Source:           StatementSourceAnnotation,
+		SQL:              "insert into sys_user(name) values(#{Name})",
+		ParameterType:    "sqlSessionUser",
+		UseGeneratedKeys: true,
+		KeyProperty:      "ID",
+	})
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	user := &sqlSessionUser{Name: "Alice"}
+
+	result, err := session.Exec(context.Background(), "system.user.UserMapper.Insert", NamedArgs{
+		"user": user,
+		"Name": user.Name,
+	})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if result.LastInsertID != 42 || user.ID != 42 {
+		t.Fatalf("expected generated key to be returned and backfilled, result=%#v user=%#v", result, user)
+	}
+}
+
+func TestSQLSession_Exec_whenSelectKeyBefore_shouldBackfillKeyBeforeInsert(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"next_id"},
+		values:  [][]driver.Value{{int64(99)}},
+	}
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:            "Insert",
+		Namespace:     "system.user.UserMapper",
+		FullName:      "system.user.UserMapper.Insert",
+		Command:       StatementCommandInsert,
+		Source:        StatementSourceXML,
+		SQL:           "insert into sys_user(id, name) values(#{ID}, #{Name})",
+		ParameterType: "sqlSessionUser",
+		KeyProperty:   "ID",
+		SelectKey: SelectKeyMeta{
+			Enabled:     true,
+			KeyProperty: "ID",
+			ResultType:  "int64",
+			Order:       SelectKeyOrderBefore,
+			SQL:         "select nextval('sys_user_id_seq')",
+		},
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	user := &sqlSessionUser{Name: "Alice"}
+
+	result, err := session.Exec(context.Background(), "system.user.UserMapper.Insert", NamedArgs{
+		"user": user,
+		"Name": user.Name,
+	})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if user.ID != 99 || result.LastInsertID != 99 {
+		t.Fatalf("expected selectKey BEFORE to backfill id, result=%#v user=%#v", result, user)
+	}
+	if !reflect.DeepEqual(state.queries, []string{"select nextval('sys_user_id_seq')"}) {
+		t.Fatalf("unexpected selectKey queries %#v", state.queries)
+	}
+	if state.exec != "insert into sys_user(id, name) values($1, $2)" {
+		t.Fatalf("unexpected insert SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: int64(99)}, {Ordinal: 2, Value: "Alice"}}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected insert args %#v", state.execArgs)
+	}
+}
+
+func TestSQLSession_Exec_whenSelectKeyAfter_shouldBackfillKeyAfterInsert(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id"},
+		values:  [][]driver.Value{{int64(100)}},
+	}
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:            "Insert",
+		Namespace:     "system.user.UserMapper",
+		FullName:      "system.user.UserMapper.Insert",
+		Command:       StatementCommandInsert,
+		Source:        StatementSourceXML,
+		SQL:           "insert into sys_user(name) values(#{Name})",
+		ParameterType: "sqlSessionUser",
+		KeyProperty:   "ID",
+		SelectKey: SelectKeyMeta{
+			Enabled:     true,
+			KeyProperty: "ID",
+			ResultType:  "int64",
+			Order:       SelectKeyOrderAfter,
+			SQL:         "select currval('sys_user_id_seq')",
+		},
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	user := &sqlSessionUser{Name: "Alice"}
+
+	result, err := session.Exec(context.Background(), "system.user.UserMapper.Insert", NamedArgs{
+		"user": user,
+		"Name": user.Name,
+	})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if user.ID != 100 || result.LastInsertID != 100 {
+		t.Fatalf("expected selectKey AFTER to backfill id, result=%#v user=%#v", result, user)
+	}
+	if state.exec != "insert into sys_user(name) values($1)" {
+		t.Fatalf("unexpected insert SQL %q", state.exec)
+	}
+	if !reflect.DeepEqual(state.queries, []string{"select currval('sys_user_id_seq')"}) {
+		t.Fatalf("unexpected selectKey queries %#v", state.queries)
+	}
+}
+
 func TestSQLSession_Exec_whenParameterTypeUsesTypeHandler_shouldConvertArgument(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1}
@@ -194,6 +1006,34 @@ func TestSQLSession_Exec_whenParameterTypeUsesTypeHandler_shouldConvertArgument(
 
 	_, err = session.Exec(context.Background(), "system.user.UserMapper.InsertProfile", NamedArgs{
 		"Profile": sqlSessionProfile{Text: "admin"},
+	})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+	if !reflect.DeepEqual(state.execArgs, []driver.NamedValue{{Ordinal: 1, Value: "admin"}}) {
+		t.Fatalf("unexpected exec args %#v", state.execArgs)
+	}
+}
+
+func TestSQLSession_Exec_whenNestedParameterTypeUsesTypeHandler_shouldConvertArgumentPath(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:            "InsertProfile",
+		Namespace:     "system.user.UserMapper",
+		FullName:      "system.user.UserMapper.InsertProfile",
+		Command:       StatementCommandInsert,
+		Source:        StatementSourceXML,
+		SQL:           "insert into sys_user(profile) values(#{user.Profile})",
+		ParameterType: "sqlSessionUser",
+	})
+	session, err := NewSQLSession(registry, state.db, nil, WithTypeHandler("profile", profileTypeHandler{}))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.InsertProfile", NamedArgs{
+		"user": &sqlSessionUser{Profile: sqlSessionProfile{Text: "admin"}},
 	})
 	if err != nil {
 		t.Fatalf("exec failed: %v", err)
@@ -251,8 +1091,666 @@ func TestSQLSession_Query_whenStatementHasDynamicSQL_shouldRenderBeforeCompile(t
 	}
 }
 
-func newSQLSessionRegistry(t *testing.T, statement StatementMeta) *Registry {
+func TestSQLSession_Query_whenStatementUsesProvider_shouldCompileProviderSQL(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:         "ListByStatus",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.ListByStatus",
+		Command:    StatementCommandSelect,
+		Source:     StatementSourceAnnotation,
+		Provider:   "UserSQL.ListByStatus",
+		Parameters: []string{"status"},
+	})
+	err := registry.RegisterSQLProvider("UserSQL.ListByStatus", func(ctx context.Context, statement StatementMeta, args NamedArgs) (SQLSource, error) {
+		if statement.FullName != "system.user.UserMapper.ListByStatus" || args["status"] != "ACTIVE" {
+			t.Fatalf("unexpected provider call statement=%s args=%#v", statement.FullName, args)
+		}
+		return SQLSource{SQL: "select id, name from sys_user where status = #{status}"}, nil
+	})
+	if err != nil {
+		t.Fatalf("register provider failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var users []sqlSessionUser
+	err = session.Query(context.Background(), "system.user.UserMapper.ListByStatus", NamedArgs{"status": "ACTIVE"}, &users)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(users) != 1 || users[0].Name != "Alice" {
+		t.Fatalf("unexpected users %#v", users)
+	}
+	if state.query != "select id, name from sys_user where status = $1" {
+		t.Fatalf("unexpected query %q", state.query)
+	}
+	if !reflect.DeepEqual(state.queryArgs, []driver.NamedValue{{Ordinal: 1, Value: "ACTIVE"}}) {
+		t.Fatalf("unexpected query args %#v", state.queryArgs)
+	}
+}
+
+func TestSQLSession_Query_whenStatementUsesMissingProvider_shouldReturnError(t *testing.T) {
+	state := openTestSQLState(t)
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "ListByStatus",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.ListByStatus",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		Provider:  "UserSQL.ListByStatus",
+	})
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var users []sqlSessionUser
+	err = session.Query(context.Background(), "system.user.UserMapper.ListByStatus", NamedArgs{"status": "ACTIVE"}, &users)
+	if err == nil || !strings.Contains(err.Error(), `SQL provider "UserSQL.ListByStatus" is not registered`) {
+		t.Fatalf("expected missing provider error, got %v", err)
+	}
+}
+
+func TestSQLSession_QueryPage_whenPageRequested_shouldCountAndQueryRecords(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"count"}, values: [][]driver.Value{{int64(2)}}},
+		{
+			columns: []string{"id", "name"},
+			values: [][]driver.Value{
+				{int64(7), "Alice"},
+				{int64(8), "Bob"},
+			},
+		},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "ListPage",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.ListPage",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where status = #{status} order by id",
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	page, err := QueryPage[sqlSessionUser](context.Background(), session, "system.user.UserMapper.ListPage", NamedArgs{"status": "ACTIVE"}, NewPageRequest(2, 10))
+	if err != nil {
+		t.Fatalf("query page failed: %v", err)
+	}
+
+	if page.Total != 2 || page.Pages != 1 || page.Current != 2 || page.Size != 10 {
+		t.Fatalf("unexpected page metadata %#v", page)
+	}
+	if len(page.Records) != 2 || page.Records[0].ID != 7 || page.Records[1].Name != "Bob" {
+		t.Fatalf("unexpected page records %#v", page.Records)
+	}
+	expectedQueries := []string{
+		"SELECT COUNT(*) FROM (select id, name from sys_user where status = $1) goark_orm_count",
+		"select id, name from sys_user where status = $1 order by id LIMIT $2 OFFSET $3",
+	}
+	if !reflect.DeepEqual(state.queries, expectedQueries) {
+		t.Fatalf("unexpected queries %#v", state.queries)
+	}
+	expectedArgs := [][]driver.NamedValue{
+		{{Ordinal: 1, Value: "ACTIVE"}},
+		{{Ordinal: 1, Value: "ACTIVE"}, {Ordinal: 2, Value: int64(10)}, {Ordinal: 3, Value: int64(10)}},
+	}
+	if !reflect.DeepEqual(state.queryArgsList, expectedArgs) {
+		t.Fatalf("unexpected query args %#v", state.queryArgsList)
+	}
+}
+
+func TestSQLSession_QueryPage_whenPaginationInterceptorEnabled_shouldNotApplyContextPaginationTwice(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"count"}, values: [][]driver.Value{{int64(1)}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "ListPage",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.ListPage",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where status = #{status}",
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithInterceptors(NewPaginationInterceptor()))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	ctx := WithPageRequest(context.Background(), NewPageRequest(9, 90))
+
+	_, err = QueryPage[sqlSessionUser](ctx, session, "system.user.UserMapper.ListPage", NamedArgs{"status": "ACTIVE"}, NewPageRequest(1, 10))
+	if err != nil {
+		t.Fatalf("query page failed: %v", err)
+	}
+
+	if state.queries[1] != "select id, name from sys_user where status = $1 LIMIT $2 OFFSET $3" {
+		t.Fatalf("unexpected paged query %q", state.queries[1])
+	}
+}
+
+func TestSQLSession_QueryOne_whenLocalCacheHit_shouldReuseDetachedResult(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+	})
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	first.Name = "Mutated"
+	var second sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if len(state.queries) != 1 {
+		t.Fatalf("expected second query to hit local cache, got queries %#v", state.queries)
+	}
+	if second.ID != 7 || second.Name != "Alice" {
+		t.Fatalf("expected detached cached value, got %#v", second)
+	}
+}
+
+func TestSQLSession_QueryOne_whenConfigurationDisablesLocalCache_shouldQueryEachTime(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+	})
+	config := DefaultConfiguration().WithLocalCache(false)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	var second sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if first.Name != "Alice" || second.Name != "Bob" || len(state.queries) != 2 {
+		t.Fatalf("expected disabled local cache to query twice, first=%#v second=%#v queries=%#v", first, second, state.queries)
+	}
+}
+
+func TestSQLSession_QueryOne_whenConfigurationUsesStatementLocalCacheScope_shouldQueryEachTime(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+	})
+	config := DefaultConfiguration()
+	config.LocalCacheScope = LocalCacheScopeStatement
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	var second sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if first.Name != "Alice" || second.Name != "Bob" || len(state.queries) != 2 {
+		t.Fatalf("expected statement local cache scope to query twice, first=%#v second=%#v queries=%#v", first, second, state.queries)
+	}
+}
+
+func TestSQLSession_QueryOne_whenConfigurationSetsDialect_shouldUseConfiguredDialect(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+	})
+	config := DefaultConfiguration()
+	config.Dialect = NewPostgresDialect()
+	session, err := NewSQLSession(registry, state.db, nil, WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var user sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &user); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if state.query != "select id, name from sys_user where id = $1" {
+		t.Fatalf("unexpected configured dialect query %q", state.query)
+	}
+	if session.Configuration().Dialect.Name() != "postgres" {
+		t.Fatalf("expected postgres configuration dialect, got %s", session.Configuration().Dialect.Name())
+	}
+}
+
+func TestSQLSession_QueryOne_whenConfigurationMapsUnderscoreToCamelCase_shouldScanAutoMappedField(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"user_name"},
+		values:  [][]driver.Value{{"Alice"}},
+	}
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "UserMapper",
+		Namespace: "system.user.UserMapper",
+		Statements: []StatementMeta{
+			{
+				ID:        "FindName",
+				Namespace: "system.user.UserMapper",
+				FullName:  "system.user.UserMapper.FindName",
+				Command:   StatementCommandSelect,
+				Source:    StatementSourceAnnotation,
+				SQL:       "select user_name from sys_user",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register mapper failed: %v", err)
+	}
+	config := DefaultConfiguration().WithMapUnderscoreToCamelCase(true)
+	session, err := NewSQLSession(registry, state.db, nil, WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var user sqlSessionConfigUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindName", nil, &user); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if user.UserName != "Alice" {
+		t.Fatalf("expected underscore column to map to UserName, got %#v", user)
+	}
+}
+
+func TestSQLSession_QueryOne_whenNamespaceSecondLevelCacheHit_shouldReuseAcrossSessions(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	registry := newCachedSQLSessionRegistry(t, CacheMeta{Enabled: true, Size: 16}, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+	})
+	firstSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new first SQL session failed: %v", err)
+	}
+	secondSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new second SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	if err := firstSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	first.Name = "Mutated"
+	var second sqlSessionUser
+	if err := secondSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if len(state.queries) != 1 {
+		t.Fatalf("expected second query to hit namespace cache, got queries %#v", state.queries)
+	}
+	if second.ID != 7 || second.Name != "Alice" {
+		t.Fatalf("expected detached namespace cache value, got %#v", second)
+	}
+}
+
+func TestSQLSession_QueryOne_whenConfigurationDisablesSecondLevelCache_shouldBypassNamespaceCache(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	registry := newCachedSQLSessionRegistry(t, CacheMeta{Enabled: true, Size: 16}, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+	})
+	config := DefaultConfiguration().WithSecondLevelCache(false)
+	firstSession, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new first SQL session failed: %v", err)
+	}
+	secondSession, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new second SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	if err := firstSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	var second sqlSessionUser
+	if err := secondSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if first.Name != "Alice" || second.Name != "Bob" || len(state.queries) != 2 {
+		t.Fatalf("expected disabled second-level cache to query twice, first=%#v second=%#v queries=%#v", first, second, state.queries)
+	}
+}
+
+func TestSQLSession_QueryOne_whenUseCacheDisabled_shouldBypassSecondLevelCache(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	registry := newCachedSQLSessionRegistry(t, CacheMeta{Enabled: true, Size: 16}, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+		UseCache:  StatementCacheDisabled,
+	})
+	firstSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new first SQL session failed: %v", err)
+	}
+	secondSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new second SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	if err := firstSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	var second sqlSessionUser
+	if err := secondSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if len(state.queries) != 2 {
+		t.Fatalf("expected useCache=false to bypass namespace cache, got queries %#v", state.queries)
+	}
+	if first.Name != "Alice" || second.Name != "Bob" {
+		t.Fatalf("unexpected query results first=%#v second=%#v", first, second)
+	}
+}
+
+func TestSQLSession_QueryOne_whenSelectFlushCacheEnabled_shouldRefreshSecondLevelCache(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	registry := newCachedSQLSessionRegistry(t, CacheMeta{Enabled: true, Size: 16}, StatementMeta{
+		ID:         "FindByID",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.FindByID",
+		Command:    StatementCommandSelect,
+		Source:     StatementSourceAnnotation,
+		SQL:        "select id, name from sys_user where id = #{id}",
+		FlushCache: StatementCacheEnabled,
+	})
+	firstSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new first SQL session failed: %v", err)
+	}
+	secondSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new second SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	if err := firstSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	var second sqlSessionUser
+	if err := secondSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if first.Name != "Alice" || second.Name != "Bob" {
+		t.Fatalf("expected flushCache=true select to refresh cache, first=%#v second=%#v", first, second)
+	}
+	if len(state.queries) != 2 {
+		t.Fatalf("expected select flushCache=true to force second query, got queries %#v", state.queries)
+	}
+}
+
+func TestSQLSession_Exec_whenDefaultWriteOccurs_shouldClearSecondLevelCache(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newCachedSQLSessionRegistry(t, CacheMeta{Enabled: true, Size: 16},
+		StatementMeta{
+			ID:        "FindByID",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.FindByID",
+			Command:   StatementCommandSelect,
+			Source:    StatementSourceAnnotation,
+			SQL:       "select id, name from sys_user where id = #{id}",
+		},
+		StatementMeta{
+			ID:        "UpdateName",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.UpdateName",
+			Command:   StatementCommandUpdate,
+			Source:    StatementSourceAnnotation,
+			SQL:       "update sys_user set name = #{name} where id = #{id}",
+		},
+	)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var before sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &before); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	if _, err := session.Exec(context.Background(), "system.user.UserMapper.UpdateName", NamedArgs{"id": int64(7), "name": "Bob"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+	secondSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new second SQL session failed: %v", err)
+	}
+	var after sqlSessionUser
+	if err := secondSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &after); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if before.Name != "Alice" || after.Name != "Bob" {
+		t.Fatalf("unexpected values before=%#v after=%#v", before, after)
+	}
+	if len(state.queries) != 2 {
+		t.Fatalf("expected write to clear namespace cache, got queries %#v", state.queries)
+	}
+}
+
+func TestSQLSession_Exec_whenFlushCacheDisabled_shouldKeepSecondLevelCache(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newCachedSQLSessionRegistry(t, CacheMeta{Enabled: true, Size: 16},
+		StatementMeta{
+			ID:        "FindByID",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.FindByID",
+			Command:   StatementCommandSelect,
+			Source:    StatementSourceAnnotation,
+			SQL:       "select id, name from sys_user where id = #{id}",
+		},
+		StatementMeta{
+			ID:         "UpdateName",
+			Namespace:  "system.user.UserMapper",
+			FullName:   "system.user.UserMapper.UpdateName",
+			Command:    StatementCommandUpdate,
+			Source:     StatementSourceAnnotation,
+			SQL:        "update sys_user set name = #{name} where id = #{id}",
+			FlushCache: StatementCacheDisabled,
+		},
+	)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var before sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &before); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	if _, err := session.Exec(context.Background(), "system.user.UserMapper.UpdateName", NamedArgs{"id": int64(7), "name": "Bob"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+	secondSession, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new second SQL session failed: %v", err)
+	}
+	var after sqlSessionUser
+	if err := secondSession.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &after); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if before.Name != "Alice" || after.Name != "Alice" {
+		t.Fatalf("expected flushCache=false to keep cached value, before=%#v after=%#v", before, after)
+	}
+	if len(state.queries) != 1 {
+		t.Fatalf("expected second query to hit namespace cache, got queries %#v", state.queries)
+	}
+}
+
+func TestSQLSession_Exec_whenWriteOccurs_shouldClearLocalCache(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t,
+		StatementMeta{
+			ID:        "FindByID",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.FindByID",
+			Command:   StatementCommandSelect,
+			Source:    StatementSourceAnnotation,
+			SQL:       "select id, name from sys_user where id = #{id}",
+		},
+		StatementMeta{
+			ID:        "UpdateName",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.UpdateName",
+			Command:   StatementCommandUpdate,
+			Source:    StatementSourceAnnotation,
+			SQL:       "update sys_user set name = #{name} where id = #{id}",
+		},
+	)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var before sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &before); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.UpdateName", NamedArgs{"id": int64(7), "name": "Bob"})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+	var after sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &after); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if before.Name != "Alice" || after.Name != "Bob" {
+		t.Fatalf("unexpected cached values before=%#v after=%#v", before, after)
+	}
+	if len(state.queries) != 2 {
+		t.Fatalf("expected cache to be cleared after write, got queries %#v", state.queries)
+	}
+}
+
+func newSQLSessionRegistry(t *testing.T, statements ...StatementMeta) *Registry {
+	return newCachedSQLSessionRegistry(t, CacheMeta{}, statements...)
+}
+
+func newCachedSQLSessionRegistry(t *testing.T, cache CacheMeta, statements ...StatementMeta) *Registry {
 	t.Helper()
+	if len(statements) == 0 {
+		t.Fatalf("test registry requires at least one statement")
+	}
 	registry := NewRegistry()
 	err := registry.RegisterEntity(EntityMeta{
 		TypeName: "sqlSessionUser",
@@ -269,6 +1767,7 @@ func newSQLSessionRegistry(t *testing.T, statement StatementMeta) *Registry {
 	err = registry.RegisterMapper(MapperMeta{
 		TypeName:  "UserMapper",
 		Namespace: "system.user.UserMapper",
+		Cache:     cache,
 		ResultMaps: []ResultMapMeta{
 			{
 				ID:       "UserResult",
@@ -279,10 +1778,474 @@ func newSQLSessionRegistry(t *testing.T, statement StatementMeta) *Registry {
 				},
 			},
 		},
-		Statements: []StatementMeta{statement},
+		Statements: statements,
 	})
 	if err != nil {
 		t.Fatalf("register mapper failed: %v", err)
+	}
+	return registry
+}
+
+func newOrderSessionRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: "system.order.OrderMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "OrderResult",
+				TypeName: "sqlSessionOrder",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "order_id", ID: true},
+					{Property: "Name", Column: "order_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property: "User",
+						TypeName: "sqlSessionUser",
+						Fields: []ResultFieldMeta{
+							{Property: "ID", Column: "user_id", ID: true},
+							{Property: "Name", Column: "user_name"},
+						},
+					},
+				},
+				Collections: []ResultCollectionMeta{
+					{
+						Property: "Items",
+						TypeName: "sqlSessionOrderItem",
+						Fields: []ResultFieldMeta{
+							{Property: "ID", Column: "item_id", ID: true},
+							{Property: "SKU", Column: "item_sku"},
+						},
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:        "FindByID",
+				Namespace: "system.order.OrderMapper",
+				FullName:  "system.order.OrderMapper.FindByID",
+				Command:   StatementCommandSelect,
+				Source:    StatementSourceXML,
+				SQL:       "select * from orders where id = #{id}",
+				ResultMap: "OrderResult",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register order mapper failed: %v", err)
+	}
+	return registry
+}
+
+func newDiscriminatorAccountRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "AccountMapper",
+		Namespace: "system.account.AccountMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "AccountResult",
+				TypeName: "sqlSessionAccount",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "id", ID: true},
+					{Property: "Kind", Column: "kind"},
+					{Property: "Name", Column: "name"},
+				},
+				Discriminator: ResultDiscriminatorMeta{
+					Column:   "kind",
+					TypeName: "string",
+					Cases: []ResultDiscriminatorCaseMeta{
+						{
+							Value:      "admin",
+							ResultType: "sqlSessionAccount",
+							Fields: []ResultFieldMeta{
+								{Property: "Level", Column: "admin_level"},
+							},
+						},
+						{
+							Value:     "vip",
+							ResultMap: "VipAccountResult",
+						},
+					},
+				},
+			},
+			{
+				ID:       "VipAccountResult",
+				TypeName: "sqlSessionAccount",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "id", ID: true},
+					{Property: "Kind", Column: "kind"},
+					{Property: "Name", Column: "name"},
+					{Property: "Phone", Column: "phone_number"},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:        "List",
+				Namespace: "system.account.AccountMapper",
+				FullName:  "system.account.AccountMapper.List",
+				Command:   StatementCommandSelect,
+				Source:    StatementSourceXML,
+				SQL:       "select * from account",
+				ResultMap: "AccountResult",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register discriminator mapper failed: %v", err)
+	}
+	return registry
+}
+
+func newMismatchedDiscriminatorAccountRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "AccountMapper",
+		Namespace: "system.account.AccountMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "AccountResult",
+				TypeName: "sqlSessionAccount",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "id", ID: true},
+					{Property: "Kind", Column: "kind"},
+					{Property: "Name", Column: "name"},
+				},
+				Discriminator: ResultDiscriminatorMeta{
+					Column:   "kind",
+					TypeName: "string",
+					Cases: []ResultDiscriminatorCaseMeta{
+						{Value: "admin", ResultType: "sqlSessionAdminAccount"},
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:        "List",
+				Namespace: "system.account.AccountMapper",
+				FullName:  "system.account.AccountMapper.List",
+				Command:   StatementCommandSelect,
+				Source:    StatementSourceXML,
+				SQL:       "select * from account",
+				ResultMap: "AccountResult",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register mismatched discriminator mapper failed: %v", err)
+	}
+	return registry
+}
+
+func newNestedSelectOrderRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: "system.order.OrderMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "OrderNestedResult",
+				TypeName: "sqlSessionOrder",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "order_id", ID: true},
+					{Property: "UserID", Column: "user_id"},
+					{Property: "Name", Column: "order_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property:  "User",
+						TypeName:  "sqlSessionUser",
+						Column:    "user_id",
+						Select:    "system.user.UserMapper.FindByID",
+						FetchType: "eager",
+					},
+				},
+				Collections: []ResultCollectionMeta{
+					{
+						Property:  "Items",
+						TypeName:  "sqlSessionOrderItem",
+						Column:    "order_id",
+						Select:    "system.order.OrderItemMapper.ListByOrderID",
+						FetchType: "eager",
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:         "FindWithNested",
+				Namespace:  "system.order.OrderMapper",
+				FullName:   "system.order.OrderMapper.FindWithNested",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select order_id, user_id, order_name from orders where order_id = #{id}",
+				ResultMap:  "OrderNestedResult",
+				Parameters: []string{"id"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register order mapper failed: %v", err)
+	}
+	err = registry.RegisterMapper(MapperMeta{
+		TypeName:  "UserMapper",
+		Namespace: "system.user.UserMapper",
+		Statements: []StatementMeta{
+			{
+				ID:         "FindByID",
+				Namespace:  "system.user.UserMapper",
+				FullName:   "system.user.UserMapper.FindByID",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select id, name from sys_user where id = #{id}",
+				Parameters: []string{"id"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register user mapper failed: %v", err)
+	}
+	err = registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderItemMapper",
+		Namespace: "system.order.OrderItemMapper",
+		Statements: []StatementMeta{
+			{
+				ID:         "ListByOrderID",
+				Namespace:  "system.order.OrderItemMapper",
+				FullName:   "system.order.OrderItemMapper.ListByOrderID",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select id, sku from order_item where order_id = #{orderID}",
+				Parameters: []string{"orderID"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register order item mapper failed: %v", err)
+	}
+	return registry
+}
+
+func newLazyNestedSelectOrderRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: "system.order.OrderMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "OrderLazyResult",
+				TypeName: "sqlSessionLazyOrder",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "order_id", ID: true},
+					{Property: "UserID", Column: "user_id"},
+					{Property: "Name", Column: "order_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property:  "User",
+						TypeName:  "sqlSessionUser",
+						Column:    "user_id",
+						Select:    "system.user.UserMapper.FindByID",
+						FetchType: "lazy",
+					},
+				},
+				Collections: []ResultCollectionMeta{
+					{
+						Property:  "Items",
+						TypeName:  "sqlSessionOrderItem",
+						Column:    "order_id",
+						Select:    "system.order.OrderItemMapper.ListByOrderID",
+						FetchType: "lazy",
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:         "FindWithLazy",
+				Namespace:  "system.order.OrderMapper",
+				FullName:   "system.order.OrderMapper.FindWithLazy",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select order_id, user_id, order_name from orders where order_id = #{id}",
+				ResultMap:  "OrderLazyResult",
+				Parameters: []string{"id"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register lazy order mapper failed: %v", err)
+	}
+	err = registry.RegisterMapper(MapperMeta{
+		TypeName:  "UserMapper",
+		Namespace: "system.user.UserMapper",
+		Statements: []StatementMeta{
+			{
+				ID:         "FindByID",
+				Namespace:  "system.user.UserMapper",
+				FullName:   "system.user.UserMapper.FindByID",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select id, name from sys_user where id = #{id}",
+				Parameters: []string{"id"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register lazy user mapper failed: %v", err)
+	}
+	err = registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderItemMapper",
+		Namespace: "system.order.OrderItemMapper",
+		Statements: []StatementMeta{
+			{
+				ID:         "ListByOrderID",
+				Namespace:  "system.order.OrderItemMapper",
+				FullName:   "system.order.OrderItemMapper.ListByOrderID",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select id, sku from order_item where order_id = #{orderID}",
+				Parameters: []string{"orderID"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register lazy order item mapper failed: %v", err)
+	}
+	return registry
+}
+
+func newCompositeNestedSelectOrderRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: "system.order.OrderMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "OrderCompositeNestedResult",
+				TypeName: "sqlSessionOrder",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "order_id", ID: true},
+					{Property: "UserID", Column: "user_id"},
+					{Property: "UserKind", Column: "user_kind"},
+					{Property: "Name", Column: "order_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property:  "User",
+						TypeName:  "sqlSessionUser",
+						Column:    "{id=user_id,kind=user_kind}",
+						Select:    "system.user.UserMapper.FindByIDAndKind",
+						FetchType: "eager",
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:         "FindWithCompositeNested",
+				Namespace:  "system.order.OrderMapper",
+				FullName:   "system.order.OrderMapper.FindWithCompositeNested",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select order_id, user_id, user_kind, order_name from orders where order_id = #{id}",
+				ResultMap:  "OrderCompositeNestedResult",
+				Parameters: []string{"id"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register composite order mapper failed: %v", err)
+	}
+	err = registry.RegisterMapper(MapperMeta{
+		TypeName:  "UserMapper",
+		Namespace: "system.user.UserMapper",
+		Statements: []StatementMeta{
+			{
+				ID:         "FindByIDAndKind",
+				Namespace:  "system.user.UserMapper",
+				FullName:   "system.user.UserMapper.FindByIDAndKind",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select id, name from sys_user where id = #{id} and kind = #{kind}",
+				Parameters: []string{"id", "kind"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register composite user mapper failed: %v", err)
+	}
+	return registry
+}
+
+func newDedupNestedSelectOrderRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: "system.order.OrderMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "OrderNestedResult",
+				TypeName: "sqlSessionOrder",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "order_id", ID: true},
+					{Property: "UserID", Column: "user_id"},
+					{Property: "Name", Column: "order_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property:  "User",
+						TypeName:  "sqlSessionUser",
+						Column:    "user_id",
+						Select:    "system.user.UserMapper.FindByID",
+						FetchType: "eager",
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:        "ListWithNested",
+				Namespace: "system.order.OrderMapper",
+				FullName:  "system.order.OrderMapper.ListWithNested",
+				Command:   StatementCommandSelect,
+				Source:    StatementSourceXML,
+				SQL:       "select order_id, user_id, order_name from orders",
+				ResultMap: "OrderNestedResult",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register dedup order mapper failed: %v", err)
+	}
+	err = registry.RegisterMapper(MapperMeta{
+		TypeName:  "UserMapper",
+		Namespace: "system.user.UserMapper",
+		Statements: []StatementMeta{
+			{
+				ID:         "FindByID",
+				Namespace:  "system.user.UserMapper",
+				FullName:   "system.user.UserMapper.FindByID",
+				Command:    StatementCommandSelect,
+				Source:     StatementSourceXML,
+				SQL:        "select id, name from sys_user where id = #{id}",
+				Parameters: []string{"id"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register dedup user mapper failed: %v", err)
 	}
 	return registry
 }
@@ -314,14 +2277,29 @@ func (profileTypeHandler) FromDB(ctx context.Context, value any, target any) err
 }
 
 type testSQLState struct {
-	db         *sql.DB
-	queryRows  testRowsData
-	execResult driver.Result
-	query      string
-	exec       string
-	queryArgs  []driver.NamedValue
-	execArgs   []driver.NamedValue
-	mu         sync.Mutex
+	db             *sql.DB
+	queryRows      testRowsData
+	queryResults   []testRowsData
+	execResult     driver.Result
+	execResults    []driver.Result
+	execErrors     []error
+	query          string
+	queries        []string
+	exec           string
+	execs          []string
+	queryArgs      []driver.NamedValue
+	queryArgsList  [][]driver.NamedValue
+	execArgs       []driver.NamedValue
+	execArgsList   [][]driver.NamedValue
+	beginCount     int
+	commitCount    int
+	rollbackCount  int
+	txOptions      []driver.TxOptions
+	rowsClosed     int
+	prepareCount   int
+	prepareQueries []string
+	stmtClosed     int
+	mu             sync.Mutex
 }
 
 type testRowsData struct {
@@ -381,7 +2359,15 @@ type testConn struct {
 }
 
 func (c *testConn) Prepare(query string) (driver.Stmt, error) {
-	return nil, fmt.Errorf("prepare is not supported")
+	return c.PrepareContext(context.Background(), query)
+}
+
+func (c *testConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	c.state.mu.Lock()
+	defer c.state.mu.Unlock()
+	c.state.prepareCount++
+	c.state.prepareQueries = append(c.state.prepareQueries, query)
+	return &testStmt{state: c.state, query: query}, nil
 }
 
 func (c *testConn) Close() error {
@@ -389,35 +2375,134 @@ func (c *testConn) Close() error {
 }
 
 func (c *testConn) Begin() (driver.Tx, error) {
-	return nil, fmt.Errorf("tx is not supported")
+	return c.BeginTx(context.Background(), driver.TxOptions{})
+}
+
+func (c *testConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	c.state.mu.Lock()
+	defer c.state.mu.Unlock()
+	c.state.beginCount++
+	c.state.txOptions = append(c.state.txOptions, opts)
+	return &testTx{state: c.state}, nil
 }
 
 func (c *testConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	c.state.mu.Lock()
-	defer c.state.mu.Unlock()
-	c.state.query = query
-	c.state.queryArgs = append([]driver.NamedValue(nil), args...)
-	return &testRows{
-		columns: append([]string(nil), c.state.queryRows.columns...),
-		values:  append([][]driver.Value(nil), c.state.queryRows.values...),
-	}, nil
+	return c.state.queryContext(query, args)
 }
 
 func (c *testConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	c.state.mu.Lock()
-	defer c.state.mu.Unlock()
-	c.state.exec = query
-	c.state.execArgs = append([]driver.NamedValue(nil), args...)
-	if c.state.execResult == nil {
+	return c.state.execContext(query, args)
+}
+
+func (s *testSQLState) queryContext(query string, args []driver.NamedValue) (driver.Rows, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.query = query
+	s.queries = append(s.queries, query)
+	s.queryArgs = append([]driver.NamedValue(nil), args...)
+	s.queryArgsList = append(s.queryArgsList, append([]driver.NamedValue(nil), args...))
+	rows := s.queryRows
+	if len(s.queryResults) > 0 {
+		rows = s.queryResults[0]
+		s.queryResults = s.queryResults[1:]
+	}
+	return &testRows{
+		columns: append([]string(nil), rows.columns...),
+		values:  append([][]driver.Value(nil), rows.values...),
+		state:   s,
+	}, nil
+}
+
+func (s *testSQLState) execContext(query string, args []driver.NamedValue) (driver.Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.exec = query
+	s.execs = append(s.execs, query)
+	s.execArgs = append([]driver.NamedValue(nil), args...)
+	s.execArgsList = append(s.execArgsList, append([]driver.NamedValue(nil), args...))
+	if len(s.execErrors) > 0 {
+		err := s.execErrors[0]
+		s.execErrors = s.execErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(s.execResults) > 0 {
+		result := s.execResults[0]
+		s.execResults = s.execResults[1:]
+		return result, nil
+	}
+	if s.execResult == nil {
 		return testResult{}, nil
 	}
-	return c.state.execResult, nil
+	return s.execResult, nil
+}
+
+type testStmt struct {
+	state *testSQLState
+	query string
+}
+
+func (s *testStmt) Close() error {
+	if s.state != nil {
+		s.state.mu.Lock()
+		defer s.state.mu.Unlock()
+		s.state.stmtClosed++
+	}
+	return nil
+}
+
+func (s *testStmt) NumInput() int {
+	return -1
+}
+
+func (s *testStmt) Exec(args []driver.Value) (driver.Result, error) {
+	return s.ExecContext(context.Background(), driverValuesToNamedValues(args))
+}
+
+func (s *testStmt) Query(args []driver.Value) (driver.Rows, error) {
+	return s.QueryContext(context.Background(), driverValuesToNamedValues(args))
+}
+
+func (s *testStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	return s.state.execContext(s.query, args)
+}
+
+func (s *testStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	return s.state.queryContext(s.query, args)
+}
+
+func driverValuesToNamedValues(values []driver.Value) []driver.NamedValue {
+	out := make([]driver.NamedValue, 0, len(values))
+	for index, value := range values {
+		out = append(out, driver.NamedValue{Ordinal: index + 1, Value: value})
+	}
+	return out
+}
+
+type testTx struct {
+	state *testSQLState
+}
+
+func (t *testTx) Commit() error {
+	t.state.mu.Lock()
+	defer t.state.mu.Unlock()
+	t.state.commitCount++
+	return nil
+}
+
+func (t *testTx) Rollback() error {
+	t.state.mu.Lock()
+	defer t.state.mu.Unlock()
+	t.state.rollbackCount++
+	return nil
 }
 
 type testRows struct {
 	columns []string
 	values  [][]driver.Value
 	index   int
+	state   *testSQLState
 }
 
 func (r *testRows) Columns() []string {
@@ -425,6 +2510,11 @@ func (r *testRows) Columns() []string {
 }
 
 func (r *testRows) Close() error {
+	if r.state != nil {
+		r.state.mu.Lock()
+		defer r.state.mu.Unlock()
+		r.state.rowsClosed++
+	}
 	return nil
 }
 

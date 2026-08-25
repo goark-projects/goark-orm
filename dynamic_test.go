@@ -158,3 +158,76 @@ func TestRenderDynamicSQL_whenChooseMatchesFirstWhen_shouldSkipOtherwise(t *test
 		t.Fatalf("unexpected SQL %q", rendered.SQL)
 	}
 }
+
+func TestRenderDynamicSQL_whenBindProvided_shouldExposeBoundArgument(t *testing.T) {
+	rendered, err := RenderDynamicSQL([]DynamicSQLNode{
+		{Kind: DynamicSQLNodeText, Text: "select id from sys_user"},
+		{Kind: DynamicSQLNodeBind, Name: "pattern", Value: "'%' + name + '%'"},
+		{
+			Kind: DynamicSQLNodeWhere,
+			Children: []DynamicSQLNode{
+				{Kind: DynamicSQLNodeText, Text: "name like #{pattern}"},
+			},
+		},
+	}, NamedArgs{"name": "Alice"})
+	if err != nil {
+		t.Fatalf("render dynamic SQL failed: %v", err)
+	}
+
+	if rendered.SQL != "select id from sys_user WHERE name like #{pattern}" {
+		t.Fatalf("unexpected SQL %q", rendered.SQL)
+	}
+	if rendered.Args["pattern"] != "%Alice%" {
+		t.Fatalf("unexpected bind value %#v", rendered.Args["pattern"])
+	}
+}
+
+func TestRenderDynamicSQL_whenNestedPathsAndForeachAliasesProvided_shouldRenderCompilableSQL(t *testing.T) {
+	rendered, err := RenderDynamicSQL([]DynamicSQLNode{
+		{Kind: DynamicSQLNodeText, Text: "select id from sys_user"},
+		{Kind: DynamicSQLNodeBind, Name: "pattern", Value: "'%' + user.name + '%'"},
+		{
+			Kind: DynamicSQLNodeWhere,
+			Children: []DynamicSQLNode{
+				{
+					Kind: DynamicSQLNodeIf,
+					Test: "filter.status != nil and user.name != ''",
+					Children: []DynamicSQLNode{
+						{Kind: DynamicSQLNodeText, Text: "and status = #{filter.status} and name like #{pattern} and id in"},
+						{
+							Kind:       DynamicSQLNodeForeach,
+							Collection: "users",
+							Item:       "item",
+							Index:      "idx",
+							Open:       "(",
+							Separator:  ",",
+							Close:      ")",
+							Children: []DynamicSQLNode{
+								{Kind: DynamicSQLNodeText, Text: "#{idx} + #{item.ID}"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, NamedArgs{
+		"user":   sqlSessionUser{Name: "Alice"},
+		"filter": map[string]any{"status": "ACTIVE"},
+		"users": []sqlSessionUser{
+			{ID: 7},
+			{ID: 8},
+		},
+	})
+	if err != nil {
+		t.Fatalf("render dynamic SQL failed: %v", err)
+	}
+
+	compiled, err := CompileSQL(rendered.SQL, rendered.Args, NewQuestionDialect())
+	if err != nil {
+		t.Fatalf("compile rendered dynamic SQL failed: %v", err)
+	}
+	expectedArgs := []any{"ACTIVE", "%Alice%", 0, int64(7), 1, int64(8)}
+	if !reflect.DeepEqual(compiled.Args, expectedArgs) {
+		t.Fatalf("unexpected compiled args %#v; SQL=%s renderedArgs=%#v", compiled.Args, compiled.SQL, rendered.Args)
+	}
+}

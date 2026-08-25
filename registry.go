@@ -2,6 +2,7 @@ package orm
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -11,6 +12,10 @@ type Registry struct {
 	entities   map[string]EntityMeta
 	mappers    map[string]MapperMeta
 	statements map[string]StatementMeta
+	caches     map[string]Cache
+	cacheRefs  map[string]string
+	handlers   map[string]TypeHandler
+	providers  map[string]SQLProvider
 }
 
 // NewRegistry 创建空的 ORM 元数据注册表。
@@ -19,6 +24,10 @@ func NewRegistry() *Registry {
 		entities:   make(map[string]EntityMeta),
 		mappers:    make(map[string]MapperMeta),
 		statements: make(map[string]StatementMeta),
+		caches:     make(map[string]Cache),
+		cacheRefs:  make(map[string]string),
+		handlers:   defaultTypeHandlers(),
+		providers:  make(map[string]SQLProvider),
 	}
 }
 
@@ -68,10 +77,145 @@ func (r *Registry) RegisterMapper(meta MapperMeta) error {
 	}
 	copied := copyMapperMeta(meta)
 	r.mappers[copied.Namespace] = copied
+	if copied.Cache.Enabled {
+		if copied.Cache.RefNamespace != "" {
+			r.cacheRefs[copied.Namespace] = copied.Cache.RefNamespace
+		} else if _, exists := r.caches[copied.Namespace]; !exists {
+			r.caches[copied.Namespace] = newMemoryCacheFromMeta(copied.Namespace, copied.Cache)
+		}
+	}
 	for _, statement := range copied.Statements {
 		r.statements[statement.FullName] = statement
 	}
 	return nil
+}
+
+// RegisterCache 注册或替换指定 namespace 的二级缓存实现。
+func (r *Registry) RegisterCache(namespace string, cache Cache) error {
+	if r == nil {
+		return fmt.Errorf("goark-orm: registry is nil")
+	}
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return fmt.Errorf("goark-orm: cache namespace is required")
+	}
+	if cache == nil {
+		return fmt.Errorf("goark-orm: cache for namespace %s is nil", namespace)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.caches[namespace] = cache
+	return nil
+}
+
+// RegisterTypeHandler 注册或替换全局 TypeHandler。
+func (r *Registry) RegisterTypeHandler(name string, handler TypeHandler) error {
+	if r == nil {
+		return fmt.Errorf("goark-orm: registry is nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("goark-orm: type-handler name is required")
+	}
+	if handler == nil {
+		return fmt.Errorf("goark-orm: type-handler %q is nil", name)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.handlers[name] = handler
+	return nil
+}
+
+// TypeHandler 按名称读取全局 TypeHandler。
+func (r *Registry) TypeHandler(name string) (TypeHandler, bool) {
+	if r == nil {
+		return nil, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	handler, ok := r.handlers[strings.TrimSpace(name)]
+	return handler, ok
+}
+
+// TypeHandlers 返回全局 TypeHandler 快照。
+func (r *Registry) TypeHandlers() map[string]TypeHandler {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]TypeHandler, len(r.handlers))
+	for name, handler := range r.handlers {
+		out[name] = handler
+	}
+	return out
+}
+
+// RegisterSQLProvider 注册或替换全局 SQL Provider。
+func (r *Registry) RegisterSQLProvider(name string, provider SQLProvider) error {
+	if r == nil {
+		return fmt.Errorf("goark-orm: registry is nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("goark-orm: SQL provider name is required")
+	}
+	if provider == nil {
+		return fmt.Errorf("goark-orm: SQL provider %q is nil", name)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.providers[name] = provider
+	return nil
+}
+
+// SQLProvider 按名称读取全局 SQL Provider。
+func (r *Registry) SQLProvider(name string) (SQLProvider, bool) {
+	if r == nil {
+		return nil, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	provider, ok := r.providers[strings.TrimSpace(name)]
+	return provider, ok
+}
+
+// Cache 按 mapper namespace 读取二级缓存，自动解析 cache-ref。
+func (r *Registry) Cache(namespace string) (Cache, string, bool) {
+	if r == nil {
+		return nil, "", false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	resolved, ok := r.resolveCacheNamespaceLocked(namespace)
+	if !ok {
+		return nil, "", false
+	}
+	cache, ok := r.caches[resolved]
+	return cache, resolved, ok
+}
+
+func (r *Registry) resolveCacheNamespaceLocked(namespace string) (string, bool) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return "", false
+	}
+	seen := make(map[string]struct{})
+	current := namespace
+	for {
+		if _, ok := seen[current]; ok {
+			return "", false
+		}
+		seen[current] = struct{}{}
+		ref := strings.TrimSpace(r.cacheRefs[current])
+		if ref == "" {
+			if _, ok := r.caches[current]; ok {
+				return current, true
+			}
+			return "", false
+		}
+		current = ref
+	}
 }
 
 // Entity 按实体类型名读取元数据。
@@ -149,13 +293,69 @@ func copyEntityMeta(meta EntityMeta) EntityMeta {
 func copyMapperMeta(meta MapperMeta) MapperMeta {
 	meta.ResultMaps = append([]ResultMapMeta(nil), meta.ResultMaps...)
 	for index := range meta.ResultMaps {
-		meta.ResultMaps[index].Fields = append([]ResultFieldMeta(nil), meta.ResultMaps[index].Fields...)
+		meta.ResultMaps[index] = copyResultMapMeta(meta.ResultMaps[index])
 	}
 	meta.Statements = append([]StatementMeta(nil), meta.Statements...)
 	for index := range meta.Statements {
+		meta.Statements[index].Parameters = append([]string(nil), meta.Statements[index].Parameters...)
 		meta.Statements[index].DynamicSQL = copyDynamicSQLNodes(meta.Statements[index].DynamicSQL)
+		meta.Statements[index].SelectKey.DynamicSQL = copyDynamicSQLNodes(meta.Statements[index].SelectKey.DynamicSQL)
 	}
 	return meta
+}
+
+func copyResultMapMeta(meta ResultMapMeta) ResultMapMeta {
+	if meta.AutoMapping != nil {
+		value := *meta.AutoMapping
+		meta.AutoMapping = &value
+	}
+	meta.Constructor.Args = append([]ResultArgMeta(nil), meta.Constructor.Args...)
+	meta.Fields = append([]ResultFieldMeta(nil), meta.Fields...)
+	meta.Associations = copyResultAssociationMetas(meta.Associations)
+	meta.Collections = copyResultCollectionMetas(meta.Collections)
+	meta.Discriminator.Cases = copyResultDiscriminatorCaseMetas(meta.Discriminator.Cases)
+	return meta
+}
+
+func copyResultDiscriminatorCaseMetas(items []ResultDiscriminatorCaseMeta) []ResultDiscriminatorCaseMeta {
+	if len(items) == 0 {
+		return nil
+	}
+	out := append([]ResultDiscriminatorCaseMeta(nil), items...)
+	for index := range out {
+		out[index].Fields = append([]ResultFieldMeta(nil), out[index].Fields...)
+		out[index].Associations = copyResultAssociationMetas(out[index].Associations)
+		out[index].Collections = copyResultCollectionMetas(out[index].Collections)
+	}
+	return out
+}
+
+func copyResultAssociationMetas(items []ResultAssociationMeta) []ResultAssociationMeta {
+	if len(items) == 0 {
+		return nil
+	}
+	out := append([]ResultAssociationMeta(nil), items...)
+	for index := range out {
+		out[index].NotNullColumns = append([]string(nil), out[index].NotNullColumns...)
+		out[index].Fields = append([]ResultFieldMeta(nil), out[index].Fields...)
+		out[index].Associations = copyResultAssociationMetas(out[index].Associations)
+		out[index].Collections = copyResultCollectionMetas(out[index].Collections)
+	}
+	return out
+}
+
+func copyResultCollectionMetas(items []ResultCollectionMeta) []ResultCollectionMeta {
+	if len(items) == 0 {
+		return nil
+	}
+	out := append([]ResultCollectionMeta(nil), items...)
+	for index := range out {
+		out[index].NotNullColumns = append([]string(nil), out[index].NotNullColumns...)
+		out[index].Fields = append([]ResultFieldMeta(nil), out[index].Fields...)
+		out[index].Associations = copyResultAssociationMetas(out[index].Associations)
+		out[index].Collections = copyResultCollectionMetas(out[index].Collections)
+	}
+	return out
 }
 
 func copyDynamicSQLNodes(nodes []DynamicSQLNode) []DynamicSQLNode {

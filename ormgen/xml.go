@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"goark.dev/orm"
@@ -15,6 +16,7 @@ import (
 
 type xmlMapperModel struct {
 	Namespace  string
+	Cache      orm.CacheMeta
 	ResultMaps []xmlResultMapModel
 	Selects    []xmlStatementModel
 	Inserts    []xmlStatementModel
@@ -24,10 +26,28 @@ type xmlMapperModel struct {
 }
 
 type xmlResultMapModel struct {
-	ID       string                `xml:"id,attr"`
-	TypeName string                `xml:"type,attr"`
-	IDs      []xmlResultFieldModel `xml:"id"`
-	Results  []xmlResultFieldModel `xml:"result"`
+	ID            string
+	TypeName      string
+	Extends       string
+	AutoMapping   *bool
+	Constructor   xmlResultConstructorModel
+	IDs           []xmlResultFieldModel
+	Results       []xmlResultFieldModel
+	Associations  []xmlResultObjectModel
+	Collections   []xmlResultObjectModel
+	Discriminator xmlDiscriminatorModel
+}
+
+type xmlResultConstructorModel struct {
+	Args []xmlResultArgModel
+}
+
+type xmlResultArgModel struct {
+	Name        string
+	Property    string
+	Column      string
+	TypeHandler string
+	ID          bool
 }
 
 type xmlResultFieldModel struct {
@@ -36,13 +56,48 @@ type xmlResultFieldModel struct {
 	TypeHandler string `xml:"typeHandler,attr"`
 }
 
+type xmlResultObjectModel struct {
+	Property       string
+	TypeName       string
+	Column         string
+	ColumnPrefix   string
+	NotNullColumns []string
+	Select         string
+	FetchType      string
+	IDs            []xmlResultFieldModel
+	Results        []xmlResultFieldModel
+	Associations   []xmlResultObjectModel
+	Collections    []xmlResultObjectModel
+}
+
+type xmlDiscriminatorModel struct {
+	Column      string
+	TypeName    string
+	TypeHandler string
+	Cases       []xmlDiscriminatorCaseModel
+}
+
+type xmlDiscriminatorCaseModel struct {
+	Value        string
+	ResultMap    string
+	ResultType   string
+	IDs          []xmlResultFieldModel
+	Results      []xmlResultFieldModel
+	Associations []xmlResultObjectModel
+	Collections  []xmlResultObjectModel
+}
+
 type xmlStatementModel struct {
 	ID               string
 	ResultMap        string
 	ResultType       string
 	ParameterType    string
+	DatabaseID       string
 	UseGeneratedKeys bool
 	KeyProperty      string
+	SelectKey        orm.SelectKeyMeta
+	UseCache         orm.StatementCachePolicy
+	FlushCache       orm.StatementCachePolicy
 	SQL              string
 	DynamicSQL       []orm.DynamicSQLNode
 }
@@ -64,7 +119,9 @@ func parseXMLMapper(path string) (xmlMapperModel, error) {
 		return xmlMapperModel{}, err
 	}
 	for _, statement := range mapper.allStatements() {
-		for _, text := range append([]string{statement.SQL}, dynamicSQLTexts(statement.DynamicSQL)...) {
+		texts := append([]string{statement.SQL, statement.SelectKey.SQL}, dynamicSQLTexts(statement.DynamicSQL)...)
+		texts = append(texts, dynamicSQLTexts(statement.SelectKey.DynamicSQL)...)
+		for _, text := range texts {
 			if strings.Contains(text, "${") {
 				return xmlMapperModel{}, fmt.Errorf("goark-orm: XML mapper %s statement %s uses forbidden ${}", path, statement.ID)
 			}
@@ -107,6 +164,30 @@ func parseXMLMapperElement(decoder *xml.Decoder, start xml.StartElement) (xmlMap
 		switch item := token.(type) {
 		case xml.StartElement:
 			switch item.Name.Local {
+			case "cache":
+				if mapper.Cache.Enabled {
+					return xmlMapperModel{}, fmt.Errorf("goark-orm: XML mapper %s declares multiple cache elements", mapper.Namespace)
+				}
+				cache, err := parseXMLCache(item)
+				if err != nil {
+					return xmlMapperModel{}, err
+				}
+				if err := skipElement(decoder, item.Name.Local); err != nil {
+					return xmlMapperModel{}, err
+				}
+				mapper.Cache = cache
+			case "cache-ref":
+				if mapper.Cache.Enabled {
+					return xmlMapperModel{}, fmt.Errorf("goark-orm: XML mapper %s declares multiple cache elements", mapper.Namespace)
+				}
+				cache, err := parseXMLCacheRef(item)
+				if err != nil {
+					return xmlMapperModel{}, err
+				}
+				if err := skipElement(decoder, item.Name.Local); err != nil {
+					return xmlMapperModel{}, err
+				}
+				mapper.Cache = cache
 			case "resultMap":
 				resultMap, err := parseXMLResultMap(decoder, item)
 				if err != nil {
@@ -149,10 +230,56 @@ func parseXMLMapperElement(decoder *xml.Decoder, start xml.StartElement) (xmlMap
 	}
 }
 
+func parseXMLCache(start xml.StartElement) (orm.CacheMeta, error) {
+	size, err := parseOptionalXMLInt(start, "size")
+	if err != nil {
+		return orm.CacheMeta{}, err
+	}
+	flushInterval, err := parseOptionalXMLInt64(start, "flushInterval")
+	if err != nil {
+		return orm.CacheMeta{}, err
+	}
+	readOnly, _, err := parseOptionalXMLBool(start, "readOnly")
+	if err != nil {
+		return orm.CacheMeta{}, err
+	}
+	blocking, _, err := parseOptionalXMLBool(start, "blocking")
+	if err != nil {
+		return orm.CacheMeta{}, err
+	}
+	return orm.CacheMeta{
+		Enabled:             true,
+		Eviction:            attrValue(start, "eviction"),
+		Size:                size,
+		FlushIntervalMillis: flushInterval,
+		ReadOnly:            readOnly,
+		Blocking:            blocking,
+	}, nil
+}
+
+func parseXMLCacheRef(start xml.StartElement) (orm.CacheMeta, error) {
+	namespace := strings.TrimSpace(attrValue(start, "namespace"))
+	if namespace == "" {
+		return orm.CacheMeta{}, fmt.Errorf("goark-orm: cache-ref missing namespace")
+	}
+	return orm.CacheMeta{
+		Enabled:      true,
+		RefNamespace: namespace,
+	}, nil
+}
+
 func parseXMLResultMap(decoder *xml.Decoder, start xml.StartElement) (xmlResultMapModel, error) {
+	autoMapping, hasAutoMapping, err := parseOptionalXMLBool(start, "autoMapping")
+	if err != nil {
+		return xmlResultMapModel{}, err
+	}
 	resultMap := xmlResultMapModel{
 		ID:       attrValue(start, "id"),
 		TypeName: attrValue(start, "type"),
+		Extends:  attrValue(start, "extends"),
+	}
+	if hasAutoMapping {
+		resultMap.AutoMapping = &autoMapping
 	}
 	for {
 		token, err := decoder.Token()
@@ -162,6 +289,12 @@ func parseXMLResultMap(decoder *xml.Decoder, start xml.StartElement) (xmlResultM
 		switch item := token.(type) {
 		case xml.StartElement:
 			switch item.Name.Local {
+			case "constructor":
+				constructor, err := parseXMLResultConstructor(decoder, item)
+				if err != nil {
+					return xmlResultMapModel{}, err
+				}
+				resultMap.Constructor = constructor
 			case "id":
 				resultMap.IDs = append(resultMap.IDs, parseXMLResultField(item))
 				if err := skipElement(decoder, item.Name.Local); err != nil {
@@ -172,6 +305,24 @@ func parseXMLResultMap(decoder *xml.Decoder, start xml.StartElement) (xmlResultM
 				if err := skipElement(decoder, item.Name.Local); err != nil {
 					return xmlResultMapModel{}, err
 				}
+			case "association":
+				association, err := parseXMLResultObject(decoder, item, false)
+				if err != nil {
+					return xmlResultMapModel{}, err
+				}
+				resultMap.Associations = append(resultMap.Associations, association)
+			case "collection":
+				collection, err := parseXMLResultObject(decoder, item, true)
+				if err != nil {
+					return xmlResultMapModel{}, err
+				}
+				resultMap.Collections = append(resultMap.Collections, collection)
+			case "discriminator":
+				discriminator, err := parseXMLDiscriminator(decoder, item)
+				if err != nil {
+					return xmlResultMapModel{}, err
+				}
+				resultMap.Discriminator = discriminator
 			default:
 				return xmlResultMapModel{}, fmt.Errorf("unsupported resultMap element <%s>", item.Name.Local)
 			}
@@ -180,6 +331,180 @@ func parseXMLResultMap(decoder *xml.Decoder, start xml.StartElement) (xmlResultM
 				return resultMap, nil
 			}
 		}
+	}
+}
+
+func parseXMLResultConstructor(decoder *xml.Decoder, start xml.StartElement) (xmlResultConstructorModel, error) {
+	constructor := xmlResultConstructorModel{}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return xmlResultConstructorModel{}, err
+		}
+		switch item := token.(type) {
+		case xml.StartElement:
+			switch item.Name.Local {
+			case "idArg":
+				constructor.Args = append(constructor.Args, parseXMLResultArg(item, true))
+				if err := skipElement(decoder, item.Name.Local); err != nil {
+					return xmlResultConstructorModel{}, err
+				}
+			case "arg":
+				constructor.Args = append(constructor.Args, parseXMLResultArg(item, false))
+				if err := skipElement(decoder, item.Name.Local); err != nil {
+					return xmlResultConstructorModel{}, err
+				}
+			default:
+				return xmlResultConstructorModel{}, fmt.Errorf("unsupported constructor element <%s>", item.Name.Local)
+			}
+		case xml.EndElement:
+			if item.Name.Local == start.Name.Local {
+				return constructor, nil
+			}
+		}
+	}
+}
+
+func parseXMLDiscriminator(decoder *xml.Decoder, start xml.StartElement) (xmlDiscriminatorModel, error) {
+	discriminator := xmlDiscriminatorModel{
+		Column:      attrValue(start, "column"),
+		TypeName:    firstNonEmpty(attrValue(start, "javaType"), attrValue(start, "type")),
+		TypeHandler: attrValue(start, "typeHandler"),
+	}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return xmlDiscriminatorModel{}, err
+		}
+		switch item := token.(type) {
+		case xml.StartElement:
+			switch item.Name.Local {
+			case "case":
+				item, err := parseXMLDiscriminatorCase(decoder, item)
+				if err != nil {
+					return xmlDiscriminatorModel{}, err
+				}
+				discriminator.Cases = append(discriminator.Cases, item)
+			default:
+				return xmlDiscriminatorModel{}, fmt.Errorf("unsupported discriminator element <%s>", item.Name.Local)
+			}
+		case xml.EndElement:
+			if item.Name.Local == start.Name.Local {
+				return discriminator, nil
+			}
+		}
+	}
+}
+
+func parseXMLDiscriminatorCase(decoder *xml.Decoder, start xml.StartElement) (xmlDiscriminatorCaseModel, error) {
+	item := xmlDiscriminatorCaseModel{
+		Value:      attrValue(start, "value"),
+		ResultMap:  attrValue(start, "resultMap"),
+		ResultType: firstNonEmpty(attrValue(start, "resultType"), attrValue(start, "type")),
+	}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return xmlDiscriminatorCaseModel{}, err
+		}
+		switch child := token.(type) {
+		case xml.StartElement:
+			switch child.Name.Local {
+			case "id":
+				item.IDs = append(item.IDs, parseXMLResultField(child))
+				if err := skipElement(decoder, child.Name.Local); err != nil {
+					return xmlDiscriminatorCaseModel{}, err
+				}
+			case "result":
+				item.Results = append(item.Results, parseXMLResultField(child))
+				if err := skipElement(decoder, child.Name.Local); err != nil {
+					return xmlDiscriminatorCaseModel{}, err
+				}
+			case "association":
+				association, err := parseXMLResultObject(decoder, child, false)
+				if err != nil {
+					return xmlDiscriminatorCaseModel{}, err
+				}
+				item.Associations = append(item.Associations, association)
+			case "collection":
+				collection, err := parseXMLResultObject(decoder, child, true)
+				if err != nil {
+					return xmlDiscriminatorCaseModel{}, err
+				}
+				item.Collections = append(item.Collections, collection)
+			default:
+				return xmlDiscriminatorCaseModel{}, fmt.Errorf("unsupported discriminator case element <%s>", child.Name.Local)
+			}
+		case xml.EndElement:
+			if child.Name.Local == start.Name.Local {
+				return item, nil
+			}
+		}
+	}
+}
+
+func parseXMLResultObject(decoder *xml.Decoder, start xml.StartElement, collection bool) (xmlResultObjectModel, error) {
+	typeName := firstNonEmpty(attrValue(start, "type"), attrValue(start, "javaType"))
+	if collection {
+		typeName = firstNonEmpty(attrValue(start, "ofType"), typeName)
+	}
+	object := xmlResultObjectModel{
+		Property:       attrValue(start, "property"),
+		TypeName:       typeName,
+		Column:         attrValue(start, "column"),
+		ColumnPrefix:   attrValue(start, "columnPrefix"),
+		NotNullColumns: splitXMLColumnList(attrValue(start, "notNullColumn")),
+		Select:         attrValue(start, "select"),
+		FetchType:      attrValue(start, "fetchType"),
+	}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return xmlResultObjectModel{}, err
+		}
+		switch item := token.(type) {
+		case xml.StartElement:
+			switch item.Name.Local {
+			case "id":
+				object.IDs = append(object.IDs, parseXMLResultField(item))
+				if err := skipElement(decoder, item.Name.Local); err != nil {
+					return xmlResultObjectModel{}, err
+				}
+			case "result":
+				object.Results = append(object.Results, parseXMLResultField(item))
+				if err := skipElement(decoder, item.Name.Local); err != nil {
+					return xmlResultObjectModel{}, err
+				}
+			case "association":
+				association, err := parseXMLResultObject(decoder, item, false)
+				if err != nil {
+					return xmlResultObjectModel{}, err
+				}
+				object.Associations = append(object.Associations, association)
+			case "collection":
+				child, err := parseXMLResultObject(decoder, item, true)
+				if err != nil {
+					return xmlResultObjectModel{}, err
+				}
+				object.Collections = append(object.Collections, child)
+			default:
+				return xmlResultObjectModel{}, fmt.Errorf("unsupported resultMap nested element <%s>", item.Name.Local)
+			}
+		case xml.EndElement:
+			if item.Name.Local == start.Name.Local {
+				return object, nil
+			}
+		}
+	}
+}
+
+func parseXMLResultArg(start xml.StartElement, id bool) xmlResultArgModel {
+	return xmlResultArgModel{
+		Name:        attrValue(start, "name"),
+		Property:    attrValue(start, "property"),
+		Column:      attrValue(start, "column"),
+		TypeHandler: attrValue(start, "typeHandler"),
+		ID:          id,
 	}
 }
 
@@ -192,7 +517,15 @@ func parseXMLResultField(start xml.StartElement) xmlResultFieldModel {
 }
 
 func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStatementModel, error) {
-	nodes, err := parseDynamicSQLNodes(decoder, start.Name.Local)
+	nodes, selectKey, err := parseXMLStatementBody(decoder, start.Name.Local)
+	if err != nil {
+		return xmlStatementModel{}, err
+	}
+	useCache, err := parseXMLStatementCachePolicy(start, "useCache")
+	if err != nil {
+		return xmlStatementModel{}, err
+	}
+	flushCache, err := parseXMLStatementCachePolicy(start, "flushCache")
 	if err != nil {
 		return xmlStatementModel{}, err
 	}
@@ -201,8 +534,12 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 		ResultMap:        attrValue(start, "resultMap"),
 		ResultType:       attrValue(start, "resultType"),
 		ParameterType:    attrValue(start, "parameterType"),
+		DatabaseID:       attrValue(start, "databaseId"),
 		UseGeneratedKeys: attrValue(start, "useGeneratedKeys") == "true",
 		KeyProperty:      attrValue(start, "keyProperty"),
+		SelectKey:        selectKey,
+		UseCache:         useCache,
+		FlushCache:       flushCache,
 		DynamicSQL:       nodes,
 	}
 	if isStaticDynamicSQL(nodes) {
@@ -210,6 +547,112 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 		statement.DynamicSQL = nil
 	}
 	return statement, nil
+}
+
+func parseAnnotationSQL(raw string) (string, []orm.DynamicSQLNode, error) {
+	sql := strings.TrimSpace(raw)
+	if sql == "" || !strings.HasPrefix(strings.ToLower(sql), "<script") {
+		return sql, nil, nil
+	}
+	decoder := xml.NewDecoder(strings.NewReader(sql))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				return "", nil, fmt.Errorf("goark-orm: annotation SQL <script> root is missing")
+			}
+			return "", nil, err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if start.Name.Local != "script" {
+			return "", nil, fmt.Errorf("goark-orm: annotation SQL root must be <script>")
+		}
+		nodes, err := parseDynamicSQLNodes(decoder, start.Name.Local)
+		if err != nil {
+			return "", nil, err
+		}
+		if isStaticDynamicSQL(nodes) {
+			return normalizeXMLSQL(nodes[0].Text), nil, nil
+		}
+		return "", nodes, nil
+	}
+}
+
+func parseXMLStatementBody(decoder *xml.Decoder, end string) ([]orm.DynamicSQLNode, orm.SelectKeyMeta, error) {
+	nodes := make([]orm.DynamicSQLNode, 0)
+	var selectKey orm.SelectKeyMeta
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, orm.SelectKeyMeta{}, err
+		}
+		switch item := token.(type) {
+		case xml.CharData:
+			text := string(item)
+			if strings.TrimSpace(text) != "" {
+				nodes = append(nodes, orm.DynamicSQLNode{Kind: orm.DynamicSQLNodeText, Text: text})
+			}
+		case xml.StartElement:
+			if item.Name.Local == "selectKey" {
+				if selectKey.Enabled {
+					return nil, orm.SelectKeyMeta{}, fmt.Errorf("goark-orm: XML <%s> declares multiple selectKey elements", end)
+				}
+				parsed, err := parseXMLSelectKey(decoder, item)
+				if err != nil {
+					return nil, orm.SelectKeyMeta{}, err
+				}
+				selectKey = parsed
+				continue
+			}
+			node, err := parseDynamicSQLNode(decoder, item)
+			if err != nil {
+				return nil, orm.SelectKeyMeta{}, err
+			}
+			nodes = append(nodes, node)
+		case xml.EndElement:
+			if item.Name.Local == end {
+				return mergeAdjacentTextNodes(nodes), selectKey, nil
+			}
+		}
+	}
+}
+
+func parseXMLSelectKey(decoder *xml.Decoder, start xml.StartElement) (orm.SelectKeyMeta, error) {
+	nodes, err := parseDynamicSQLNodes(decoder, start.Name.Local)
+	if err != nil {
+		return orm.SelectKeyMeta{}, err
+	}
+	order, err := parseXMLSelectKeyOrder(start)
+	if err != nil {
+		return orm.SelectKeyMeta{}, err
+	}
+	selectKey := orm.SelectKeyMeta{
+		Enabled:     true,
+		KeyProperty: attrValue(start, "keyProperty"),
+		ResultType:  attrValue(start, "resultType"),
+		Order:       order,
+		DynamicSQL:  nodes,
+	}
+	if isStaticDynamicSQL(nodes) {
+		selectKey.SQL = normalizeXMLSQL(nodes[0].Text)
+		selectKey.DynamicSQL = nil
+	}
+	return selectKey, nil
+}
+
+func parseXMLSelectKeyOrder(start xml.StartElement) (orm.SelectKeyOrder, error) {
+	value := strings.ToUpper(strings.TrimSpace(attrValue(start, "order")))
+	switch value {
+	case "", string(orm.SelectKeyOrderAfter):
+		return orm.SelectKeyOrderAfter, nil
+	case string(orm.SelectKeyOrderBefore):
+		return orm.SelectKeyOrderBefore, nil
+	default:
+		return "", fmt.Errorf("goark-orm: XML <selectKey> attribute order requires BEFORE or AFTER")
+	}
 }
 
 func parseDynamicSQLNodes(decoder *xml.Decoder, end string) ([]orm.DynamicSQLNode, error) {
@@ -281,6 +724,15 @@ func parseDynamicSQLNode(decoder *xml.Decoder, start xml.StartElement) (orm.Dyna
 			Kind:  orm.DynamicSQLNodeInclude,
 			RefID: firstNonEmpty(attrValue(start, "refid"), attrValue(start, "refId")),
 		}, nil
+	case "bind":
+		if err := skipElement(decoder, start.Name.Local); err != nil {
+			return orm.DynamicSQLNode{}, err
+		}
+		return orm.DynamicSQLNode{
+			Kind:  orm.DynamicSQLNodeBind,
+			Name:  attrValue(start, "name"),
+			Value: attrValue(start, "value"),
+		}, nil
 	default:
 		return orm.DynamicSQLNode{}, fmt.Errorf("unsupported dynamic SQL element <%s>", start.Name.Local)
 	}
@@ -326,6 +778,56 @@ func attrValue(start xml.StartElement, name string) string {
 	return ""
 }
 
+func parseOptionalXMLInt(start xml.StartElement, name string) (int, error) {
+	value := attrValue(start, name)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("goark-orm: XML <%s> attribute %s requires integer value", start.Name.Local, name)
+	}
+	return parsed, nil
+}
+
+func parseOptionalXMLInt64(start xml.StartElement, name string) (int64, error) {
+	value := attrValue(start, name)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("goark-orm: XML <%s> attribute %s requires integer value", start.Name.Local, name)
+	}
+	return parsed, nil
+}
+
+func parseOptionalXMLBool(start xml.StartElement, name string) (bool, bool, error) {
+	value := attrValue(start, name)
+	if value == "" {
+		return false, false, nil
+	}
+	switch value {
+	case "true":
+		return true, true, nil
+	case "false":
+		return false, true, nil
+	default:
+		return false, true, fmt.Errorf("goark-orm: XML <%s> attribute %s requires boolean value", start.Name.Local, name)
+	}
+}
+
+func parseXMLStatementCachePolicy(start xml.StartElement, name string) (orm.StatementCachePolicy, error) {
+	value, ok, err := parseOptionalXMLBool(start, name)
+	if err != nil || !ok {
+		return orm.StatementCacheDefault, err
+	}
+	if value {
+		return orm.StatementCacheEnabled, nil
+	}
+	return orm.StatementCacheDisabled, nil
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
@@ -368,9 +870,17 @@ func expandXMLIncludes(mapper *xmlMapperModel) error {
 		if err != nil {
 			return err
 		}
+		mapper.Inserts[index].SelectKey.DynamicSQL, err = expandDynamicIncludes(mapper.Inserts[index].SelectKey.DynamicSQL, mapper.Fragments, nil)
+		if err != nil {
+			return err
+		}
 	}
 	for index := range mapper.Updates {
 		mapper.Updates[index].DynamicSQL, err = expandDynamicIncludes(mapper.Updates[index].DynamicSQL, mapper.Fragments, nil)
+		if err != nil {
+			return err
+		}
+		mapper.Updates[index].SelectKey.DynamicSQL, err = expandDynamicIncludes(mapper.Updates[index].SelectKey.DynamicSQL, mapper.Fragments, nil)
 		if err != nil {
 			return err
 		}
@@ -451,42 +961,235 @@ func (m xmlMapperModel) allStatements() []xmlStatementModel {
 
 func xmlResultMaps(mapper xmlMapperModel) ([]orm.ResultMapMeta, error) {
 	resultMaps := make([]orm.ResultMapMeta, 0, len(mapper.ResultMaps))
+	models := make(map[string]xmlResultMapModel, len(mapper.ResultMaps))
 	for _, item := range mapper.ResultMaps {
 		id := strings.TrimSpace(item.ID)
 		if id == "" {
 			return nil, fmt.Errorf("goark-orm: XML resultMap missing id")
 		}
-		resultMap := orm.ResultMapMeta{
-			ID:       id,
-			TypeName: strings.TrimSpace(item.TypeName),
+		if _, exists := models[id]; exists {
+			return nil, fmt.Errorf("goark-orm: duplicate XML resultMap %q", id)
 		}
-		for _, field := range item.IDs {
-			resultMap.Fields = append(resultMap.Fields, orm.ResultFieldMeta{
-				Property:    strings.TrimSpace(field.Property),
-				Column:      strings.TrimSpace(field.Column),
-				ID:          true,
-				TypeHandler: strings.TrimSpace(field.TypeHandler),
-			})
-		}
-		for _, field := range item.Results {
-			resultMap.Fields = append(resultMap.Fields, orm.ResultFieldMeta{
-				Property:    strings.TrimSpace(field.Property),
-				Column:      strings.TrimSpace(field.Column),
-				TypeHandler: strings.TrimSpace(field.TypeHandler),
-			})
+		item.ID = id
+		models[id] = item
+	}
+	resolved := make(map[string]orm.ResultMapMeta, len(models))
+	for _, item := range mapper.ResultMaps {
+		resultMap, err := resolveXMLResultMap(mapper.Namespace, item.ID, models, resolved, nil)
+		if err != nil {
+			return nil, err
 		}
 		resultMaps = append(resultMaps, resultMap)
 	}
 	return resultMaps, nil
 }
 
-func xmlStatements(namespace string, mapper xmlMapperModel) ([]StatementModel, error) {
+func resolveXMLResultMap(namespace string, id string, models map[string]xmlResultMapModel, resolved map[string]orm.ResultMapMeta, stack []string) (orm.ResultMapMeta, error) {
+	id = localXMLResultMapID(namespace, id)
+	if resultMap, ok := resolved[id]; ok {
+		return resultMap, nil
+	}
+	if containsString(stack, id) {
+		return orm.ResultMapMeta{}, fmt.Errorf("goark-orm: resultMap extends cycle detected: %s", strings.Join(append(stack, id), " -> "))
+	}
+	item, ok := models[id]
+	if !ok {
+		return orm.ResultMapMeta{}, fmt.Errorf("goark-orm: resultMap %q not found", id)
+	}
+	resultMap := xmlResultMapMeta(item)
+	if parentID := strings.TrimSpace(item.Extends); parentID != "" {
+		parent, err := resolveXMLResultMap(namespace, parentID, models, resolved, append(stack, id))
+		if err != nil {
+			return orm.ResultMapMeta{}, err
+		}
+		resultMap = mergeResultMaps(parent, resultMap)
+	}
+	resolved[id] = resultMap
+	return resultMap, nil
+}
+
+func xmlResultMapMeta(item xmlResultMapModel) orm.ResultMapMeta {
+	resultMap := orm.ResultMapMeta{
+		ID:          strings.TrimSpace(item.ID),
+		TypeName:    strings.TrimSpace(item.TypeName),
+		Extends:     strings.TrimSpace(item.Extends),
+		AutoMapping: item.AutoMapping,
+	}
+	resultMap.Constructor = xmlResultConstructor(item.Constructor)
+	resultMap.Fields = xmlResultFieldMetas(item.IDs, true)
+	resultMap.Fields = append(resultMap.Fields, xmlResultFieldMetas(item.Results, false)...)
+	for _, association := range item.Associations {
+		resultMap.Associations = append(resultMap.Associations, xmlResultAssociation(association))
+	}
+	for _, collection := range item.Collections {
+		resultMap.Collections = append(resultMap.Collections, xmlResultCollection(collection))
+	}
+	resultMap.Discriminator = xmlResultDiscriminator(item.Discriminator)
+	return resultMap
+}
+
+func mergeResultMaps(parent orm.ResultMapMeta, child orm.ResultMapMeta) orm.ResultMapMeta {
+	out := child
+	if out.TypeName == "" {
+		out.TypeName = parent.TypeName
+	}
+	if out.AutoMapping == nil {
+		out.AutoMapping = parent.AutoMapping
+	}
+	out.Constructor.Args = append(append([]orm.ResultArgMeta(nil), parent.Constructor.Args...), child.Constructor.Args...)
+	out.Fields = append(append([]orm.ResultFieldMeta(nil), parent.Fields...), child.Fields...)
+	out.Associations = append(append([]orm.ResultAssociationMeta(nil), parent.Associations...), child.Associations...)
+	out.Collections = append(append([]orm.ResultCollectionMeta(nil), parent.Collections...), child.Collections...)
+	if len(out.Discriminator.Cases) == 0 && out.Discriminator.Column == "" {
+		out.Discriminator = parent.Discriminator
+	}
+	return out
+}
+
+func localXMLResultMapID(namespace string, id string) string {
+	id = strings.TrimSpace(id)
+	namespace = strings.TrimSpace(namespace)
+	prefix := namespace + "."
+	if namespace != "" && strings.HasPrefix(id, prefix) {
+		return strings.TrimPrefix(id, prefix)
+	}
+	return id
+}
+
+func xmlResultAssociation(item xmlResultObjectModel) orm.ResultAssociationMeta {
+	out := orm.ResultAssociationMeta{
+		Property:       strings.TrimSpace(item.Property),
+		TypeName:       strings.TrimSpace(item.TypeName),
+		Column:         strings.TrimSpace(item.Column),
+		ColumnPrefix:   strings.TrimSpace(item.ColumnPrefix),
+		NotNullColumns: trimmedStrings(item.NotNullColumns),
+		Select:         strings.TrimSpace(item.Select),
+		FetchType:      strings.TrimSpace(item.FetchType),
+	}
+	out.Fields = xmlResultFields(item)
+	for _, association := range item.Associations {
+		out.Associations = append(out.Associations, xmlResultAssociation(association))
+	}
+	for _, collection := range item.Collections {
+		out.Collections = append(out.Collections, xmlResultCollection(collection))
+	}
+	return out
+}
+
+func xmlResultCollection(item xmlResultObjectModel) orm.ResultCollectionMeta {
+	out := orm.ResultCollectionMeta{
+		Property:       strings.TrimSpace(item.Property),
+		TypeName:       strings.TrimSpace(item.TypeName),
+		Column:         strings.TrimSpace(item.Column),
+		ColumnPrefix:   strings.TrimSpace(item.ColumnPrefix),
+		NotNullColumns: trimmedStrings(item.NotNullColumns),
+		Select:         strings.TrimSpace(item.Select),
+		FetchType:      strings.TrimSpace(item.FetchType),
+	}
+	out.Fields = xmlResultFields(item)
+	for _, association := range item.Associations {
+		out.Associations = append(out.Associations, xmlResultAssociation(association))
+	}
+	for _, collection := range item.Collections {
+		out.Collections = append(out.Collections, xmlResultCollection(collection))
+	}
+	return out
+}
+
+func xmlResultFields(item xmlResultObjectModel) []orm.ResultFieldMeta {
+	fields := xmlResultFieldMetas(item.IDs, true)
+	fields = append(fields, xmlResultFieldMetas(item.Results, false)...)
+	return fields
+}
+
+func xmlResultConstructor(item xmlResultConstructorModel) orm.ResultConstructorMeta {
+	return orm.ResultConstructorMeta{Args: xmlResultArgMetas(item.Args)}
+}
+
+func xmlResultArgMetas(items []xmlResultArgModel) []orm.ResultArgMeta {
+	args := make([]orm.ResultArgMeta, 0, len(items))
+	for _, arg := range items {
+		args = append(args, orm.ResultArgMeta{
+			Name:        strings.TrimSpace(arg.Name),
+			Property:    strings.TrimSpace(arg.Property),
+			Column:      strings.TrimSpace(arg.Column),
+			ID:          arg.ID,
+			TypeHandler: strings.TrimSpace(arg.TypeHandler),
+		})
+	}
+	return args
+}
+
+func xmlResultFieldMetas(items []xmlResultFieldModel, id bool) []orm.ResultFieldMeta {
+	fields := make([]orm.ResultFieldMeta, 0, len(items))
+	for _, field := range items {
+		fields = append(fields, orm.ResultFieldMeta{
+			Property:    strings.TrimSpace(field.Property),
+			Column:      strings.TrimSpace(field.Column),
+			ID:          id,
+			TypeHandler: strings.TrimSpace(field.TypeHandler),
+		})
+	}
+	return fields
+}
+
+func splitXMLColumnList(value string) []string {
+	parts := strings.Split(value, ",")
+	return trimmedStrings(parts)
+}
+
+func trimmedStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func xmlResultDiscriminator(item xmlDiscriminatorModel) orm.ResultDiscriminatorMeta {
+	out := orm.ResultDiscriminatorMeta{
+		Column:      strings.TrimSpace(item.Column),
+		TypeName:    strings.TrimSpace(item.TypeName),
+		TypeHandler: strings.TrimSpace(item.TypeHandler),
+	}
+	for _, item := range item.Cases {
+		out.Cases = append(out.Cases, xmlResultDiscriminatorCase(item))
+	}
+	return out
+}
+
+func xmlResultDiscriminatorCase(item xmlDiscriminatorCaseModel) orm.ResultDiscriminatorCaseMeta {
+	out := orm.ResultDiscriminatorCaseMeta{
+		Value:      strings.TrimSpace(item.Value),
+		ResultMap:  strings.TrimSpace(item.ResultMap),
+		ResultType: strings.TrimSpace(item.ResultType),
+	}
+	out.Fields = xmlResultFieldMetas(item.IDs, true)
+	out.Fields = append(out.Fields, xmlResultFieldMetas(item.Results, false)...)
+	for _, association := range item.Associations {
+		out.Associations = append(out.Associations, xmlResultAssociation(association))
+	}
+	for _, collection := range item.Collections {
+		out.Collections = append(out.Collections, xmlResultCollection(collection))
+	}
+	return out
+}
+
+func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) ([]StatementModel, error) {
+	databaseID = strings.TrimSpace(databaseID)
 	statements := make([]StatementModel, 0)
 	appendStatements := func(command orm.StatementCommand, source []xmlStatementModel) error {
-		for _, item := range source {
+		selected, err := selectXMLStatementsForDatabase(command, source, databaseID)
+		if err != nil {
+			return err
+		}
+		for _, item := range selected {
 			id := strings.TrimSpace(item.ID)
-			if id == "" {
-				return fmt.Errorf("goark-orm: XML %s statement missing id", command)
+			if strings.TrimSpace(item.ResultMap) != "" && strings.TrimSpace(item.ResultType) != "" {
+				return fmt.Errorf("goark-orm: XML statement %s declares both resultMap and resultType", id)
 			}
 			statement := StatementModel{
 				ID:               id,
@@ -499,11 +1202,20 @@ func xmlStatements(namespace string, mapper xmlMapperModel) ([]StatementModel, e
 				ResultMap:        strings.TrimSpace(item.ResultMap),
 				ResultType:       strings.TrimSpace(item.ResultType),
 				ParameterType:    strings.TrimSpace(item.ParameterType),
+				DatabaseID:       strings.TrimSpace(item.DatabaseID),
 				UseGeneratedKeys: item.UseGeneratedKeys,
 				KeyProperty:      strings.TrimSpace(item.KeyProperty),
+				SelectKey:        item.SelectKey,
+				UseCache:         item.UseCache,
+				FlushCache:       item.FlushCache,
 			}
+			statement.SelectKey.KeyProperty = strings.TrimSpace(statement.SelectKey.KeyProperty)
+			statement.SelectKey.ResultType = strings.TrimSpace(statement.SelectKey.ResultType)
+			statement.SelectKey.SQL = normalizeXMLSQL(statement.SelectKey.SQL)
 			statement.Parameters = statementParameters(statement.SQL)
 			statement.Parameters = append(statement.Parameters, dynamicStatementParameters(statement.DynamicSQL)...)
+			statement.Parameters = append(statement.Parameters, statementParameters(statement.SelectKey.SQL)...)
+			statement.Parameters = append(statement.Parameters, dynamicStatementParameters(statement.SelectKey.DynamicSQL)...)
 			statement.Parameters = uniqueSorted(statement.Parameters)
 			statements = append(statements, statement)
 		}
@@ -524,6 +1236,58 @@ func xmlStatements(namespace string, mapper xmlMapperModel) ([]StatementModel, e
 	return statements, nil
 }
 
+type selectedXMLStatement struct {
+	item        xmlStatementModel
+	specificity int
+}
+
+func selectXMLStatementsForDatabase(command orm.StatementCommand, source []xmlStatementModel, databaseID string) ([]xmlStatementModel, error) {
+	orderedIDs := make([]string, 0, len(source))
+	selected := make(map[string]selectedXMLStatement, len(source))
+	for _, item := range source {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			return nil, fmt.Errorf("goark-orm: XML %s statement missing id", command)
+		}
+		item.ID = id
+		item.DatabaseID = strings.TrimSpace(item.DatabaseID)
+		specificity := xmlStatementDatabaseSpecificity(item.DatabaseID, databaseID)
+		if specificity < 0 {
+			continue
+		}
+		current, exists := selected[id]
+		if exists && current.specificity == specificity {
+			return nil, fmt.Errorf("goark-orm: duplicate XML statement %s for databaseId %q", id, item.DatabaseID)
+		}
+		if !exists {
+			orderedIDs = append(orderedIDs, id)
+		}
+		if !exists || specificity > current.specificity {
+			selected[id] = selectedXMLStatement{item: item, specificity: specificity}
+		}
+	}
+	out := make([]xmlStatementModel, 0, len(selected))
+	for _, id := range orderedIDs {
+		out = append(out, selected[id].item)
+	}
+	return out, nil
+}
+
+func xmlStatementDatabaseSpecificity(statementDatabaseID string, targetDatabaseID string) int {
+	switch {
+	case targetDatabaseID == "" && statementDatabaseID == "":
+		return 0
+	case targetDatabaseID == "":
+		return -1
+	case statementDatabaseID == targetDatabaseID:
+		return 2
+	case statementDatabaseID == "":
+		return 1
+	default:
+		return -1
+	}
+}
+
 func normalizeXMLSQL(raw string) string {
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
 	normalized := make([]string, 0, len(lines))
@@ -541,6 +1305,9 @@ func dynamicSQLTexts(nodes []orm.DynamicSQLNode) []string {
 	for _, node := range nodes {
 		if node.Kind == orm.DynamicSQLNodeText && node.Text != "" {
 			out = append(out, node.Text)
+		}
+		if node.Value != "" {
+			out = append(out, node.Value)
 		}
 		out = append(out, dynamicSQLTexts(node.Children)...)
 	}
@@ -584,6 +1351,18 @@ func collectDynamicParameters(nodes []orm.DynamicSQLNode, scoped map[string]stru
 				childScope[node.Index] = struct{}{}
 			}
 			collectDynamicParameters(node.Children, childScope, out)
+		case orm.DynamicSQLNodeBind:
+			if scoped == nil {
+				scoped = make(map[string]struct{})
+			}
+			for _, param := range expressionParameters(node.Value) {
+				if _, ok := scoped[param]; !ok {
+					*out = append(*out, param)
+				}
+			}
+			if node.Name != "" {
+				scoped[node.Name] = struct{}{}
+			}
 		default:
 			collectDynamicParameters(node.Children, scoped, out)
 		}
@@ -632,7 +1411,32 @@ func identifiersOutsideQuotes(value string) []string {
 			for index < len(value) && isIdentifierPart(rune(value[index])) {
 				index++
 			}
+			for index < len(value) {
+				switch value[index] {
+				case '.':
+					next := index + 1
+					if next >= len(value) || !isIdentifierStart(rune(value[next])) {
+						out = append(out, value[start:index])
+						goto nextToken
+					}
+					index = next + 1
+					for index < len(value) && isIdentifierPart(rune(value[index])) {
+						index++
+					}
+				case '[':
+					end := strings.IndexByte(value[index:], ']')
+					if end < 0 {
+						out = append(out, value[start:index])
+						goto nextToken
+					}
+					index += end + 1
+				default:
+					out = append(out, value[start:index])
+					goto nextToken
+				}
+			}
 			out = append(out, value[start:index])
+		nextToken:
 			continue
 		}
 		index++

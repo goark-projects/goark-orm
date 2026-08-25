@@ -17,3 +17,11 @@ type Session interface {
 	QueryOne(ctx context.Context, statement string, args NamedArgs, dest any) error
 	Exec(ctx context.Context, statement string, args NamedArgs) (Result, error)
 }
+
+// ManagedSession 描述具备 MyBatis 风格生命周期的 Session。
+type ManagedSession interface {
+	Session
+	Commit() error
+	Rollback() error
+	Close() error
+}

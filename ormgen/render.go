@@ -36,6 +36,7 @@ func Render(model *PackageModel) ([]byte, error) {
 	builder.WriteString(model.PackageName)
 	builder.WriteString("\n\n")
 	writeImports(&builder, model)
+	writeEntitySupport(&builder, model)
 	writeRegisterFunction(&builder, model)
 	writeHelperFunctions(&builder, model)
 	for _, mapper := range model.Mappers {
@@ -64,8 +65,8 @@ func writeRegisterFunction(builder *bytes.Buffer, model *PackageModel) {
 	builder.WriteString("func RegisterGoarkORMMetadata(registry *orm.Registry) error {\n")
 	for _, entity := range model.Entities {
 		builder.WriteString("if err := registry.RegisterEntity(")
-		writeEntityMeta(builder, entity)
-		builder.WriteString("); err != nil {\nreturn err\n}\n")
+		builder.WriteString(entityMetaFunctionName(entity))
+		builder.WriteString("()); err != nil {\nreturn err\n}\n")
 	}
 	for _, mapper := range model.Mappers {
 		builder.WriteString("if err := registry.RegisterMapper(")
@@ -74,6 +75,26 @@ func writeRegisterFunction(builder *bytes.Buffer, model *PackageModel) {
 	}
 	builder.WriteString("return nil\n")
 	builder.WriteString("}\n\n")
+}
+
+func writeEntitySupport(builder *bytes.Buffer, model *PackageModel) {
+	for _, entity := range model.Entities {
+		writeEntityMetaFunction(builder, entity)
+		writeEntityFields(builder, entity)
+		writeEntityTypedFields(builder, entity)
+		if primary, ok := singleBaseMapperPrimaryColumn(entity); ok {
+			writeBaseMapperFactory(builder, entity, primary)
+			writeServiceFactory(builder, entity, primary)
+		}
+	}
+}
+
+func writeEntityMetaFunction(builder *bytes.Buffer, entity EntityModel) {
+	builder.WriteString("func ")
+	builder.WriteString(entityMetaFunctionName(entity))
+	builder.WriteString("() orm.EntityMeta {\nreturn ")
+	writeEntityMeta(builder, entity)
+	builder.WriteString("\n}\n\n")
 }
 
 func writeEntityMeta(builder *bytes.Buffer, entity EntityModel) {
@@ -90,6 +111,124 @@ func writeEntityMeta(builder *bytes.Buffer, entity EntityModel) {
 	builder.WriteString("}}")
 }
 
+func writeEntityFields(builder *bytes.Buffer, entity EntityModel) {
+	fieldsType := entityFieldsTypeName(entity)
+	builder.WriteString("type ")
+	builder.WriteString(fieldsType)
+	builder.WriteString(" struct {\n")
+	for _, column := range entity.Columns {
+		builder.WriteString(column.FieldName)
+		builder.WriteString(" orm.Field[")
+		builder.WriteString(entity.TypeName)
+		builder.WriteString("]\n")
+	}
+	builder.WriteString("}\n\n")
+	fieldsVar := entityFieldsVarName(entity)
+	builder.WriteString("// ")
+	builder.WriteString(fieldsVar)
+	builder.WriteString(" 暴露 ")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(" 的类型安全字段常量。\n")
+	builder.WriteString("var ")
+	builder.WriteString(fieldsVar)
+	builder.WriteString(" = ")
+	builder.WriteString(fieldsType)
+	builder.WriteString("{\n")
+	for _, column := range entity.Columns {
+		builder.WriteString(column.FieldName)
+		builder.WriteString(": orm.NewField[")
+		builder.WriteString(entity.TypeName)
+		builder.WriteString("](")
+		builder.WriteString(strconv.Quote(column.ColumnName))
+		builder.WriteString("),\n")
+	}
+	builder.WriteString("}\n\n")
+}
+
+func writeEntityTypedFields(builder *bytes.Buffer, entity EntityModel) {
+	fieldsType := entityTypedFieldsTypeName(entity)
+	builder.WriteString("type ")
+	builder.WriteString(fieldsType)
+	builder.WriteString(" struct {\n")
+	for _, column := range entity.Columns {
+		builder.WriteString(column.FieldName)
+		builder.WriteString(" orm.TypedField[")
+		builder.WriteString(entity.TypeName)
+		builder.WriteString(", ")
+		builder.WriteString(generatedTypedFieldValueType(column.FieldType))
+		builder.WriteString("]\n")
+	}
+	builder.WriteString("}\n\n")
+	fieldsVar := entityTypedFieldsVarName(entity)
+	builder.WriteString("// ")
+	builder.WriteString(fieldsVar)
+	builder.WriteString(" 暴露 ")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(" 的类型化字段常量。\n")
+	builder.WriteString("var ")
+	builder.WriteString(fieldsVar)
+	builder.WriteString(" = ")
+	builder.WriteString(fieldsType)
+	builder.WriteString("{\n")
+	for _, column := range entity.Columns {
+		fieldType := generatedTypedFieldValueType(column.FieldType)
+		builder.WriteString(column.FieldName)
+		builder.WriteString(": orm.NewTypedField[")
+		builder.WriteString(entity.TypeName)
+		builder.WriteString(", ")
+		builder.WriteString(fieldType)
+		builder.WriteString("](")
+		builder.WriteString(strconv.Quote(column.ColumnName))
+		builder.WriteString("),\n")
+	}
+	builder.WriteString("}\n\n")
+}
+
+func writeBaseMapperFactory(builder *bytes.Buffer, entity EntityModel, primary ColumnModel) {
+	functionName := "New" + entity.TypeName + "BaseMapper"
+	builder.WriteString("// ")
+	builder.WriteString(functionName)
+	builder.WriteString(" 创建 ")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(" 的通用 BaseMapper。\n")
+	builder.WriteString("func ")
+	builder.WriteString(functionName)
+	builder.WriteString("(session orm.StatementSession) (*orm.BaseMapper[")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(", ")
+	builder.WriteString(primary.FieldType)
+	builder.WriteString("], error) {\nreturn orm.NewBaseMapper[")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(", ")
+	builder.WriteString(primary.FieldType)
+	builder.WriteString("](session, ")
+	builder.WriteString(entityMetaFunctionName(entity))
+	builder.WriteString("())\n}\n\n")
+}
+
+func writeServiceFactory(builder *bytes.Buffer, entity EntityModel, primary ColumnModel) {
+	functionName := "New" + entity.TypeName + "Service"
+	mapperName := "New" + entity.TypeName + "BaseMapper"
+	builder.WriteString("// ")
+	builder.WriteString(functionName)
+	builder.WriteString(" 创建 ")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(" 的通用 Service。\n")
+	builder.WriteString("func ")
+	builder.WriteString(functionName)
+	builder.WriteString("(session orm.StatementSession) (*orm.Service[")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(", ")
+	builder.WriteString(primary.FieldType)
+	builder.WriteString("], error) {\nmapper, err := ")
+	builder.WriteString(mapperName)
+	builder.WriteString("(session)\nif err != nil {\nreturn nil, err\n}\nreturn orm.NewService[")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(", ")
+	builder.WriteString(primary.FieldType)
+	builder.WriteString("](mapper)\n}\n\n")
+}
+
 func writeColumnMeta(builder *bytes.Buffer, column ColumnModel) {
 	builder.WriteString("{")
 	writeStringField(builder, "FieldName", column.FieldName)
@@ -97,6 +236,7 @@ func writeColumnMeta(builder *bytes.Buffer, column ColumnModel) {
 	writeStringField(builder, "ColumnName", column.ColumnName)
 	writeBoolField(builder, "PrimaryKey", column.PrimaryKey)
 	writeBoolField(builder, "AutoIncrement", column.AutoIncrement)
+	writeIDTypeField(builder, column.IDType)
 	if column.Nullable != nil {
 		builder.WriteString("Nullable: goarkORMBoolPtr(")
 		builder.WriteString(strconv.FormatBool(*column.Nullable))
@@ -123,21 +263,42 @@ func writeMapperMeta(builder *bytes.Buffer, mapper MapperModel) {
 	writeStringField(builder, "Namespace", mapper.Namespace)
 	writeStringField(builder, "XML", mapper.XML)
 	writeStringField(builder, "ImplTypeName", mapper.ImplTypeName)
+	if mapper.Cache.Enabled {
+		builder.WriteString("Cache:")
+		writeCacheMeta(builder, mapper.Cache)
+		builder.WriteByte(',')
+	}
 	builder.WriteString("ResultMaps:[]orm.ResultMapMeta{")
 	for _, resultMap := range mapper.ResultMaps {
 		builder.WriteString("{")
 		writeStringField(builder, "ID", resultMap.ID)
 		writeStringField(builder, "TypeName", resultMap.TypeName)
-		builder.WriteString("Fields:[]orm.ResultFieldMeta{")
-		for _, field := range resultMap.Fields {
-			builder.WriteString("{")
-			writeStringField(builder, "Property", field.Property)
-			writeStringField(builder, "Column", field.Column)
-			writeBoolField(builder, "ID", field.ID)
-			writeStringField(builder, "TypeHandler", field.TypeHandler)
-			builder.WriteString("},")
+		writeStringField(builder, "Extends", resultMap.Extends)
+		writeBoolPtrField(builder, "AutoMapping", resultMap.AutoMapping)
+		if len(resultMap.Constructor.Args) > 0 {
+			builder.WriteString("Constructor:")
+			writeResultConstructor(builder, resultMap.Constructor)
+			builder.WriteByte(',')
 		}
-		builder.WriteString("}},")
+		builder.WriteString("Fields:[]orm.ResultFieldMeta{")
+		writeResultFields(builder, resultMap.Fields)
+		builder.WriteString("},")
+		if len(resultMap.Associations) > 0 {
+			builder.WriteString("Associations:")
+			writeResultAssociations(builder, resultMap.Associations)
+			builder.WriteByte(',')
+		}
+		if len(resultMap.Collections) > 0 {
+			builder.WriteString("Collections:")
+			writeResultCollections(builder, resultMap.Collections)
+			builder.WriteByte(',')
+		}
+		if len(resultMap.Discriminator.Cases) > 0 || resultMap.Discriminator.Column != "" {
+			builder.WriteString("Discriminator:")
+			writeResultDiscriminator(builder, resultMap.Discriminator)
+			builder.WriteByte(',')
+		}
+		builder.WriteString("},")
 	}
 	builder.WriteString("},")
 	builder.WriteString("Statements:[]orm.StatementMeta{")
@@ -146,6 +307,125 @@ func writeMapperMeta(builder *bytes.Buffer, mapper MapperModel) {
 		builder.WriteByte(',')
 	}
 	builder.WriteString("}}")
+}
+
+func writeResultConstructor(builder *bytes.Buffer, constructor orm.ResultConstructorMeta) {
+	builder.WriteString("orm.ResultConstructorMeta{")
+	if len(constructor.Args) > 0 {
+		builder.WriteString("Args:[]orm.ResultArgMeta{")
+		for _, arg := range constructor.Args {
+			builder.WriteString("{")
+			writeStringField(builder, "Name", arg.Name)
+			writeStringField(builder, "Property", arg.Property)
+			writeStringField(builder, "Column", arg.Column)
+			writeBoolField(builder, "ID", arg.ID)
+			writeStringField(builder, "TypeHandler", arg.TypeHandler)
+			builder.WriteString("},")
+		}
+		builder.WriteString("},")
+	}
+	builder.WriteString("}")
+}
+
+func writeResultFields(builder *bytes.Buffer, fields []orm.ResultFieldMeta) {
+	for _, field := range fields {
+		builder.WriteString("{")
+		writeStringField(builder, "Property", field.Property)
+		writeStringField(builder, "Column", field.Column)
+		writeBoolField(builder, "ID", field.ID)
+		writeStringField(builder, "TypeHandler", field.TypeHandler)
+		builder.WriteString("},")
+	}
+}
+
+func writeResultAssociations(builder *bytes.Buffer, associations []orm.ResultAssociationMeta) {
+	builder.WriteString("[]orm.ResultAssociationMeta{")
+	for _, association := range associations {
+		builder.WriteString("{")
+		writeStringField(builder, "Property", association.Property)
+		writeStringField(builder, "TypeName", association.TypeName)
+		writeStringField(builder, "Column", association.Column)
+		writeStringField(builder, "ColumnPrefix", association.ColumnPrefix)
+		writeStringSliceField(builder, "NotNullColumns", association.NotNullColumns)
+		writeStringField(builder, "Select", association.Select)
+		writeStringField(builder, "FetchType", association.FetchType)
+		builder.WriteString("Fields:[]orm.ResultFieldMeta{")
+		writeResultFields(builder, association.Fields)
+		builder.WriteString("},")
+		if len(association.Associations) > 0 {
+			builder.WriteString("Associations:")
+			writeResultAssociations(builder, association.Associations)
+			builder.WriteByte(',')
+		}
+		if len(association.Collections) > 0 {
+			builder.WriteString("Collections:")
+			writeResultCollections(builder, association.Collections)
+			builder.WriteByte(',')
+		}
+		builder.WriteString("},")
+	}
+	builder.WriteString("}")
+}
+
+func writeResultCollections(builder *bytes.Buffer, collections []orm.ResultCollectionMeta) {
+	builder.WriteString("[]orm.ResultCollectionMeta{")
+	for _, collection := range collections {
+		builder.WriteString("{")
+		writeStringField(builder, "Property", collection.Property)
+		writeStringField(builder, "TypeName", collection.TypeName)
+		writeStringField(builder, "Column", collection.Column)
+		writeStringField(builder, "ColumnPrefix", collection.ColumnPrefix)
+		writeStringSliceField(builder, "NotNullColumns", collection.NotNullColumns)
+		writeStringField(builder, "Select", collection.Select)
+		writeStringField(builder, "FetchType", collection.FetchType)
+		builder.WriteString("Fields:[]orm.ResultFieldMeta{")
+		writeResultFields(builder, collection.Fields)
+		builder.WriteString("},")
+		if len(collection.Associations) > 0 {
+			builder.WriteString("Associations:")
+			writeResultAssociations(builder, collection.Associations)
+			builder.WriteByte(',')
+		}
+		if len(collection.Collections) > 0 {
+			builder.WriteString("Collections:")
+			writeResultCollections(builder, collection.Collections)
+			builder.WriteByte(',')
+		}
+		builder.WriteString("},")
+	}
+	builder.WriteString("}")
+}
+
+func writeResultDiscriminator(builder *bytes.Buffer, discriminator orm.ResultDiscriminatorMeta) {
+	builder.WriteString("orm.ResultDiscriminatorMeta{")
+	writeStringField(builder, "Column", discriminator.Column)
+	writeStringField(builder, "TypeName", discriminator.TypeName)
+	writeStringField(builder, "TypeHandler", discriminator.TypeHandler)
+	if len(discriminator.Cases) > 0 {
+		builder.WriteString("Cases:[]orm.ResultDiscriminatorCaseMeta{")
+		for _, item := range discriminator.Cases {
+			builder.WriteString("{")
+			writeStringField(builder, "Value", item.Value)
+			writeStringField(builder, "ResultMap", item.ResultMap)
+			writeStringField(builder, "ResultType", item.ResultType)
+			builder.WriteString("Fields:[]orm.ResultFieldMeta{")
+			writeResultFields(builder, item.Fields)
+			builder.WriteString("},")
+			if len(item.Associations) > 0 {
+				builder.WriteString("Associations:")
+				writeResultAssociations(builder, item.Associations)
+				builder.WriteByte(',')
+			}
+			if len(item.Collections) > 0 {
+				builder.WriteString("Collections:")
+				writeResultCollections(builder, item.Collections)
+				builder.WriteByte(',')
+			}
+			builder.WriteString("},")
+		}
+		builder.WriteString("},")
+	}
+	builder.WriteString("}")
 }
 
 func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
@@ -160,16 +440,68 @@ func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
 	builder.WriteString(strconv.Quote(string(statement.Source)))
 	builder.WriteString("),")
 	writeStringField(builder, "SQL", statement.SQL)
+	writeStringField(builder, "Provider", statement.Provider)
 	writeStringField(builder, "ResultMap", statement.ResultMap)
 	writeStringField(builder, "ResultType", statement.ResultType)
 	writeStringField(builder, "ParameterType", statement.ParameterType)
+	writeStringField(builder, "DatabaseID", statement.DatabaseID)
 	writeBoolField(builder, "UseGeneratedKeys", statement.UseGeneratedKeys)
 	writeStringField(builder, "KeyProperty", statement.KeyProperty)
+	if statement.SelectKey.Enabled {
+		builder.WriteString("SelectKey:")
+		writeSelectKeyMeta(builder, statement.SelectKey)
+		builder.WriteByte(',')
+	}
+	writeStatementCachePolicyField(builder, "UseCache", statement.UseCache)
+	writeStatementCachePolicyField(builder, "FlushCache", statement.FlushCache)
+	writeStringSliceField(builder, "Parameters", statement.Parameters)
 	if len(statement.DynamicSQL) > 0 {
 		builder.WriteString("DynamicSQL:")
 		writeDynamicSQLNodes(builder, statement.DynamicSQL)
 		builder.WriteByte(',')
 	}
+	builder.WriteString("}")
+}
+
+func writeSelectKeyMeta(builder *bytes.Buffer, selectKey orm.SelectKeyMeta) {
+	builder.WriteString("orm.SelectKeyMeta{")
+	writeBoolField(builder, "Enabled", selectKey.Enabled)
+	writeStringField(builder, "KeyProperty", selectKey.KeyProperty)
+	writeStringField(builder, "ResultType", selectKey.ResultType)
+	if selectKey.Order != "" {
+		builder.WriteString("Order:")
+		builder.WriteString(selectKeyOrderExpression(selectKey.Order))
+		builder.WriteByte(',')
+	}
+	writeStringField(builder, "SQL", selectKey.SQL)
+	if len(selectKey.DynamicSQL) > 0 {
+		builder.WriteString("DynamicSQL:")
+		writeDynamicSQLNodes(builder, selectKey.DynamicSQL)
+		builder.WriteByte(',')
+	}
+	builder.WriteString("}")
+}
+
+func selectKeyOrderExpression(order orm.SelectKeyOrder) string {
+	switch order {
+	case orm.SelectKeyOrderBefore:
+		return "orm.SelectKeyOrderBefore"
+	case orm.SelectKeyOrderAfter:
+		return "orm.SelectKeyOrderAfter"
+	default:
+		return "orm.SelectKeyOrder(" + strconv.Quote(string(order)) + ")"
+	}
+}
+
+func writeCacheMeta(builder *bytes.Buffer, cache orm.CacheMeta) {
+	builder.WriteString("orm.CacheMeta{")
+	writeBoolField(builder, "Enabled", cache.Enabled)
+	writeStringField(builder, "RefNamespace", cache.RefNamespace)
+	writeStringField(builder, "Eviction", cache.Eviction)
+	writeIntField(builder, "Size", cache.Size)
+	writeInt64Field(builder, "FlushIntervalMillis", cache.FlushIntervalMillis)
+	writeBoolField(builder, "ReadOnly", cache.ReadOnly)
+	writeBoolField(builder, "Blocking", cache.Blocking)
 	builder.WriteString("}")
 }
 
@@ -189,6 +521,8 @@ func writeDynamicSQLNodes(builder *bytes.Buffer, nodes []orm.DynamicSQLNode) {
 		writeStringField(builder, "Collection", node.Collection)
 		writeStringField(builder, "Item", node.Item)
 		writeStringField(builder, "Index", node.Index)
+		writeStringField(builder, "Name", node.Name)
+		writeStringField(builder, "Value", node.Value)
 		writeStringField(builder, "Open", node.Open)
 		writeStringField(builder, "Close", node.Close)
 		writeStringField(builder, "Separator", node.Separator)
@@ -225,6 +559,8 @@ func dynamicSQLKindExpression(kind orm.DynamicSQLNodeKind) string {
 		return "orm.DynamicSQLNodeOtherwise"
 	case orm.DynamicSQLNodeInclude:
 		return "orm.DynamicSQLNodeInclude"
+	case orm.DynamicSQLNodeBind:
+		return "orm.DynamicSQLNodeBind"
 	default:
 		return "orm.DynamicSQLNodeKind(" + strconv.Quote(string(kind)) + ")"
 	}
@@ -246,6 +582,94 @@ func writeBoolField(builder *bytes.Buffer, name string, value bool) {
 	}
 	builder.WriteString(name)
 	builder.WriteString(":true,")
+}
+
+func writeBoolPtrField(builder *bytes.Buffer, name string, value *bool) {
+	if value == nil {
+		return
+	}
+	builder.WriteString(name)
+	builder.WriteString(":goarkORMBoolPtr(")
+	builder.WriteString(strconv.FormatBool(*value))
+	builder.WriteString("),")
+}
+
+func writeIntField(builder *bytes.Buffer, name string, value int) {
+	if value == 0 {
+		return
+	}
+	builder.WriteString(name)
+	builder.WriteByte(':')
+	builder.WriteString(strconv.Itoa(value))
+	builder.WriteByte(',')
+}
+
+func writeInt64Field(builder *bytes.Buffer, name string, value int64) {
+	if value == 0 {
+		return
+	}
+	builder.WriteString(name)
+	builder.WriteByte(':')
+	builder.WriteString(strconv.FormatInt(value, 10))
+	builder.WriteByte(',')
+}
+
+func writeStringSliceField(builder *bytes.Buffer, name string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	builder.WriteString(name)
+	builder.WriteString(":[]string{")
+	for _, value := range values {
+		builder.WriteString(strconv.Quote(value))
+		builder.WriteByte(',')
+	}
+	builder.WriteString("},")
+}
+
+func writeStatementCachePolicyField(builder *bytes.Buffer, name string, value orm.StatementCachePolicy) {
+	if value == orm.StatementCacheDefault {
+		return
+	}
+	builder.WriteString(name)
+	builder.WriteByte(':')
+	builder.WriteString(statementCachePolicyExpression(value))
+	builder.WriteByte(',')
+}
+
+func writeIDTypeField(builder *bytes.Buffer, value orm.IDType) {
+	if value == orm.IDTypeNone {
+		return
+	}
+	builder.WriteString("IDType:")
+	builder.WriteString(idTypeExpression(value))
+	builder.WriteByte(',')
+}
+
+func idTypeExpression(value orm.IDType) string {
+	switch value {
+	case orm.IDTypeAuto:
+		return "orm.IDTypeAuto"
+	case orm.IDTypeInput:
+		return "orm.IDTypeInput"
+	case orm.IDTypeAssignID:
+		return "orm.IDTypeAssignID"
+	case orm.IDTypeAssignUUID:
+		return "orm.IDTypeAssignUUID"
+	default:
+		return "orm.IDType(" + strconv.Quote(string(value)) + ")"
+	}
+}
+
+func statementCachePolicyExpression(value orm.StatementCachePolicy) string {
+	switch value {
+	case orm.StatementCacheEnabled:
+		return "orm.StatementCacheEnabled"
+	case orm.StatementCacheDisabled:
+		return "orm.StatementCacheDisabled"
+	default:
+		return "orm.StatementCachePolicy(" + strconv.Quote(string(value)) + ")"
+	}
 }
 
 func writeMapperImplementation(builder *bytes.Buffer, model *PackageModel, mapper MapperModel) {
@@ -271,12 +695,53 @@ func writeMapperMethod(builder *bytes.Buffer, model *PackageModel, mapper Mapper
 	builder.WriteString(method.Name)
 	builder.WriteByte('(')
 	writeParams(builder, method.Params)
-	builder.WriteString(") (")
-	builder.WriteString(method.ResultType)
-	builder.WriteString(", error) {\n")
+	builder.WriteByte(')')
+	writeMethodReturns(builder, method)
+	builder.WriteString(" {\n")
 	argsExpr := namedArgsExpression(model, method)
 	switch method.Statement.Command {
 	case orm.StatementCommandSelect:
+		if handler, itemType, ok := resultHandlerParam(method); ok {
+			builder.WriteString("return orm.QueryEach[")
+			builder.WriteString(itemType)
+			builder.WriteString("](")
+			builder.WriteString(method.Params[0].Name)
+			builder.WriteString(", m.session, ")
+			builder.WriteString(strconv.Quote(method.Statement.FullName))
+			builder.WriteString(", ")
+			builder.WriteString(argsExpr)
+			builder.WriteString(", ")
+			builder.WriteString(handler.Name)
+			builder.WriteString(")\n")
+			break
+		}
+		if itemType, ok := cursorResultTypeArg(method.ResultType); ok {
+			builder.WriteString("return orm.QueryCursor[")
+			builder.WriteString(itemType)
+			builder.WriteString("](")
+			builder.WriteString(method.Params[0].Name)
+			builder.WriteString(", m.session, ")
+			builder.WriteString(strconv.Quote(method.Statement.FullName))
+			builder.WriteString(", ")
+			builder.WriteString(argsExpr)
+			builder.WriteString(")\n")
+			break
+		}
+		if itemType, ok := pageResultTypeArg(method.ResultType); ok {
+			pageParam, _ := pageRequestParam(method)
+			builder.WriteString("return orm.QueryPage[")
+			builder.WriteString(itemType)
+			builder.WriteString("](")
+			builder.WriteString(method.Params[0].Name)
+			builder.WriteString(", m.session, ")
+			builder.WriteString(strconv.Quote(method.Statement.FullName))
+			builder.WriteString(", ")
+			builder.WriteString(argsExpr)
+			builder.WriteString(", ")
+			builder.WriteString(pageParam.Name)
+			builder.WriteString(")\n")
+			break
+		}
 		builder.WriteString("var out ")
 		builder.WriteString(method.ResultType)
 		builder.WriteByte('\n')
@@ -302,13 +767,23 @@ func writeMapperMethod(builder *bytes.Buffer, model *PackageModel, mapper Mapper
 		builder.WriteString(", ")
 		builder.WriteString(argsExpr)
 		builder.WriteString(")\nif err != nil {\nreturn 0, err\n}\n")
-		if method.Statement.Command == orm.StatementCommandInsert && method.Statement.UseGeneratedKeys {
+		if method.Statement.Command == orm.StatementCommandInsert && (method.Statement.UseGeneratedKeys || method.Statement.SelectKey.Enabled) {
 			builder.WriteString("return result.LastInsertID, nil\n")
 		} else {
 			builder.WriteString("return result.RowsAffected, nil\n")
 		}
 	}
 	builder.WriteString("}\n\n")
+}
+
+func writeMethodReturns(builder *bytes.Buffer, method MethodModel) {
+	if strings.TrimSpace(method.ResultType) == "" {
+		builder.WriteString(" error")
+		return
+	}
+	builder.WriteString(" (")
+	builder.WriteString(method.ResultType)
+	builder.WriteString(", error)")
 }
 
 func writeParams(builder *bytes.Buffer, params []ParamModel) {
@@ -324,11 +799,19 @@ func writeParams(builder *bytes.Buffer, params []ParamModel) {
 
 func namedArgsExpression(model *PackageModel, method MethodModel) string {
 	pairs := make(map[string]string)
-	for _, param := range method.Params[1:] {
+	dataParams := methodDataParams(method)
+	for index, param := range dataParams {
 		pairs[param.Name] = param.Name
+		pairs["param"+strconv.Itoa(index+1)] = param.Name
 	}
-	if len(method.Params) == 2 {
-		param := method.Params[1]
+	if len(dataParams) == 1 {
+		param := dataParams[0]
+		pairs["_parameter"] = param.Name
+		if isCollectionParameterType(param.Type) {
+			pairs["array"] = param.Name
+			pairs["collection"] = param.Name
+			pairs["list"] = param.Name
+		}
 		entityName := normalizeTypeName(param.Type)
 		for _, entity := range model.Entities {
 			if entity.TypeName != entityName {
@@ -336,6 +819,9 @@ func namedArgsExpression(model *PackageModel, method MethodModel) string {
 			}
 			for _, column := range entity.Columns {
 				pairs[column.FieldName] = param.Name + "." + column.FieldName
+				if alias := propertyAlias(column.FieldName); alias != "" {
+					pairs[alias] = param.Name + "." + column.FieldName
+				}
 			}
 		}
 	}
@@ -356,6 +842,30 @@ func namedArgsExpression(model *PackageModel, method MethodModel) string {
 	return builder.String()
 }
 
+func propertyAlias(fieldName string) string {
+	fieldName = strings.TrimSpace(fieldName)
+	if fieldName == "" {
+		return ""
+	}
+	leadingUpper := 0
+	for leadingUpper < len(fieldName) {
+		ch := fieldName[leadingUpper]
+		if ch < 'A' || ch > 'Z' {
+			break
+		}
+		leadingUpper++
+	}
+	switch {
+	case leadingUpper == 0:
+		return fieldName
+	case leadingUpper == len(fieldName):
+		return strings.ToLower(fieldName)
+	case leadingUpper > 1:
+		leadingUpper--
+	}
+	return strings.ToLower(fieldName[:leadingUpper]) + fieldName[leadingUpper:]
+}
+
 func writeHelperFunctions(builder *bytes.Buffer, model *PackageModel) {
 	if !modelNeedsPointerHelpers(model) {
 		return
@@ -372,7 +882,55 @@ func modelNeedsPointerHelpers(model *PackageModel) bool {
 			}
 		}
 	}
+	for _, mapper := range model.Mappers {
+		for _, resultMap := range mapper.ResultMaps {
+			if resultMap.AutoMapping != nil {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+func entityMetaFunctionName(entity EntityModel) string {
+	return "goarkORM" + entity.TypeName + "EntityMeta"
+}
+
+func entityFieldsTypeName(entity EntityModel) string {
+	return "goarkORM" + entity.TypeName + "Fields"
+}
+
+func entityFieldsVarName(entity EntityModel) string {
+	return entity.TypeName + "Fields"
+}
+
+func entityTypedFieldsTypeName(entity EntityModel) string {
+	return "goarkORM" + entity.TypeName + "TypedFields"
+}
+
+func entityTypedFieldsVarName(entity EntityModel) string {
+	return entity.TypeName + "TypedFields"
+}
+
+func generatedTypedFieldValueType(fieldType string) string {
+	fieldType = strings.TrimSpace(fieldType)
+	if fieldType == "" || strings.Contains(fieldType, ".") {
+		return "any"
+	}
+	return fieldType
+}
+
+func singleBaseMapperPrimaryColumn(entity EntityModel) (ColumnModel, bool) {
+	var primary ColumnModel
+	count := 0
+	for _, column := range entity.Columns {
+		if !column.PrimaryKey {
+			continue
+		}
+		primary = column
+		count++
+	}
+	return primary, count == 1
 }
 
 // DefaultOutputName 返回包级 ORM 生成文件默认名称。

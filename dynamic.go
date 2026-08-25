@@ -3,12 +3,9 @@ package orm
 import (
 	"fmt"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 )
-
-var dynamicPlaceholderPattern = regexp.MustCompile(`#\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}`)
 
 // RenderedSQL 表示动态 SQL 渲染后的 SQL 和参数。
 type RenderedSQL struct {
@@ -102,9 +99,31 @@ func (c *dynamicRenderContext) renderNode(node DynamicSQLNode) (string, error) {
 		return c.renderChildren(node.Children)
 	case DynamicSQLNodeInclude:
 		return "", fmt.Errorf("goark-orm: dynamic SQL include %q was not expanded", node.RefID)
+	case DynamicSQLNodeBind:
+		return "", c.renderBind(node)
 	default:
 		return "", fmt.Errorf("goark-orm: unsupported dynamic SQL node %q", node.Kind)
 	}
+}
+
+func (c *dynamicRenderContext) renderBind(node DynamicSQLNode) error {
+	name := strings.TrimSpace(node.Name)
+	if name == "" {
+		return fmt.Errorf("goark-orm: bind name is required")
+	}
+	if !validIdentifierPart(name) {
+		return fmt.Errorf("goark-orm: bind name %q is invalid", name)
+	}
+	if strings.Contains(node.Value, "${") {
+		return fmt.Errorf("goark-orm: bind %s uses forbidden ${}", name)
+	}
+	value, err := evalValueExpression(node.Value, c.lookup)
+	if err != nil {
+		return fmt.Errorf("goark-orm: bind %s failed: %w", name, err)
+	}
+	c.values[name] = value
+	c.args[name] = value
+	return nil
 }
 
 func (c *dynamicRenderContext) renderChildren(nodes []DynamicSQLNode) (string, error) {
@@ -120,13 +139,19 @@ func (c *dynamicRenderContext) renderText(text string) string {
 	if text == "" || len(c.aliases) == 0 {
 		return text
 	}
-	return dynamicPlaceholderPattern.ReplaceAllStringFunc(text, func(raw string) string {
-		matches := dynamicPlaceholderPattern.FindStringSubmatch(raw)
+	return statementParamPattern.ReplaceAllStringFunc(text, func(raw string) string {
+		matches := statementParamPattern.FindStringSubmatch(raw)
 		if len(matches) < 2 {
 			return raw
 		}
-		if alias, ok := c.aliases[strings.TrimSpace(matches[1])]; ok {
-			return "#{" + alias + "}"
+		parameter := strings.TrimSpace(matches[1])
+		path, err := parseParameterPath(parameter)
+		if err != nil || len(path.segments) == 0 {
+			return raw
+		}
+		if alias, ok := c.aliases[path.segments[0].name]; ok {
+			path.segments[0].name = alias
+			return "#{" + path.String() + "}"
 		}
 		return raw
 	})
@@ -186,7 +211,14 @@ func (c *dynamicRenderContext) renderForeach(node DynamicSQLNode) (string, error
 		previousValue, hadValue := c.values[itemName]
 		c.aliases[itemName] = alias
 		c.values[itemName] = itemValue
+		var indexAlias string
+		var hadIndexAlias bool
+		var previousIndexAlias string
 		if indexName != "" {
+			indexAlias = c.nextAlias(indexName)
+			c.args[indexAlias] = i
+			previousIndexAlias, hadIndexAlias = c.aliases[indexName]
+			c.aliases[indexName] = indexAlias
 			c.values[indexName] = i
 		}
 		content, err := c.renderChildren(node.Children)
@@ -201,6 +233,11 @@ func (c *dynamicRenderContext) renderForeach(node DynamicSQLNode) (string, error
 			delete(c.values, itemName)
 		}
 		if indexName != "" {
+			if hadIndexAlias {
+				c.aliases[indexName] = previousIndexAlias
+			} else {
+				delete(c.aliases, indexName)
+			}
 			delete(c.values, indexName)
 		}
 		if err != nil {
@@ -354,6 +391,16 @@ func (c *dynamicRenderContext) lookup(name string) (any, bool) {
 	if value, ok := c.values[name]; ok {
 		return value, true
 	}
-	value, ok := c.args[name]
-	return value, ok
+	if value, ok := c.args[name]; ok {
+		return value, true
+	}
+	value, ok, err := resolveNamedArg(c.values, name)
+	if err == nil && ok {
+		return value, true
+	}
+	value, ok, err = resolveNamedArg(c.args, name)
+	if err == nil && ok {
+		return value, true
+	}
+	return nil, false
 }

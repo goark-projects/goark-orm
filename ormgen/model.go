@@ -6,6 +6,7 @@ import "goark.dev/orm"
 type GenerateSpec struct {
 	Dir          string
 	PackageName  string
+	DatabaseID   string
 	TypeHandlers []string
 }
 
@@ -31,6 +32,7 @@ type ColumnModel struct {
 	ColumnName    string
 	PrimaryKey    bool
 	AutoIncrement bool
+	IDType        orm.IDType
 	Nullable      *bool
 	Size          *int
 	DBType        string
@@ -48,6 +50,7 @@ type MapperModel struct {
 	TypeName     string
 	Namespace    string
 	XML          string
+	Cache        orm.CacheMeta
 	ImplTypeName string
 	Methods      []MethodModel
 	ResultMaps   []orm.ResultMapMeta
@@ -77,11 +80,16 @@ type StatementModel struct {
 	Command          orm.StatementCommand
 	Source           orm.StatementSource
 	SQL              string
+	Provider         string
 	ResultMap        string
 	ResultType       string
 	ParameterType    string
+	DatabaseID       string
 	UseGeneratedKeys bool
 	KeyProperty      string
+	SelectKey        orm.SelectKeyMeta
+	UseCache         orm.StatementCachePolicy
+	FlushCache       orm.StatementCachePolicy
 	Parameters       []string
 	DynamicSQL       []orm.DynamicSQLNode
 }

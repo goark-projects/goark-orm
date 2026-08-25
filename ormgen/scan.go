@@ -18,7 +18,12 @@ import (
 	"goark.dev/orm"
 )
 
-var sqlParameterPattern = regexp.MustCompile(`#\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}`)
+var sqlParameterPattern = regexp.MustCompile(`#\{\s*([^{}]+?)\s*\}`)
+
+type scanContext struct {
+	fset       *token.FileSet
+	interfaces map[string]*ast.InterfaceType
+}
 
 // ScanPackage 扫描单个 Go package 的 ORM 元数据。
 func ScanPackage(spec GenerateSpec) (*PackageModel, error) {
@@ -60,9 +65,10 @@ func ScanPackage(spec GenerateSpec) (*PackageModel, error) {
 		Dir:         spec.Dir,
 		PackageName: packageName,
 	}
+	ctx := newScanContext(fset, pkg)
 	files := sortedFiles(fset, pkg)
 	for _, file := range files {
-		if err := scanFile(model, fset, file, spec); err != nil {
+		if err := scanFile(model, ctx, file, spec); err != nil {
 			return nil, err
 		}
 	}
@@ -83,7 +89,33 @@ func sortedFiles(fset *token.FileSet, pkg *ast.Package) []*ast.File {
 	return files
 }
 
-func scanFile(model *PackageModel, fset *token.FileSet, file *ast.File, spec GenerateSpec) error {
+func newScanContext(fset *token.FileSet, pkg *ast.Package) *scanContext {
+	ctx := &scanContext{
+		fset:       fset,
+		interfaces: make(map[string]*ast.InterfaceType),
+	}
+	for _, file := range sortedFiles(fset, pkg) {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.TYPE {
+				continue
+			}
+			for _, rawSpec := range genDecl.Specs {
+				typeSpec, ok := rawSpec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				interfaceType, ok := typeSpec.Type.(*ast.InterfaceType)
+				if ok {
+					ctx.interfaces[typeSpec.Name.Name] = interfaceType
+				}
+			}
+		}
+	}
+	return ctx
+}
+
+func scanFile(model *PackageModel, ctx *scanContext, file *ast.File, spec GenerateSpec) error {
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
 		if !ok || genDecl.Tok != token.TYPE {
@@ -104,14 +136,14 @@ func scanFile(model *PackageModel, fset *token.FileSet, file *ast.File, spec Gen
 			}
 			annotations := mergeAnnotations(declAnnotations, specAnnotations)
 			if _, ok := findAnnotation(annotations, "entity"); ok {
-				entity, err := buildEntity(model, fset, typeSpec, annotations, spec)
+				entity, err := buildEntity(model, ctx.fset, typeSpec, annotations, spec)
 				if err != nil {
 					return err
 				}
 				model.Entities = append(model.Entities, entity)
 			}
 			if _, ok := findAnnotation(annotations, "mapper"); ok {
-				mapper, err := buildMapper(model, fset, typeSpec, annotations)
+				mapper, err := buildMapper(model, ctx, typeSpec, annotations, spec)
 				if err != nil {
 					return err
 				}
@@ -196,6 +228,15 @@ func buildColumn(entityName string, fieldName string, fieldType string, tag fiel
 	} else {
 		column.AutoIncrement = value
 	}
+	if value, ok, err := tagString(tag, "id-type"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else if ok {
+		idType, err := orm.ParseIDType(value)
+		if err != nil {
+			return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+		}
+		column.IDType = idType
+	}
 	if value, ok, err := tagBool(tag, "nullable"); err != nil {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
 	} else if ok {
@@ -248,6 +289,12 @@ func validateEntity(entity EntityModel, spec GenerateSpec) error {
 		if column.AutoIncrement && !column.PrimaryKey {
 			return fmt.Errorf("goark-orm: field %s.%s auto-increment requires primary-key=true", entity.TypeName, column.FieldName)
 		}
+		if column.IDType != orm.IDTypeNone && !column.PrimaryKey {
+			return fmt.Errorf("goark-orm: field %s.%s id-type requires primary-key=true", entity.TypeName, column.FieldName)
+		}
+		if column.AutoIncrement && column.IDType != orm.IDTypeNone && column.IDType != orm.IDTypeAuto {
+			return fmt.Errorf("goark-orm: field %s.%s auto-increment conflicts with id-type %s", entity.TypeName, column.FieldName, column.IDType)
+		}
 		if column.Version {
 			versionFields++
 		}
@@ -299,7 +346,7 @@ func typeHandlerSet(spec GenerateSpec) map[string]struct{} {
 	return out
 }
 
-func buildMapper(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpec, annotations []annotation) (MapperModel, error) {
+func buildMapper(model *PackageModel, ctx *scanContext, typeSpec *ast.TypeSpec, annotations []annotation, spec GenerateSpec) (MapperModel, error) {
 	mapperAnnotation, _ := findAnnotation(annotations, "mapper")
 	namespace := strings.TrimSpace(mapperAnnotation.Args["namespace"])
 	if namespace == "" {
@@ -325,12 +372,13 @@ func buildMapper(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 		if xmlMapper.Namespace != namespace {
 			return MapperModel{}, fmt.Errorf("goark-orm: XML namespace %q does not match mapper namespace %q", xmlMapper.Namespace, namespace)
 		}
+		mapper.Cache = xmlMapper.Cache
 		resultMaps, err := xmlResultMaps(xmlMapper)
 		if err != nil {
 			return MapperModel{}, err
 		}
 		mapper.ResultMaps = resultMaps
-		statements, err := xmlStatements(namespace, xmlMapper)
+		statements, err := xmlStatements(namespace, xmlMapper, spec.DatabaseID)
 		if err != nil {
 			return MapperModel{}, err
 		}
@@ -339,12 +387,17 @@ func buildMapper(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 		}
 	}
 	usedXMLStatements := make(map[string]struct{})
+	seenMethods := make(map[string]struct{})
 	for _, method := range interfaceType.Methods.List {
-		methods, err := buildMapperMethods(fset, namespace, method, statementByID)
+		methods, err := buildMapperMethods(ctx, namespace, method, statementByID, nil)
 		if err != nil {
 			return MapperModel{}, err
 		}
 		for _, method := range methods {
+			if _, exists := seenMethods[method.Name]; exists {
+				return MapperModel{}, fmt.Errorf("goark-orm: mapper %s has duplicate method %s", mapper.TypeName, method.Name)
+			}
+			seenMethods[method.Name] = struct{}{}
 			if method.Statement.Source == orm.StatementSourceXML {
 				usedXMLStatements[method.Name] = struct{}{}
 			}
@@ -365,9 +418,40 @@ func buildMapper(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 	return mapper, nil
 }
 
-func buildMapperMethods(fset *token.FileSet, namespace string, field *ast.Field, xmlStatements map[string]StatementModel) ([]MethodModel, error) {
+func buildMapperMethods(ctx *scanContext, namespace string, field *ast.Field, xmlStatements map[string]StatementModel, stack map[string]struct{}) ([]MethodModel, error) {
 	if len(field.Names) == 0 {
-		return nil, fmt.Errorf("goark-orm: embedded mapper interfaces are not supported in V1")
+		embeddedName, err := embeddedInterfaceName(ctx.fset, field.Type)
+		if err != nil {
+			return nil, err
+		}
+		interfaceType, ok := ctx.interfaces[embeddedName]
+		if !ok {
+			return nil, fmt.Errorf("goark-orm: embedded mapper interface %s is not found in current package", embeddedName)
+		}
+		if stack == nil {
+			stack = make(map[string]struct{})
+		}
+		if _, exists := stack[embeddedName]; exists {
+			return nil, fmt.Errorf("goark-orm: embedded mapper interface %s has cyclic embedding", embeddedName)
+		}
+		stack[embeddedName] = struct{}{}
+		defer delete(stack, embeddedName)
+		out := make([]MethodModel, 0, len(interfaceType.Methods.List))
+		seen := make(map[string]struct{})
+		for _, embeddedField := range interfaceType.Methods.List {
+			methods, err := buildMapperMethods(ctx, namespace, embeddedField, xmlStatements, stack)
+			if err != nil {
+				return nil, err
+			}
+			for _, method := range methods {
+				if _, exists := seen[method.Name]; exists {
+					return nil, fmt.Errorf("goark-orm: embedded mapper interface %s has duplicate method %s", embeddedName, method.Name)
+				}
+				seen[method.Name] = struct{}{}
+				out = append(out, method)
+			}
+		}
+		return out, nil
 	}
 	out := make([]MethodModel, 0, len(field.Names))
 	for _, name := range field.Names {
@@ -376,7 +460,7 @@ func buildMapperMethods(fset *token.FileSet, namespace string, field *ast.Field,
 		if !ok {
 			return nil, fmt.Errorf("goark-orm: mapper method %s must be function", methodName)
 		}
-		method, err := buildMethodSignature(fset, methodName, funcType)
+		method, err := buildMethodSignature(ctx.fset, methodName, funcType)
 		if err != nil {
 			return nil, err
 		}
@@ -407,17 +491,43 @@ func buildMapperMethods(fset *token.FileSet, namespace string, field *ast.Field,
 	return out, nil
 }
 
+func embeddedInterfaceName(fset *token.FileSet, expr ast.Expr) (string, error) {
+	switch item := expr.(type) {
+	case *ast.Ident:
+		if item.Name == "" {
+			return "", fmt.Errorf("goark-orm: embedded mapper interface is empty")
+		}
+		return item.Name, nil
+	default:
+		return "", fmt.Errorf("goark-orm: embedded mapper interface %s must be local named interface", exprString(fset, expr))
+	}
+}
+
 func applyMethodSignatureToStatement(method *MethodModel) {
-	if method.Statement.ParameterType == "" && len(method.Params) == 2 {
-		method.Statement.ParameterType = normalizeTypeName(method.Params[1].Type)
+	dataParams := methodDataParams(*method)
+	if method.Statement.ParameterType == "" && len(dataParams) == 1 && !isCollectionParameterType(dataParams[0].Type) {
+		method.Statement.ParameterType = normalizeTypeName(dataParams[0].Type)
 	}
 	if method.Statement.ResultType == "" {
-		method.Statement.ResultType = normalizeResultType(method.ResultType)
+		if itemType, ok := pageResultTypeArg(method.ResultType); ok {
+			method.Statement.ResultType = normalizeResultType(itemType)
+		} else if itemType, ok := cursorResultTypeArg(method.ResultType); ok {
+			method.Statement.ResultType = normalizeResultType(itemType)
+		} else if _, itemType, ok := resultHandlerParam(*method); ok {
+			method.Statement.ResultType = normalizeResultType(itemType)
+		} else {
+			method.Statement.ResultType = normalizeResultType(method.ResultType)
+		}
 	}
 }
 
 func normalizeResultType(typ string) string {
 	typ = strings.TrimSpace(typ)
+	if itemType, ok := pageResultTypeArg(typ); ok {
+		typ = itemType
+	} else if itemType, ok := cursorResultTypeArg(typ); ok {
+		typ = itemType
+	}
 	for strings.HasPrefix(typ, "[]") {
 		typ = strings.TrimSpace(strings.TrimPrefix(typ, "[]"))
 	}
@@ -449,13 +559,23 @@ func buildMethodSignature(fset *token.FileSet, methodName string, fn *ast.FuncTy
 	if len(method.Params[0].Name) == 0 {
 		return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s context parameter must be named", methodName)
 	}
-	if fn.Results == nil || len(fn.Results.List) != 2 {
-		return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s must return (T, error)", methodName)
+	resultCount := 0
+	if fn.Results != nil {
+		resultCount = len(fn.Results.List)
 	}
-	if exprString(fset, fn.Results.List[1].Type) != "error" {
-		return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s last return value must be error", methodName)
+	switch resultCount {
+	case 1:
+		if exprString(fset, fn.Results.List[0].Type) != "error" {
+			return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s single return value must be error", methodName)
+		}
+	case 2:
+		if exprString(fset, fn.Results.List[1].Type) != "error" {
+			return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s last return value must be error", methodName)
+		}
+		method.ResultType = exprString(fset, fn.Results.List[0].Type)
+	default:
+		return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s must return (T, error) or error", methodName)
 	}
-	method.ResultType = exprString(fset, fn.Results.List[0].Type)
 	_ = paramIndex
 	return method, nil
 }
@@ -479,12 +599,23 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 	if count > 1 {
 		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s has multiple SQL annotations", methodName)
 	}
-	sql := strings.TrimSpace(selected.Args["sql"])
-	if sql == "" {
-		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s requires sql", methodName, selected.Name)
+	rawSQL := strings.TrimSpace(selected.Args["sql"])
+	provider := strings.TrimSpace(selected.Args["provider"])
+	switch {
+	case rawSQL == "" && provider == "":
+		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s requires sql or provider", methodName, selected.Name)
+	case rawSQL != "" && provider != "":
+		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s declares both sql and provider", methodName, selected.Name)
 	}
-	if strings.Contains(sql, "${") {
-		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s uses forbidden ${}", methodName, selected.Name)
+	sql, dynamicSQL, err := parseAnnotationSQL(rawSQL)
+	if err != nil {
+		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses script failed: %w", methodName, selected.Name, err)
+	}
+	texts := append([]string{sql}, dynamicSQLTexts(dynamicSQL)...)
+	for _, text := range texts {
+		if strings.Contains(text, "${") {
+			return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s uses forbidden ${}", methodName, selected.Name)
+		}
 	}
 	useGeneratedKeys := false
 	if value := strings.TrimSpace(selected.Args["useGeneratedKeys"]); value != "" {
@@ -504,16 +635,41 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 		Command:          command,
 		Source:           orm.StatementSourceAnnotation,
 		SQL:              sql,
+		Provider:         provider,
 		UseGeneratedKeys: useGeneratedKeys,
 		KeyProperty:      strings.TrimSpace(selected.Args["keyProperty"]),
 		Parameters:       statementParameters(sql),
+		DynamicSQL:       dynamicSQL,
 	}
+	statement.Parameters = append(statement.Parameters, dynamicStatementParameters(statement.DynamicSQL)...)
+	statement.Parameters = uniqueSorted(statement.Parameters)
 	return statement, true, nil
 }
 
 func validateMethodStatement(model *PackageModel, method MethodModel) error {
+	if err := validateStatementTypes(model, method); err != nil {
+		return err
+	}
 	switch method.Statement.Command {
 	case orm.StatementCommandSelect:
+		if _, _, ok := resultHandlerParam(method); ok {
+			if strings.TrimSpace(method.ResultType) != "" {
+				return fmt.Errorf("goark-orm: mapper method %s with ResultHandler must return error", method.Name)
+			}
+			return validateSQLParameters(model, method)
+		}
+		if strings.TrimSpace(method.ResultType) == "" {
+			return fmt.Errorf("goark-orm: mapper method %s select without ResultHandler must return (T, error)", method.Name)
+		}
+		if _, ok := cursorResultTypeArg(method.ResultType); ok {
+			return validateSQLParameters(model, method)
+		}
+		if _, ok := pageResultTypeArg(method.ResultType); ok {
+			if _, found := pageRequestParam(method); !found {
+				return fmt.Errorf("goark-orm: mapper method %s returns page result but has no orm.PageRequest parameter", method.Name)
+			}
+			return validateSQLParameters(model, method)
+		}
 		if method.ResultType == "int64" || method.ResultType == "int" || method.ResultType == "string" || method.ResultType == "bool" {
 			return validateSQLParameters(model, method)
 		}
@@ -525,6 +681,214 @@ func validateMethodStatement(model *PackageModel, method MethodModel) error {
 		return validateSQLParameters(model, method)
 	default:
 		return fmt.Errorf("goark-orm: mapper method %s has unsupported command %q", method.Name, method.Statement.Command)
+	}
+}
+
+func validateStatementTypes(model *PackageModel, method MethodModel) error {
+	if err := validateParameterType(model, method); err != nil {
+		return err
+	}
+	if method.Statement.Command == orm.StatementCommandSelect {
+		if err := validateResultType(model, method); err != nil {
+			return err
+		}
+	}
+	if method.Statement.SelectKey.Enabled {
+		if strings.TrimSpace(firstNonEmpty(method.Statement.SelectKey.KeyProperty, method.Statement.KeyProperty)) == "" {
+			return fmt.Errorf("goark-orm: mapper method %s selectKey requires keyProperty", method.Name)
+		}
+		resultType := normalizeTypeName(method.Statement.SelectKey.ResultType)
+		if resultType != "" && !isScalarType(resultType) && !entityExists(model, resultType) {
+			return fmt.Errorf("goark-orm: mapper method %s selectKey uses unknown resultType %q", method.Name, method.Statement.SelectKey.ResultType)
+		}
+	}
+	return nil
+}
+
+func validateParameterType(model *PackageModel, method MethodModel) error {
+	parameterType := strings.TrimSpace(method.Statement.ParameterType)
+	if parameterType == "" {
+		return nil
+	}
+	normalized := normalizeTypeName(parameterType)
+	if isMapParameterType(parameterType) {
+		return nil
+	}
+	if !isScalarType(normalized) && !entityExists(model, normalized) {
+		return fmt.Errorf("goark-orm: mapper method %s uses unknown parameterType %q", method.Name, parameterType)
+	}
+	dataParams := methodDataParams(method)
+	if len(dataParams) != 1 {
+		return fmt.Errorf("goark-orm: mapper method %s parameterType %q requires exactly one data parameter", method.Name, parameterType)
+	}
+	actual := normalizeTypeName(dataParams[0].Type)
+	if actual != normalized {
+		return fmt.Errorf("goark-orm: mapper method %s parameterType %q does not match method parameter %s %s", method.Name, parameterType, dataParams[0].Name, dataParams[0].Type)
+	}
+	return nil
+}
+
+func validateResultType(model *PackageModel, method MethodModel) error {
+	resultType := strings.TrimSpace(method.Statement.ResultType)
+	if resultType == "" {
+		return nil
+	}
+	normalized := normalizeResultType(resultType)
+	if !isScalarType(normalized) && !entityExists(model, normalized) {
+		return fmt.Errorf("goark-orm: mapper method %s uses unknown resultType %q", method.Name, resultType)
+	}
+	expected := methodExpectedResultType(method)
+	if expected != "" && normalized != expected {
+		return fmt.Errorf("goark-orm: mapper method %s resultType %q does not match method result %s", method.Name, resultType, method.ResultType)
+	}
+	return nil
+}
+
+func methodExpectedResultType(method MethodModel) string {
+	if itemType, ok := pageResultTypeArg(method.ResultType); ok {
+		return normalizeResultType(itemType)
+	}
+	if itemType, ok := cursorResultTypeArg(method.ResultType); ok {
+		return normalizeResultType(itemType)
+	}
+	if _, itemType, ok := resultHandlerParam(method); ok {
+		return normalizeResultType(itemType)
+	}
+	return normalizeResultType(method.ResultType)
+}
+
+func validateResultMapTypes(model *PackageModel, mapper MapperModel) error {
+	for _, resultMap := range mapper.ResultMaps {
+		if err := validateResultObjectType(model, mapper.TypeName, "resultMap "+resultMap.ID, resultMap.TypeName); err != nil {
+			return err
+		}
+		for _, association := range resultMap.Associations {
+			if err := validateAssociationType(model, mapper.TypeName, resultMap.ID, association); err != nil {
+				return err
+			}
+		}
+		for _, collection := range resultMap.Collections {
+			if err := validateCollectionType(model, mapper.TypeName, resultMap.ID, collection); err != nil {
+				return err
+			}
+		}
+		if err := validateDiscriminatorTypes(model, mapper, resultMap); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateDiscriminatorTypes(model *PackageModel, mapper MapperModel, resultMap orm.ResultMapMeta) error {
+	for _, item := range resultMap.Discriminator.Cases {
+		location := "discriminator case " + item.Value + " on resultMap " + resultMap.ID
+		if item.ResultMap != "" && !resultMapExists(mapper, localXMLResultMapID(mapper.Namespace, item.ResultMap)) {
+			return fmt.Errorf("goark-orm: mapper %s %s references missing resultMap %q", mapper.TypeName, location, item.ResultMap)
+		}
+		if err := validateResultObjectType(model, mapper.TypeName, location, item.ResultType); err != nil {
+			return err
+		}
+		for _, association := range item.Associations {
+			if err := validateAssociationType(model, mapper.TypeName, resultMap.ID, association); err != nil {
+				return err
+			}
+		}
+		for _, collection := range item.Collections {
+			if err := validateCollectionType(model, mapper.TypeName, resultMap.ID, collection); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateAssociationType(model *PackageModel, mapperName string, resultMapID string, association orm.ResultAssociationMeta) error {
+	if err := validateResultObjectType(model, mapperName, "association "+association.Property+" on resultMap "+resultMapID, association.TypeName); err != nil {
+		return err
+	}
+	for _, child := range association.Associations {
+		if err := validateAssociationType(model, mapperName, resultMapID, child); err != nil {
+			return err
+		}
+	}
+	for _, child := range association.Collections {
+		if err := validateCollectionType(model, mapperName, resultMapID, child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateCollectionType(model *PackageModel, mapperName string, resultMapID string, collection orm.ResultCollectionMeta) error {
+	if err := validateResultObjectType(model, mapperName, "collection "+collection.Property+" on resultMap "+resultMapID, collection.TypeName); err != nil {
+		return err
+	}
+	for _, child := range collection.Associations {
+		if err := validateAssociationType(model, mapperName, resultMapID, child); err != nil {
+			return err
+		}
+	}
+	for _, child := range collection.Collections {
+		if err := validateCollectionType(model, mapperName, resultMapID, child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateResultObjectType(model *PackageModel, mapperName string, location string, typeName string) error {
+	typeName = normalizeTypeName(typeName)
+	if typeName == "" || isScalarType(typeName) || entityExists(model, typeName) {
+		return nil
+	}
+	return fmt.Errorf("goark-orm: mapper %s %s uses unknown type %q", mapperName, location, typeName)
+}
+
+func entityExists(model *PackageModel, typeName string) bool {
+	typeName = normalizeTypeName(typeName)
+	for _, entity := range model.Entities {
+		if entity.TypeName == typeName {
+			return true
+		}
+	}
+	return false
+}
+
+func isScalarType(typeName string) bool {
+	switch normalizeTypeName(typeName) {
+	case "bool",
+		"byte",
+		"rune",
+		"string",
+		"int",
+		"int8",
+		"int16",
+		"int32",
+		"int64",
+		"uint",
+		"uint8",
+		"uint16",
+		"uint32",
+		"uint64",
+		"uintptr",
+		"float32",
+		"float64",
+		"Time",
+		"any",
+		"interface{}":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMapParameterType(typeName string) bool {
+	normalized := strings.ReplaceAll(strings.TrimSpace(typeName), " ", "")
+	switch normalized {
+	case "orm.NamedArgs", "NamedArgs", "map[string]any", "map[string]interface{}":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -540,7 +904,14 @@ func resultMapExists(mapper MapperModel, id string) bool {
 func validateSQLParameters(model *PackageModel, method MethodModel) error {
 	available := availableParameters(model, method)
 	for _, name := range method.Statement.Parameters {
-		if _, ok := available[name]; !ok {
+		root, valid := parameterRootName(name)
+		if !valid {
+			return fmt.Errorf("goark-orm: mapper method %s SQL parameter %q is invalid", method.Name, name)
+		}
+		if _, ok := available[name]; ok {
+			continue
+		}
+		if _, ok := available[root]; !ok {
 			return fmt.Errorf("goark-orm: mapper method %s SQL parameter %q has no matching method parameter or entity field", method.Name, name)
 		}
 	}
@@ -549,12 +920,19 @@ func validateSQLParameters(model *PackageModel, method MethodModel) error {
 
 func availableParameters(model *PackageModel, method MethodModel) map[string]struct{} {
 	out := make(map[string]struct{})
-	dataParams := method.Params[1:]
-	for _, param := range dataParams {
+	dataParams := methodDataParams(method)
+	for index, param := range dataParams {
 		out[param.Name] = struct{}{}
+		out[fmt.Sprintf("param%d", index+1)] = struct{}{}
 	}
 	if len(dataParams) != 1 {
 		return out
+	}
+	out["_parameter"] = struct{}{}
+	if isCollectionParameterType(dataParams[0].Type) {
+		out["collection"] = struct{}{}
+		out["list"] = struct{}{}
+		out["array"] = struct{}{}
 	}
 	entityName := normalizeTypeName(dataParams[0].Type)
 	for _, entity := range model.Entities {
@@ -563,9 +941,84 @@ func availableParameters(model *PackageModel, method MethodModel) map[string]str
 		}
 		for _, column := range entity.Columns {
 			out[column.FieldName] = struct{}{}
+			if alias := propertyAlias(column.FieldName); alias != "" {
+				out[alias] = struct{}{}
+			}
 		}
 	}
 	return out
+}
+
+func methodDataParams(method MethodModel) []ParamModel {
+	out := make([]ParamModel, 0, len(method.Params))
+	for index, param := range method.Params {
+		if index == 0 || isPageRequestType(param.Type) || isResultHandlerType(param.Type) {
+			continue
+		}
+		out = append(out, param)
+	}
+	return out
+}
+
+func pageRequestParam(method MethodModel) (ParamModel, bool) {
+	for _, param := range method.Params[1:] {
+		if isPageRequestType(param.Type) {
+			return param, true
+		}
+	}
+	return ParamModel{}, false
+}
+
+func isPageRequestType(typ string) bool {
+	typ = strings.TrimSpace(typ)
+	return typ == "orm.PageRequest" || typ == "PageRequest"
+}
+
+func resultHandlerParam(method MethodModel) (ParamModel, string, bool) {
+	for _, param := range method.Params[1:] {
+		if itemType, ok := resultHandlerTypeArg(param.Type); ok {
+			return param, itemType, true
+		}
+	}
+	return ParamModel{}, "", false
+}
+
+func isResultHandlerType(typ string) bool {
+	_, ok := resultHandlerTypeArg(typ)
+	return ok
+}
+
+func resultHandlerTypeArg(typ string) (string, bool) {
+	typ = strings.TrimSpace(typ)
+	for _, prefix := range []string{"orm.ResultHandler[", "ResultHandler["} {
+		if strings.HasPrefix(typ, prefix) && strings.HasSuffix(typ, "]") {
+			itemType := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(typ, prefix), "]"))
+			return itemType, itemType != ""
+		}
+	}
+	return "", false
+}
+
+func pageResultTypeArg(typ string) (string, bool) {
+	typ = strings.TrimSpace(typ)
+	for _, prefix := range []string{"orm.Page[", "Page["} {
+		if strings.HasPrefix(typ, prefix) && strings.HasSuffix(typ, "]") {
+			itemType := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(typ, prefix), "]"))
+			return itemType, itemType != ""
+		}
+	}
+	return "", false
+}
+
+func cursorResultTypeArg(typ string) (string, bool) {
+	typ = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(typ), "*"))
+	for _, prefix := range []string{"orm.Cursor[", "Cursor["} {
+		if strings.HasPrefix(typ, prefix) && strings.HasSuffix(typ, "]") {
+			itemType := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(typ, prefix), "]"))
+			return itemType, itemType != ""
+		}
+	}
+	return "", false
 }
 
 func normalizeTypeName(typ string) string {
@@ -595,6 +1048,70 @@ func statementParameters(sql string) []string {
 	return out
 }
 
+func parameterRootName(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !isIdentifierStart(rune(raw[0])) {
+		return "", false
+	}
+	index := 1
+	for index < len(raw) && isIdentifierPart(rune(raw[index])) {
+		index++
+	}
+	if !validParameterPathTail(raw[index:]) {
+		return "", false
+	}
+	return raw[:index], true
+}
+
+func validParameterPathTail(raw string) bool {
+	for index := 0; index < len(raw); {
+		switch raw[index] {
+		case '.':
+			index++
+			if index >= len(raw) || !isIdentifierStart(rune(raw[index])) {
+				return false
+			}
+			index++
+			for index < len(raw) && isIdentifierPart(rune(raw[index])) {
+				index++
+			}
+		case '[':
+			end := strings.IndexByte(raw[index:], ']')
+			if end < 0 {
+				return false
+			}
+			end += index
+			content := strings.TrimSpace(raw[index+1 : end])
+			if content == "" {
+				return false
+			}
+			if content[0] == '\'' || content[0] == '"' {
+				if len(content) < 2 || content[len(content)-1] != content[0] {
+					return false
+				}
+			} else {
+				for pos, r := range content {
+					if pos == 0 && r == '-' {
+						return false
+					}
+					if !isIdentifierPart(r) {
+						return false
+					}
+				}
+			}
+			index = end + 1
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isCollectionParameterType(typ string) bool {
+	typ = strings.TrimSpace(typ)
+	return strings.HasPrefix(typ, "[]") || strings.HasPrefix(typ, "[")
+}
+
 func finalizeModel(model *PackageModel, spec GenerateSpec) error {
 	sort.SliceStable(model.Entities, func(i, j int) bool {
 		return model.Entities[i].TypeName < model.Entities[j].TypeName
@@ -608,6 +1125,9 @@ func finalizeModel(model *PackageModel, spec GenerateSpec) error {
 			return fmt.Errorf("goark-orm: duplicate mapper namespace %q on %s and %s", mapper.Namespace, existing, mapper.TypeName)
 		}
 		namespaces[mapper.Namespace] = mapper.TypeName
+		if err := validateResultMapTypes(model, mapper); err != nil {
+			return err
+		}
 		for _, method := range mapper.Methods {
 			if method.Statement.ResultMap != "" && !resultMapExists(mapper, method.Statement.ResultMap) {
 				return fmt.Errorf("goark-orm: method %s references missing resultMap %q", method.Name, method.Statement.ResultMap)

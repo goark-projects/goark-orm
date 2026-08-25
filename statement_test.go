@@ -38,6 +38,29 @@ func TestCompileSQL_whenPostgresDialect_shouldUseNumberedPlaceholders(t *testing
 	}
 }
 
+func TestCompileSQL_whenNestedParameterPathsProvided_shouldResolveStructMapAndSlice(t *testing.T) {
+	user := sqlSessionUser{ID: 7, Name: "Alice"}
+	compiled, err := CompileSQL(
+		"select * from sys_user where name = #{user.name} and status = #{filter.status} and id = #{ids[1]}",
+		NamedArgs{
+			"user":   user,
+			"filter": map[string]any{"status": "ACTIVE"},
+			"ids":    []int64{1, 7},
+		},
+		NewQuestionDialect(),
+	)
+	if err != nil {
+		t.Fatalf("compile SQL failed: %v", err)
+	}
+	if compiled.SQL != "select * from sys_user where name = ? and status = ? and id = ?" {
+		t.Fatalf("unexpected SQL %q", compiled.SQL)
+	}
+	expectedArgs := []any{"Alice", "ACTIVE", int64(7)}
+	if !reflect.DeepEqual(compiled.Args, expectedArgs) {
+		t.Fatalf("unexpected args %#v", compiled.Args)
+	}
+}
+
 func TestCompileSQL_whenParameterMissing_shouldReturnError(t *testing.T) {
 	_, err := CompileSQL("select * from sys_user where id = #{id}", nil, NewQuestionDialect())
 	if err == nil || !strings.Contains(err.Error(), `parameter "id" is missing`) {

@@ -51,6 +51,59 @@ func evalExpression(expression string, lookup valueLookup) (bool, error) {
 	return truthy(value), nil
 }
 
+func evalValueExpression(expression string, lookup valueLookup) (any, error) {
+	expression = strings.TrimSpace(expression)
+	if expression == "" {
+		return nil, fmt.Errorf("goark-orm: dynamic SQL value expression is empty")
+	}
+	parts := splitValueExpression(expression, '+')
+	if len(parts) > 1 {
+		var builder strings.Builder
+		for _, part := range parts {
+			value, ok := expressionValue(part, lookup)
+			if !ok {
+				return nil, fmt.Errorf("SQL value expression variable %q is missing", part)
+			}
+			if value != nil {
+				builder.WriteString(fmt.Sprint(comparableValue(value)))
+			}
+		}
+		return builder.String(), nil
+	}
+	value, ok := expressionValue(expression, lookup)
+	if !ok {
+		return nil, fmt.Errorf("SQL value expression variable %q is missing", expression)
+	}
+	return value, nil
+}
+
+func splitValueExpression(expression string, operator rune) []string {
+	var out []string
+	inQuote := rune(0)
+	start := 0
+	for index, r := range expression {
+		if inQuote != 0 {
+			if r == inQuote {
+				inQuote = 0
+			}
+			continue
+		}
+		if r == '\'' || r == '"' {
+			inQuote = r
+			continue
+		}
+		if r == operator {
+			out = append(out, strings.TrimSpace(expression[start:index]))
+			start = index + 1
+		}
+	}
+	if len(out) == 0 {
+		return []string{expression}
+	}
+	out = append(out, strings.TrimSpace(expression[start:]))
+	return out
+}
+
 func splitExpression(expression string, operator string) []string {
 	var out []string
 	inQuote := rune(0)

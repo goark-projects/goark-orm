@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var statementParamPattern = regexp.MustCompile(`#\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}`)
+var statementParamPattern = regexp.MustCompile(`#\{\s*([^{}]+?)\s*\}`)
 
 // CompiledSQL 表示已经完成占位符改写和参数排序的 SQL。
 type CompiledSQL struct {
@@ -37,7 +37,10 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 	for index, match := range matches {
 		builder.WriteString(query[offset:match[0]])
 		name := strings.TrimSpace(query[match[2]:match[3]])
-		value, ok := args[name]
+		value, ok, err := resolveNamedArg(args, name)
+		if err != nil {
+			return CompiledSQL{}, err
+		}
 		if !ok {
 			return CompiledSQL{}, fmt.Errorf("goark-orm: SQL parameter %q is missing", name)
 		}

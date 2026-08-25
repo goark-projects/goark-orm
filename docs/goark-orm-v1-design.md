@@ -15,9 +15,10 @@ Goark 核心框架已经明确采用编译期生成注册代码，不做 Java �
 - 支持 MyBatis 风格 XML Mapper。
 - 支持 MyBatis 注解风格 Annotation Mapper。
 - XML Mapper 和 Annotation Mapper 可以在同一个接口中混用。
-- 统一实体元数据、Statement 元数据、参数绑定、结果映射、事务和执行器内核。
-- 使用独立 `goark-orm generate orm` 生成 Mapper 实现和静态元数据。
-- 在 Goark 生态中可选使用 `goark generate orm` 作为薄包装入口。
+- 统一实体元数据、Statement 元数据、参数绑定、结果映射、事务、Configuration、一级缓存、Mapper namespace 二级缓存和执行器内核。
+- 使用独立 `goark-orm generate orm` 生成 Mapper 实现、分页签名、流式签名和静态元数据。
+- 支持 Go Mapper 接口在本包内通过接口嵌入复用公共方法。
+- Goark 主 CLI 不包含 ORM 子命令，也不依赖 `goark.dev/orm`。
 - 保持运行时热路径低反射或无反射。
 
 ## 非目标
@@ -47,7 +48,7 @@ EntityMeta / StatementMeta / Mapper Impl / Binding Func
 Session / Executor / Dialect / TypeHandler / Interceptor
         │
         ▼
-goark-database / database/sql
+database/sql
 ```
 
 核心原则：XML 和注解只是 Statement 来源不同，进入运行时前必须统一编译为 `StatementMeta`。
@@ -126,9 +127,10 @@ type User struct {
 3. 非持久化字段必须显式声明 transient=true。
 4. 一个实体至少需要一个 primary-key=true 字段。
 5. auto-increment=true 只能用于主键字段。
-6. version=true 在同一个实体内最多只能出现一次。
-7. soft-delete=true 在同一个实体内最多只能出现一次。
-8. created-at=true 和 updated-at=true 允许各出现一次。
+6. id-type 只能用于主键字段，auto-increment=true 只能与 id-type=AUTO 或未声明 id-type 共用。
+7. version=true 在同一个实体内最多只能出现一次。
+8. soft-delete=true 在同一个实体内最多只能出现一次。
+9. created-at=true 和 updated-at=true 允许各出现一次。
 ```
 
 常用字段属性：
@@ -138,6 +140,7 @@ type User struct {
 | `column` | string | 数据库列名 |
 | `primary-key` | bool | 主键字段 |
 | `auto-increment` | bool | 数据库自增主键 |
+| `id-type` | string | 主键策略：AUTO、INPUT、ASSIGN_ID、ASSIGN_UUID |
 | `type` | string | 数据库列类型描述 |
 | `size` | int | 字符串长度或精度辅助信息 |
 | `nullable` | bool | 是否允许空值 |
@@ -185,6 +188,7 @@ Mapper 规则：
 8. Statement 全名统一为 namespace + "." + methodName。
 9. Mapper 方法第一个参数必须是 context.Context。
 10. Mapper 方法最后一个返回值必须是 error。
+11. Mapper 可以嵌入本包内命名接口，生成器会展平方法并按当前 Mapper namespace 绑定 Statement。
 ```
 
 namespace 推荐按业务域命名，不建议强绑定 Go 包路径：
@@ -213,10 +217,12 @@ V1 只保留四个 SQL 注解：
 ```text
 1. 一个方法最多只能有一个 SQL 注解。
 2. select、insert、update、delete 互斥。
-3. sql 参数必填。
-4. insert 可以声明 useGeneratedKeys 和 keyProperty。
-5. select 返回实体、实体指针、实体切片、分页结果或标量。
-6. insert、update、delete 返回受影响行数或生成主键时必须符合生成器支持的签名。
+3. sql 和 provider 二选一必填，不能同时声明。
+4. sql 可以使用 `<script>` 包裹 MyBatis 风格动态 SQL 节点。
+5. provider 是运行期 SQL Provider 名称，必须由业务显式注册到 `orm.Registry`。
+6. insert 可以声明 useGeneratedKeys 和 keyProperty。
+7. select 返回实体、实体指针、实体切片、分页结果或标量。
+8. insert、update、delete 返回受影响行数或生成主键时必须符合生成器支持的签名。
 ```
 
 示例：
@@ -235,7 +241,15 @@ Update(ctx context.Context, user *User) (int64, error)
 Delete(ctx context.Context, id int64) (int64, error)
 ```
 
-Annotation Mapper V1 主要服务简单静态 SQL。复杂动态 SQL 优先放入 XML。
+Annotation Mapper 支持 `<script>` 动态 SQL，但复杂、可复用 SQL 仍建议放入 XML，便于 review 和复用。
+
+```go
+//goark-orm:select(sql="<script>select id, name from sys_user <where><if test=\"status != nil and status != ''\">status = #{status}</if></where></script>")
+List(ctx context.Context, status string) ([]User, error)
+
+//goark-orm:select(provider="UserSQL.ListByStatus")
+ListByProvider(ctx context.Context, status string) ([]User, error)
+```
 
 ## XML Mapper
 
@@ -268,6 +282,9 @@ XML 规则：
 5. #{param} 走安全参数绑定。
 6. ${} V1 默认禁止。
 7. XML 中定义的方法如果又在接口方法上声明 SQL 注解，生成器必须报错。
+8. `<cache>` 和 `<cache-ref>` 只允许二选一，缓存配置进入生成后的静态 MapperMeta。
+9. statement 可声明 `useCache` 和 `flushCache`，未声明时使用 MyBatis 默认策略。
+10. statement 可声明 `databaseId`，生成期优先选择匹配 `GenerateSpec.DatabaseID` 的同名语句。
 ```
 
 V1 支持节点：
@@ -275,15 +292,21 @@ V1 支持节点：
 | 节点 | 说明 |
 | --- | --- |
 | `mapper` | XML 根节点 |
+| `cache` | 当前 namespace 二级缓存 |
+| `cache-ref` | 复用其他 namespace 二级缓存 |
 | `resultMap` | 结果映射 |
 | `id` | 主键结果映射 |
 | `result` | 普通结果映射 |
+| `association` | 嵌套对象映射 |
+| `collection` | 嵌套集合映射 |
+| `discriminator` / `case` | 判别器元数据 |
 | `select` | 查询语句 |
 | `insert` | 插入语句 |
 | `update` | 更新语句 |
 | `delete` | 删除语句 |
 | `sql` | SQL 片段 |
 | `include` | 片段引用 |
+| `bind` | 动态变量绑定 |
 | `if` | 条件 SQL |
 | `where` | WHERE 包装 |
 | `set` | SET 包装 |
@@ -297,7 +320,8 @@ V1 支持节点：
 1. 支持 `and` / `or` 组合。
 2. 支持 `==` / `!=`。
 3. 支持 `nil`、布尔值、字符串字面量和已命名参数。
-4. 不执行脚本，不支持任意函数调用，不支持 `${}`。
+4. 支持 `user.name`、`items[0]`、`map.key` 这类确定性参数路径。
+5. 不执行脚本，不支持任意函数调用，不支持 `${}`。
 ```
 
 动态 SQL 示例：
@@ -323,10 +347,12 @@ V1 支持节点：
 
 ```text
 1. 方法参数名由生成器从接口方法 AST 中读取。
-2. 单结构体参数可以使用字段名绑定，例如 #{ID}、#{Name}。
-3. 多参数方法必须使用参数名绑定，例如 #{id}、#{status}。
-4. 不存在的参数或字段生成期报错。
-5. TypeHandler 在入库和出库两个方向都必须参与。
+2. 单结构体参数可以使用字段名绑定，例如 `#{ID}`、`#{Name}`，也可以使用 Go 参数路径，例如 `#{user.ID}`、`#{user.name}`。
+3. 多参数方法会生成 MyBatis 风格 `param1`、`param2` 别名，同时保留 Go 参数名。
+4. 单参数会生成 `_parameter` 别名；单 slice/array 参数会生成 `collection`、`list`、`array` 别名。
+5. 参数路径支持结构体导出字段、lower-camel 字段别名、map key 和 slice/array 下标。
+6. 不存在的参数或字段生成期报错。
+7. TypeHandler 在入库和出库两个方向都必须参与；实体路径参数只转换 SQL 实际引用的字段，避免未使用字段触发无关 TypeHandler。
 ```
 
 示例：
@@ -343,17 +369,17 @@ V1 支持的签名：
 ```go
 Find(ctx context.Context, id int64) (*User, error)
 List(ctx context.Context, status string) ([]User, error)
+List(ctx context.Context, query UserQuery, page orm.PageRequest) (orm.Page[User], error)
+ListCursor(ctx context.Context, status string) (*orm.Cursor[User], error)
+ListEach(ctx context.Context, status string, handler orm.ResultHandler[User]) error
 Count(ctx context.Context) (int64, error)
 Insert(ctx context.Context, user *User) (int64, error)
 Update(ctx context.Context, user *User) (int64, error)
 Delete(ctx context.Context, id int64) (int64, error)
 ```
 
-分页结果可以后续加入：
-
-```go
-List(ctx context.Context, query UserQuery, page orm.PageRequest) (orm.Page[User], error)
-```
+分页 Mapper 签名由生成器识别 `orm.Page[T]` 返回值和 `orm.PageRequest` 参数，并生成 `orm.QueryPage[T]` 调用。`PageRequest` 不参与 SQL 参数绑定。
+流式 Mapper 签名由生成器识别 `*orm.Cursor[T]` 返回值或 `orm.ResultHandler[T]` 参数，并分别生成 `orm.QueryCursor[T]` 和 `orm.QueryEach[T]` 调用。`ResultHandler` 不参与 SQL 参数绑定。
 
 V1 不支持隐式无 `error` 返回值。
 
@@ -362,9 +388,9 @@ V1 不支持隐式无 `error` 返回值。
 ```text
 dialect       数据库方言、占位符、分页、标识符引用
 mapping       EntityMeta、ColumnMeta、ResultMap
-statement     StatementMeta、动态 SQL AST、参数绑定计划
+statement     StatementMeta、Provider、动态 SQL AST、参数绑定计划
 executor      Query、QueryOne、Exec、Batch、结果映射
-session       Session、事务上下文
+session       Session、Configuration、事务上下文、一级缓存
 typehandler   JSON、Time、Decimal、自定义类型处理器
 interceptor   SQL 日志、分页、租户、乐观锁、逻辑删除、指标
 xmlmapper     XML 解析模型
@@ -375,9 +401,9 @@ ormgen        生成器模型、校验器、代码渲染
 
 ```go
 type Executor interface {
-	Query(ctx context.Context, statement Statement, args Args, dest any) error
-	QueryOne(ctx context.Context, statement Statement, args Args, dest any) error
-	Exec(ctx context.Context, statement Statement, args Args) (Result, error)
+	Query(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs, dest any) error
+	QueryOne(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs, dest any) error
+	Exec(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs) (Result, error)
 }
 ```
 
@@ -388,6 +414,10 @@ type TypeHandler interface {
 }
 ```
 
+```go
+type SQLProvider func(ctx context.Context, statement StatementMeta, args NamedArgs) (SQLSource, error)
+```
+
 运行时要求：
 
 ```text
@@ -395,7 +425,7 @@ type TypeHandler interface {
 2. 不在热路径解析 XML、注解或 struct tag。
 3. 不在热路径做全量反射字段扫描。
 4. Mapper 实现和行扫描函数由生成器生成。
-5. 事务和连接生命周期对接 goark-database。
+5. 事务和连接生命周期由 goark-orm 自身抽象承载，默认实现基于 database/sql。
 ```
 
 ## CLI 边界
@@ -406,11 +436,7 @@ ORM 必须提供独立 CLI，用户不安装 Goark 主 CLI 也能生成代码：
 goark-orm generate orm ./...
 ```
 
-Goark 主 CLI 可以作为可选生态包装：
-
-```bash
-goark generate orm ./...
-```
+Goark 主 CLI 必须保持不依赖其他 Goark 模块，因此不能包装 `goark-orm` 的生成能力。ORM 用户统一安装和执行独立的 `goark-orm` 命令。
 
 实现分层：
 
@@ -433,12 +459,9 @@ goark.dev/orm/ormgen
         ▼
 goark.dev/orm
         └─ Runtime 契约
-
-goark.dev/cli
-        └─ 可选包装，复用 goark-orm/ormgen，不承载 ORM 核心逻辑
 ```
 
-依赖方向只能是 `goark.dev/orm/cmd -> goark.dev/orm/ormgen -> goark.dev/orm`，以及可选 `cli -> goark.dev/orm/ormgen -> goark.dev/orm`。禁止 `goark-orm` 反向依赖 Goark core、boot 或 CLI。
+依赖方向只能是 `goark.dev/orm/cmd -> goark.dev/orm/ormgen -> goark.dev/orm`。禁止 `goark-orm` 反向依赖 Goark core、boot 或 CLI，也禁止 Goark 主 CLI 依赖 `goark.dev/orm`。
 
 ## 生成内容
 
@@ -453,12 +476,16 @@ zz_goark_orm_<package>_gen.go
 ```text
 1. Entity 静态元数据。
 2. ResultMap 静态元数据。
-3. Statement 静态元数据。
-4. Mapper 接口实现类型。
-5. 参数绑定函数。
-6. 行扫描函数。
-7. TypeHandler 引用。
-8. 可选 Goark Bean 注册代码。
+3. Mapper Cache 静态元数据。
+4. Statement 静态元数据。
+5. Mapper 接口实现类型。
+6. 参数绑定函数。
+7. 行扫描函数。
+8. TypeHandler 引用。
+9. 类型安全字段常量和类型化字段常量。
+10. 单主键实体的 BaseMapper 工厂。
+11. 单主键实体的 Service 工厂。
+12. 可选 Goark Bean 注册代码。
 ```
 
 生成代码必须可读、确定性排序、可提交，并能通过 `go test ./...` 编译。
@@ -480,7 +507,7 @@ zz_goark_orm_<package>_gen.go
 10. 主键缺失或主键规则冲突。
 11. type-handler 未注册。
 12. resultMap 不存在。
-13. SQL 参数找不到对应方法参数或结构体字段。
+13. SQL 参数路径找不到对应方法参数、别名或结构体字段。
 14. 返回值签名不支持。
 15. XML 使用 V1 禁止的 ${}。
 ```
@@ -499,7 +526,34 @@ goark-orm: method UserMapper.FindByID is declared by both XML and annotation
 
 ## 事务与拦截器
 
-事务由 `goark-database` 提供连接和事务底座，`goark-orm` 只消费事务上下文。
+`goark-orm` core 是独立 ORM 框架，自带 MyBatis 风格的 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。默认事务实现基于 `database/sql` 的 `*sql.DB` / `*sql.Tx`。
+
+生成 Mapper 只依赖 `orm.Session`，所以普通自动提交 Session、事务 Session 和 BatchSession 都可以直接传给生成 Mapper：
+
+```go
+factory, err := orm.NewSQLSessionFactory(registry, db, orm.NewPostgresDialect())
+if err != nil {
+	return err
+}
+
+err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) error {
+	userMapper := NewUserMapper(session)
+	_, err := userMapper.ListByStatus(ctx, "ACTIVE")
+	return err
+})
+```
+
+`BatchSession` 对齐 MyBatis `ExecutorType.BATCH` 的核心行为：写语句先进入队列，`Flush(ctx)` 按顺序执行并返回每条语句的 `BatchResult`；查询前会自动 flush，事务批处理可通过 `factory.BeginBatchTx(ctx, opts)` 或在 `InTx` 回调中使用 `orm.NewBatchSession(session)`。
+
+`SQLSession` 默认启用 Session 级一级缓存。缓存 key 由最终编译 SQL 和参数组成，写操作、`Commit`、`Rollback` 和 `Close` 会清空缓存。可通过 `WithLocalCache(false)` 关闭，也可以通过 `Configuration.LocalCacheScope` 设置为 `STATEMENT`，使缓存不跨语句复用。
+
+运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时和 fetch size 元数据。
+
+Mapper namespace 级二级缓存由 `Cache` SPI 承载，默认实现是并发安全的有界内存 LRU 缓存。XML `<cache>` 会为当前 namespace 创建默认二级缓存，`<cache-ref namespace="...">` 会复用目标 namespace 缓存。`select` 默认 `useCache=true`，insert/update/delete 默认 `flushCache=true`，select 默认 `flushCache=false`；显式 `useCache=false` 或 `flushCache=false` 会覆盖默认策略。
+
+二级缓存遵循 MyBatis 风格事务发布语义：自动提交 Session 查询后立即写入缓存，写语句成功后立即清理 namespace 缓存；事务 Session 内的查询缓存写入和写语句缓存清理先进入挂起队列，只有事务 `Commit` 成功后才对共享二级缓存生效，`Rollback` 和未完成 `Close` 会丢弃挂起变更。
+
+未来与 Goark 生态集成时，应新增类似 `mybatis-spring` 的适配层对接 `goark/db`、boot 生命周期和容器装配；`goark-orm` core 不直接依赖 `goark/db`。
 
 拦截器顺序建议：
 
@@ -514,7 +568,18 @@ goark-orm: method UserMapper.FindByID is declared by both XML and annotation
 8. Executor 执行
 ```
 
-V1 可以先保留拦截器接口，不必一次实现全部内置拦截器。
+V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL 渲染后、方言占位符编译前工作。内置能力包括：
+
+```text
+1. BlockAttackInterceptor：拒绝无 WHERE 的 update/delete。
+2. SQLObserverInterceptor：观察下游改写后的最终 SQL 模板和命名参数。
+3. TenantInterceptor：按列和值注入租户 WHERE 条件。
+4. DataPermissionInterceptor：由业务 Provider 返回数据权限 SQLCondition。
+5. DynamicTableInterceptor：按映射改写 from/join/update/into 后的表名。
+6. PaginationInterceptor：从 context 读取 PageRequest 并追加方言分页。
+```
+
+分页拦截器使用 `WithPageRequest(ctx, page)` 传递分页请求。条件注入只覆盖 select/update/delete，insert 的租户字段自动填充属于后续实体填充策略，不在本阶段混入 WHERE 插件。
 
 ## 分期计划
 
@@ -547,22 +612,39 @@ V1 可以先保留拦截器接口，不必一次实现全部内置拦截器。
 
 ### V1.5 工程能力
 
-- 对接 `goark-database` 事务。
-- 支持分页、批量、生成主键。
-- 支持逻辑删除、乐观锁、自动时间字段。
-- 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 扩展点。
+- 已支持独立 `SQLSessionFactory`、自动提交 Session、手动 `BeginTx`、`Commit`、`Rollback`、`Close` 和 `InTx` 回调事务。
+- 已支持 BaseMapper 分页、生成 Mapper 分页签名、生成 Mapper Cursor/ResultHandler 流式签名、按主键批量查询和生成主键元数据透传。
+- 已支持 BatchSession 批处理执行器、自动提交批处理和事务批处理。
+- 已支持 Session 级一级缓存及写操作/生命周期失效。
+- 已支持 Mapper namespace 级二级缓存 SPI、默认内存 LRU 缓存、XML `<cache>` / `<cache-ref>`、statement `useCache` / `flushCache` 和事务提交发布语义。
+- 已支持 ResultMap 的 association 和 collection 嵌套映射，collection 会按根对象 id 聚合多行结果。
+- 已支持 ResultMap association/collection 的 `select` 嵌套查询 eager 回填、`Lazy[T]` / `LazySlice[T]` 显式 lazy 延迟加载、复合列参数绑定和单次父查询内相同参数结果复用；非 Lazy 字段保持 eager 行为，避免引入透明代理。
+- 已支持 XML resultMap `constructor/idArg/arg`、`columnPrefix`、`notNullColumn`、`extends` 生成期继承合并、`autoMapping` 三态元数据和 `discriminator/case` 运行期分派。
+- 已支持 Annotation Mapper 的 `<script>` 动态 SQL 和显式注册 SQL Provider。
+- 已支持 `ResultHandler`、`QueryCursor`、`QueryEach` 和 `RowCursor` 逐行流式查询；游标查询绕过缓存写入，并拒绝 collection resultMap 多行聚合场景。
+- 已支持独立 `Configuration` API，用于统一配置方言、缓存策略、下划线转驼峰和默认执行器类型。
+- 已支持 `ExecutorType.REUSE` 预编译语句复用，按最终 SQL 在 Session 内缓存 prepared statement，并在 Session/事务生命周期结束时关闭。
+- 已支持 BaseMapper 逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
+- 已支持 SQLSession 拦截器 SPI、全表更新/删除保护、SQL 观察、租户条件、数据权限条件、动态表名和分页拦截器。
+- 已支持 `UpdateWrapper` 局部更新、常用条件操作符、`TypedField` 字段引用、生成期 `UserTypedFields`、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
+- 已支持 `IDType` 主键策略、默认 ASSIGN_ID/ASSIGN_UUID 生成器、XML `<bind>` 和 `databaseId` 语句选择。
+- 已支持 `QueryWrapper` / `UpdateWrapper` 嵌套条件、EXISTS/NOT EXISTS、Apply、Last、Between/NotBetween、NotLike、LikeLeft/LikeRight、NotIn，以及 QueryWrapper 的 GroupBy/Having/Select/AllEq/条件化 OrderBy。
+- 已支持 BaseMapper 的 SelectCount、SelectMaps、SelectObjs、DeleteBatchIDs 和 SaveOrUpdate。
+- 已支持 MyBatis-Plus 风格 Service 层、QueryChain、UpdateChain，并由生成器为单主键实体输出 `New<Entity>Service` 工厂。
+- 已支持 Mapper 本包内接口嵌入展平，公共查询/写入接口可以复用到具体 Mapper。
+- 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。
 
 ## 关键决策
 
 | 决策 | 结论 | 原因 |
 | --- | --- | --- |
-| 公开模型 | 只做 Mapper 单体系 | XML 和注解足够覆盖 MyBatis / MyBatis-Plus 风格，不引入重复 Repository 概念 |
+| 公开模型 | Mapper 单体系，并提供 BaseMapper 通用 CRUD | XML 和注解覆盖 MyBatis 风格，BaseMapper 覆盖 MyBatis-Plus 常用 CRUD，不引入重复 Repository 概念 |
 | SQL 注解 | 只保留 select/insert/update/delete | 比通用 query 更明确，减少误用 |
 | namespace | 必填且全局唯一 | 自动推断容易重复，namespace 是稳定公共契约 |
 | 实体字段 | 使用 `goark-orm` struct tag | 字段级元数据更符合 Go 生态 |
 | tag 格式 | 分号分隔且必须 key=value | 解析确定、可扩展、便于错误定位 |
 | 生成方式 | 编译期生成 | 符合 Goark 低反射和显式注册路线 |
-| CLI | `goark-orm generate orm` 为主，`goark generate orm` 为可选包装 | ORM 本身必须能独立安装和使用，Goark 主 CLI 不能承载 ORM 核心逻辑 |
+| CLI | 只提供独立 `goark-orm generate orm` | ORM 本身必须能独立安装和使用，Goark 主 CLI 不能依赖 ORM 模块 |
 
 ## 验证要求
 

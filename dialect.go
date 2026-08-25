@@ -31,6 +31,10 @@ func (questionDialect) QuoteIdent(identifier string) string {
 	return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
 }
 
+func (questionDialect) LimitOffsetSQL(query string, limitPlaceholder string, offsetPlaceholder string) string {
+	return query + " LIMIT " + limitPlaceholder + " OFFSET " + offsetPlaceholder
+}
+
 type postgresDialect struct{}
 
 // NewPostgresDialect 创建 PostgreSQL 方言。
@@ -48,4 +52,8 @@ func (postgresDialect) Placeholder(index int) string {
 
 func (postgresDialect) QuoteIdent(identifier string) string {
 	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func (postgresDialect) LimitOffsetSQL(query string, limitPlaceholder string, offsetPlaceholder string) string {
+	return query + " LIMIT " + limitPlaceholder + " OFFSET " + offsetPlaceholder
 }
