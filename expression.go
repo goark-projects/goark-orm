@@ -14,41 +14,252 @@ func evalExpression(expression string, lookup valueLookup) (bool, error) {
 	if expression == "" {
 		return false, fmt.Errorf("goark-orm: dynamic SQL test expression is empty")
 	}
-	orParts := splitExpression(expression, "or")
-	if len(orParts) > 1 {
-		for _, part := range orParts {
-			ok, err := evalExpression(part, lookup)
+	tokens, err := scanExpressionTokens(expression)
+	if err != nil {
+		return false, err
+	}
+	parser := expressionParser{tokens: tokens, lookup: lookup}
+	out, err := parser.parseOr()
+	if err != nil {
+		return false, err
+	}
+	if !parser.done() {
+		return false, fmt.Errorf("goark-orm: unexpected dynamic SQL token %q", parser.peek().value)
+	}
+	return out, nil
+}
+
+type expressionTokenKind int
+
+const (
+	expressionTokenEOF expressionTokenKind = iota
+	expressionTokenWord
+	expressionTokenString
+	expressionTokenOperator
+	expressionTokenLParen
+	expressionTokenRParen
+)
+
+type expressionToken struct {
+	kind  expressionTokenKind
+	value string
+}
+
+type expressionParser struct {
+	tokens []expressionToken
+	pos    int
+	lookup valueLookup
+}
+
+func scanExpressionTokens(expression string) ([]expressionToken, error) {
+	tokens := make([]expressionToken, 0, 8)
+	for index := 0; index < len(expression); {
+		ch := expression[index]
+		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' {
+			index++
+			continue
+		}
+		switch ch {
+		case '(':
+			tokens = append(tokens, expressionToken{kind: expressionTokenLParen, value: "("})
+			index++
+			continue
+		case ')':
+			tokens = append(tokens, expressionToken{kind: expressionTokenRParen, value: ")"})
+			index++
+			continue
+		case '\'', '"':
+			value, next, err := scanExpressionString(expression, index)
 			if err != nil {
-				return false, err
+				return nil, err
 			}
-			if ok {
-				return true, nil
+			tokens = append(tokens, expressionToken{kind: expressionTokenString, value: value})
+			index = next
+			continue
+		}
+		if index+1 < len(expression) {
+			switch expression[index : index+2] {
+			case "==", "!=", ">=", "<=", "&&", "||":
+				tokens = append(tokens, expressionToken{kind: expressionTokenOperator, value: expression[index : index+2]})
+				index += 2
+				continue
 			}
 		}
-		return false, nil
-	}
-	andParts := splitExpression(expression, "and")
-	if len(andParts) > 1 {
-		for _, part := range andParts {
-			ok, err := evalExpression(part, lookup)
-			if err != nil || !ok {
-				return ok, err
-			}
+		if ch == '!' || ch == '>' || ch == '<' {
+			tokens = append(tokens, expressionToken{kind: expressionTokenOperator, value: expression[index : index+1]})
+			index++
+			continue
 		}
-		return true, nil
+		start := index
+		for index < len(expression) && !isExpressionDelimiter(expression[index]) {
+			index++
+		}
+		if start == index {
+			return nil, fmt.Errorf("goark-orm: invalid dynamic SQL expression near %q", expression[index:])
+		}
+		if index+1 < len(expression) && expression[index] == '(' && expression[index+1] == ')' {
+			index += 2
+		}
+		tokens = append(tokens, expressionToken{kind: expressionTokenWord, value: expression[start:index]})
 	}
-	if left, right, ok := cutOperator(expression, "!="); ok {
-		equal, err := compareExpressionValues(left, right, lookup)
-		return !equal, err
+	tokens = append(tokens, expressionToken{kind: expressionTokenEOF})
+	return tokens, nil
+}
+
+func scanExpressionString(expression string, start int) (string, int, error) {
+	quote := expression[start]
+	for index := start + 1; index < len(expression); index++ {
+		if expression[index] == '\\' && quote == '"' {
+			index++
+			continue
+		}
+		if expression[index] == quote {
+			return expression[start : index+1], index + 1, nil
+		}
 	}
-	if left, right, ok := cutOperator(expression, "=="); ok {
-		return compareExpressionValues(left, right, lookup)
+	return "", start, fmt.Errorf("goark-orm: unterminated dynamic SQL string literal")
+}
+
+func isExpressionDelimiter(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\r', '\n', '(', ')', '!', '>', '<', '=':
+		return true
+	default:
+		return false
 	}
-	value, ok := lookup(strings.TrimSpace(expression))
+}
+
+func (p *expressionParser) parseOr() (bool, error) {
+	left, err := p.parseAnd()
+	if err != nil {
+		return false, err
+	}
+	for p.matchKeyword("or") || p.matchOperator("||") {
+		right, err := p.parseAnd()
+		if err != nil {
+			return false, err
+		}
+		left = left || right
+	}
+	return left, nil
+}
+
+func (p *expressionParser) parseAnd() (bool, error) {
+	left, err := p.parseUnary()
+	if err != nil {
+		return false, err
+	}
+	for p.matchKeyword("and") || p.matchOperator("&&") {
+		right, err := p.parseUnary()
+		if err != nil {
+			return false, err
+		}
+		left = left && right
+	}
+	return left, nil
+}
+
+func (p *expressionParser) parseUnary() (bool, error) {
+	if p.matchKeyword("not") || p.matchOperator("!") {
+		value, err := p.parseUnary()
+		return !value, err
+	}
+	return p.parsePrimary()
+}
+
+func (p *expressionParser) parsePrimary() (bool, error) {
+	if p.matchKind(expressionTokenLParen) {
+		value, err := p.parseOr()
+		if err != nil {
+			return false, err
+		}
+		if !p.matchKind(expressionTokenRParen) {
+			return false, fmt.Errorf("goark-orm: dynamic SQL expression missing closing parenthesis")
+		}
+		return value, nil
+	}
+	return p.parseComparison()
+}
+
+func (p *expressionParser) parseComparison() (bool, error) {
+	left, err := p.consumeValue()
+	if err != nil {
+		return false, err
+	}
+	if operator, ok := p.matchComparisonOperator(); ok {
+		right, err := p.consumeValue()
+		if err != nil {
+			return false, err
+		}
+		return compareExpression(left, operator, right, p.lookup)
+	}
+	value, ok := expressionValue(left, p.lookup)
 	if !ok {
 		return false, nil
 	}
 	return truthy(value), nil
+}
+
+func (p *expressionParser) consumeValue() (string, error) {
+	token := p.peek()
+	switch token.kind {
+	case expressionTokenWord, expressionTokenString:
+		p.pos++
+		return token.value, nil
+	default:
+		return "", fmt.Errorf("goark-orm: expected dynamic SQL value, got %q", token.value)
+	}
+}
+
+func (p *expressionParser) matchComparisonOperator() (string, bool) {
+	token := p.peek()
+	if token.kind != expressionTokenOperator {
+		return "", false
+	}
+	switch token.value {
+	case "==", "!=", ">", ">=", "<", "<=":
+		p.pos++
+		return token.value, true
+	default:
+		return "", false
+	}
+}
+
+func (p *expressionParser) matchKeyword(keyword string) bool {
+	token := p.peek()
+	if token.kind == expressionTokenWord && strings.EqualFold(token.value, keyword) {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+func (p *expressionParser) matchOperator(operator string) bool {
+	token := p.peek()
+	if token.kind == expressionTokenOperator && token.value == operator {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+func (p *expressionParser) matchKind(kind expressionTokenKind) bool {
+	if p.peek().kind == kind {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+func (p *expressionParser) peek() expressionToken {
+	if p.pos >= len(p.tokens) {
+		return expressionToken{kind: expressionTokenEOF}
+	}
+	return p.tokens[p.pos]
+}
+
+func (p *expressionParser) done() bool {
+	return p.peek().kind == expressionTokenEOF
 }
 
 func evalValueExpression(expression string, lookup valueLookup) (any, error) {
@@ -166,14 +377,103 @@ func compareExpressionValues(left string, right string, lookup valueLookup) (boo
 	return fmt.Sprint(leftComparable) == fmt.Sprint(rightComparable), nil
 }
 
+func compareExpression(left string, operator string, right string, lookup valueLookup) (bool, error) {
+	switch operator {
+	case "==":
+		return compareExpressionValues(left, right, lookup)
+	case "!=":
+		equal, err := compareExpressionValues(left, right, lookup)
+		return !equal, err
+	case ">", ">=", "<", "<=":
+		order, ok, err := compareExpressionOrder(left, right, lookup)
+		if err != nil || !ok {
+			return false, err
+		}
+		switch operator {
+		case ">":
+			return order > 0, nil
+		case ">=":
+			return order >= 0, nil
+		case "<":
+			return order < 0, nil
+		case "<=":
+			return order <= 0, nil
+		}
+	}
+	return false, fmt.Errorf("goark-orm: unsupported dynamic SQL operator %q", operator)
+}
+
+func compareExpressionOrder(left string, right string, lookup valueLookup) (int, bool, error) {
+	leftValue, _ := expressionValue(left, lookup)
+	rightValue, _ := expressionValue(right, lookup)
+	if isNilValue(leftValue) || isNilValue(rightValue) {
+		return 0, false, nil
+	}
+	leftNumber, leftNumberOK := numericExpressionValue(leftValue)
+	rightNumber, rightNumberOK := numericExpressionValue(rightValue)
+	if leftNumberOK && rightNumberOK {
+		switch {
+		case leftNumber > rightNumber:
+			return 1, true, nil
+		case leftNumber < rightNumber:
+			return -1, true, nil
+		default:
+			return 0, true, nil
+		}
+	}
+	leftText, leftStringOK := comparableValue(leftValue).(string)
+	rightText, rightStringOK := comparableValue(rightValue).(string)
+	if leftStringOK && rightStringOK {
+		return strings.Compare(leftText, rightText), true, nil
+	}
+	return 0, false, fmt.Errorf("goark-orm: dynamic SQL operator requires numeric or string values")
+}
+
+func numericExpressionValue(value any) (float64, bool) {
+	switch item := value.(type) {
+	case int:
+		return float64(item), true
+	case int8:
+		return float64(item), true
+	case int16:
+		return float64(item), true
+	case int32:
+		return float64(item), true
+	case int64:
+		return float64(item), true
+	case uint:
+		return float64(item), true
+	case uint8:
+		return float64(item), true
+	case uint16:
+		return float64(item), true
+	case uint32:
+		return float64(item), true
+	case uint64:
+		return float64(item), true
+	case uintptr:
+		return float64(item), true
+	case float32:
+		return float64(item), true
+	case float64:
+		return item, true
+	case string:
+		parsed, err := strconv.ParseFloat(item, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
 func expressionValue(raw string, lookup valueLookup) (any, bool) {
 	raw = strings.TrimSpace(raw)
+	lower := strings.ToLower(raw)
 	switch {
-	case raw == "nil":
+	case lower == "nil" || lower == "null":
 		return nil, true
-	case raw == "true":
+	case lower == "true":
 		return true, true
-	case raw == "false":
+	case lower == "false":
 		return false, true
 	case strings.HasPrefix(raw, "'") && strings.HasSuffix(raw, "'") && len(raw) >= 2:
 		return strings.TrimSuffix(strings.TrimPrefix(raw, "'"), "'"), true
@@ -182,11 +482,82 @@ func expressionValue(raw string, lookup valueLookup) (any, bool) {
 		if err == nil {
 			return value, true
 		}
+	case strings.HasPrefix(lower, "len(") && strings.HasSuffix(raw, ")"):
+		return expressionLength(strings.TrimSpace(raw[4:len(raw)-1]), lookup)
+	case isExpressionNumber(raw):
+		if strings.ContainsAny(raw, ".eE") {
+			parsed, err := strconv.ParseFloat(raw, 64)
+			return parsed, err == nil
+		}
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		return parsed, err == nil
 	case raw != "":
+		if value, ok := expressionSizeProperty(raw, lookup); ok {
+			return value, true
+		}
 		value, ok := lookup(raw)
 		return value, ok
 	}
 	return nil, false
+}
+
+func isExpressionNumber(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	start := 0
+	if raw[0] == '-' || raw[0] == '+' {
+		if len(raw) == 1 {
+			return false
+		}
+		start = 1
+	}
+	digit := false
+	for index := start; index < len(raw); index++ {
+		ch := raw[index]
+		if ch >= '0' && ch <= '9' {
+			digit = true
+			continue
+		}
+		if ch == '.' || ch == 'e' || ch == 'E' || ch == '-' || ch == '+' {
+			continue
+		}
+		return false
+	}
+	return digit
+}
+
+func expressionSizeProperty(raw string, lookup valueLookup) (any, bool) {
+	for _, suffix := range []string{".size()", ".length()", ".size", ".length"} {
+		if strings.HasSuffix(raw, suffix) {
+			return expressionLength(strings.TrimSpace(raw[:len(raw)-len(suffix)]), lookup)
+		}
+	}
+	return nil, false
+}
+
+func expressionLength(raw string, lookup valueLookup) (any, bool) {
+	if raw == "" {
+		return nil, false
+	}
+	value, ok := lookup(raw)
+	if !ok {
+		return nil, false
+	}
+	if isNilValue(value) {
+		return 0, true
+	}
+	current := reflect.ValueOf(value)
+	current, nilValue := dereferenceParameterValue(current)
+	if nilValue {
+		return 0, true
+	}
+	switch current.Kind() {
+	case reflect.Array, reflect.Slice, reflect.Map, reflect.String:
+		return current.Len(), true
+	default:
+		return nil, false
+	}
 }
 
 func comparableValue(value any) any {
