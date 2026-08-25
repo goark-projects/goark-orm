@@ -15,6 +15,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和基础结果扫描。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
+- MyBatis `${}` 原样替换的 Go 化安全版本：默认拒绝普通字符串，只允许 `RawSQLToken`，内置 `RawIdentifier` 和 `RawOrderBy` 白名单 token。
 - XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`；`test` 表达式支持括号、`and/or`、`not/!`、`==/!=/>/>=/</<=`、数值/字符串比较和集合 `size/length`。
 - MyBatis-Plus 风格 `BaseMapper` 通用 CRUD、`QueryWrapper` 条件构造器和 `Page` 分页模型。
 - MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作。
@@ -252,6 +253,37 @@ err := registry.RegisterSQLProvider("UserSQL.ListByStatus", func(ctx context.Con
 if err != nil {
 	return err
 }
+```
+
+`${}` 只允许显式安全 token，适合动态表名、列名或排序字段：
+
+```go
+table, err := orm.NewRawIdentifier("tenant_01.sys_user")
+if err != nil {
+	return err
+}
+orderName, err := orm.NewRawOrderItem("name", false)
+if err != nil {
+	return err
+}
+orderID, err := orm.NewRawOrderItem("id", true)
+if err != nil {
+	return err
+}
+
+compiled, err := orm.CompileSQL(
+	"select * from ${table} order by ${orderBy} limit #{limit}",
+	orm.NamedArgs{
+		"table":   table,
+		"orderBy": orm.NewRawOrderBy(orderName, orderID),
+		"limit":   20,
+	},
+	orm.NewPostgresDialect(),
+)
+if err != nil {
+	return err
+}
+_ = compiled
 ```
 
 MyBatis 风格事务可以通过 `SQLSessionFactory` 使用：

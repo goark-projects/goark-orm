@@ -7,6 +7,7 @@ import (
 )
 
 var statementParamPattern = regexp.MustCompile(`#\{\s*([^{}]+?)\s*\}`)
+var rawSQLParamPattern = regexp.MustCompile(`\$\{\s*([^{}]+?)\s*\}`)
 
 // CompiledSQL 表示已经完成占位符改写和参数排序的 SQL。
 type CompiledSQL struct {
@@ -19,9 +20,11 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 	if dialect == nil {
 		dialect = NewQuestionDialect()
 	}
-	if strings.Contains(query, "${") {
-		return CompiledSQL{}, bindingErrorf("SQL uses forbidden ${}")
+	rendered, err := renderRawSQL(query, args, dialect)
+	if err != nil {
+		return CompiledSQL{}, err
 	}
+	query = rendered
 	matches := statementParamPattern.FindAllStringSubmatchIndex(query, -1)
 	if len(matches) == 0 {
 		if strings.Contains(query, "#{") {
@@ -57,4 +60,50 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 		return CompiledSQL{}, bindingErrorf("SQL contains invalid parameter placeholder")
 	}
 	return compiled, nil
+}
+
+func renderRawSQL(query string, args NamedArgs, dialect Dialect) (string, error) {
+	matches := rawSQLParamPattern.FindAllStringSubmatchIndex(query, -1)
+	if len(matches) == 0 {
+		if strings.Contains(query, "${") {
+			return "", bindingErrorf("SQL contains invalid raw placeholder")
+		}
+		return query, nil
+	}
+	var builder strings.Builder
+	builder.Grow(len(query))
+	offset := 0
+	for _, match := range matches {
+		builder.WriteString(query[offset:match[0]])
+		name := strings.TrimSpace(query[match[2]:match[3]])
+		value, ok, err := resolveNamedArg(args, name)
+		if err != nil {
+			return "", &BindingError{Parameter: name, Err: err}
+		}
+		if !ok {
+			return "", &BindingError{
+				Parameter: name,
+				Message:   fmt.Sprintf("raw SQL parameter %q is missing", name),
+			}
+		}
+		token, ok := value.(RawSQLToken)
+		if !ok {
+			return "", &BindingError{
+				Parameter: name,
+				Message:   fmt.Sprintf("raw SQL parameter %q must use orm.RawSQLToken", name),
+			}
+		}
+		rendered, err := token.renderRawSQL(dialect)
+		if err != nil {
+			return "", &BindingError{Parameter: name, Err: err}
+		}
+		builder.WriteString(rendered)
+		offset = match[1]
+	}
+	builder.WriteString(query[offset:])
+	rendered := builder.String()
+	if strings.Contains(rendered, "${") {
+		return "", bindingErrorf("SQL contains invalid raw placeholder")
+	}
+	return rendered, nil
 }

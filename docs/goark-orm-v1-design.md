@@ -27,7 +27,7 @@ Goark 核心框架已经明确采用编译期生成注册代码，不做 Java �
 - 不实现 Hibernate/JPA 的持久化上下文、脏检查、透明懒加载代理和隐式 flush。
 - 不做运行时 Mapper 扫描、运行时 XML 扫描或运行时实体建模。
 - 不生成 SQL 迁移脚本，不提交临时 SQL 文件。
-- V1 不支持 `${}` 原样字符串替换。
+- `${}` 原样替换默认拒绝普通字符串，仅允许显式 `RawSQLToken` 白名单 token。
 
 ## 总体架构
 
@@ -282,7 +282,7 @@ XML 规则：
 3. select、insert、update、delete 的 id 必须匹配接口方法名。
 4. resultMap 引用必须存在。
 5. #{param} 走安全参数绑定。
-6. ${} V1 默认禁止。
+6. `${}` 仅允许绑定 `RawSQLToken`，用于表名、列名、排序字段等白名单场景。
 7. XML 中定义的方法如果又在接口方法上声明 SQL 注解，生成器必须报错。
 8. `<cache>` 和 `<cache-ref>` 只允许二选一，缓存配置进入生成后的静态 MapperMeta。
 9. statement 可声明 `useCache` 和 `flushCache`，未声明时使用 MyBatis 默认策略。
@@ -325,7 +325,7 @@ V1 支持节点：
 4. 支持 `nil` / `null`、布尔值、数值、字符串字面量和已命名参数。
 5. 支持 `user.name`、`items[0]`、`map.key` 这类确定性参数路径。
 6. 支持集合或字符串的 `size` / `length` / `size()` / `length()` 和 Go 化 `len(value)` 只读长度表达式。
-7. 不执行脚本，不支持任意函数调用，不支持 `${}`。
+7. 不执行脚本，不支持任意函数调用；`${}` 仅允许显式 `RawSQLToken`。
 ```
 
 动态 SQL 示例：
@@ -513,7 +513,7 @@ zz_goark_orm_<package>_gen.go
 12. resultMap 不存在。
 13. SQL 参数路径找不到对应方法参数、别名或结构体字段。
 14. 返回值签名不支持。
-15. XML 使用 V1 禁止的 ${}。
+15. XML 或注解使用 `${}` 时，运行期必须绑定 `RawSQLToken`。
 ```
 
 错误信息必须包含文件、类型、方法或字段定位。

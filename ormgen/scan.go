@@ -620,12 +620,6 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 	if err != nil {
 		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses script failed: %w", methodName, selected.Name, err)
 	}
-	texts := append([]string{sql}, dynamicSQLTexts(dynamicSQL)...)
-	for _, text := range texts {
-		if strings.Contains(text, "${") {
-			return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s uses forbidden ${}", methodName, selected.Name)
-		}
-	}
 	useGeneratedKeys := false
 	if value := strings.TrimSpace(selected.Args["useGeneratedKeys"]); value != "" {
 		switch value {

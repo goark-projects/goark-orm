@@ -108,6 +108,46 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenAnnotationUsesRawSQLToken_shouldKeepRawPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import (
+	"context"
+
+	orm "goark.dev/orm"
+)
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name'"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper")
+type UserMapper interface {
+	//goark-orm:select(sql="select id, name from ${table} where id = #{id}")
+	FindFrom(ctx context.Context, table orm.RawIdentifier, id int64) (*User, error)
+}
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := string(source)
+	expected := []string{
+		`${table}`,
+		`"table": table`,
+		`"id": id`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, output)
+		}
+	}
+}
+
 func TestGenerate_whenMapperUsesStreamingSignatures_shouldRenderCursorAndEachCalls(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

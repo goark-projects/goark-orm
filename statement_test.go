@@ -70,7 +70,7 @@ func TestCompileSQL_whenParameterMissing_shouldReturnError(t *testing.T) {
 
 func TestCompileSQL_whenRawSubstitutionUsed_shouldReject(t *testing.T) {
 	_, err := CompileSQL("select * from ${table}", nil, NewQuestionDialect())
-	if err == nil || !strings.Contains(err.Error(), "forbidden") {
-		t.Fatalf("expected forbidden substitution error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "raw SQL parameter") {
+		t.Fatalf("expected raw substitution error, got %v", err)
 	}
 }

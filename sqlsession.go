@@ -333,9 +333,6 @@ func (s *SQLSession) invokeSQLProvider(ctx context.Context, meta StatementMeta, 
 	if source.SQL == "" && len(source.DynamicSQL) == 0 {
 		return SQLSource{}, bindingErrorf("SQL provider %q for statement %s returned empty SQL", name, meta.FullName)
 	}
-	if strings.Contains(source.SQL, "${") || dynamicSQLContainsForbiddenSubstitution(source.DynamicSQL) {
-		return SQLSource{}, bindingErrorf("SQL provider %q for statement %s uses forbidden ${}", name, meta.FullName)
-	}
 	return source, nil
 }
 

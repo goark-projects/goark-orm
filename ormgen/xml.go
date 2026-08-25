@@ -118,15 +118,6 @@ func parseXMLMapper(path string) (xmlMapperModel, error) {
 	if err := expandXMLIncludes(&mapper); err != nil {
 		return xmlMapperModel{}, err
 	}
-	for _, statement := range mapper.allStatements() {
-		texts := append([]string{statement.SQL, statement.SelectKey.SQL}, dynamicSQLTexts(statement.DynamicSQL)...)
-		texts = append(texts, dynamicSQLTexts(statement.SelectKey.DynamicSQL)...)
-		for _, text := range texts {
-			if strings.Contains(text, "${") {
-				return xmlMapperModel{}, fmt.Errorf("goark-orm: XML mapper %s statement %s uses forbidden ${}", path, statement.ID)
-			}
-		}
-	}
 	return mapper, nil
 }
 
