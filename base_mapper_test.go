@@ -494,6 +494,48 @@ func TestBaseMapper_Insert_whenAssignUUIDPrimaryKey_shouldGenerateAndInsertPrima
 	}
 }
 
+func TestBaseMapper_Insert_whenGlobalConfigProvidesAssignID_shouldGeneratePrimaryKey(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	config := DefaultConfiguration()
+	config.GlobalConfig = DefaultGlobalConfig()
+	config.GlobalConfig.DbConfig.IDType = IDTypeAssignID
+	config.GlobalConfig.IdentifierGenerator = fixedIdentifierGenerator{id: int64(9001)}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperUser, int64](session, EntityMeta{
+		TypeName: "baseMapperUser",
+		Table:    "sys_user",
+		Columns: []ColumnMeta{
+			{FieldName: "ID", FieldType: "int64", ColumnName: "id", PrimaryKey: true},
+			{FieldName: "Name", FieldType: "string", ColumnName: "name"},
+			{FieldName: "Status", FieldType: "string", ColumnName: "status"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+	user := &baseMapperUser{Name: "Alice", Status: "ACTIVE"}
+
+	_, err = mapper.Insert(context.Background(), user)
+	if err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+
+	if user.ID != 9001 {
+		t.Fatalf("expected global id type to assign id, got %#v", user)
+	}
+	if state.exec != `INSERT INTO "sys_user" ("id", "name", "status") VALUES ($1, $2, $3)` {
+		t.Fatalf("unexpected exec SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: int64(9001)}, {Ordinal: 2, Value: "Alice"}, {Ordinal: 3, Value: "ACTIVE"}}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected exec args %#v", state.execArgs)
+	}
+}
+
 func TestBaseMapper_Insert_whenAutoTimeFieldsPresent_shouldFillCreatedAndUpdatedAt(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1, lastInsertID: 42}
@@ -527,6 +569,127 @@ func TestBaseMapper_Insert_whenAutoTimeFieldsPresent_shouldFillCreatedAndUpdated
 		{Ordinal: 3, Value: false},
 		{Ordinal: 4, Value: now},
 		{Ordinal: 5, Value: now},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected exec args %#v", state.execArgs)
+	}
+}
+
+func TestBaseMapper_SelectByID_whenGlobalConfigProvidesSchemaAndTablePrefix_shouldUsePhysicalTable(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name", "status"},
+		values:  [][]driver.Value{{int64(7), "Alice", "ACTIVE"}},
+	}
+	config := DefaultConfiguration()
+	config.GlobalConfig = DefaultGlobalConfig()
+	config.GlobalConfig.DbConfig.Schema = "tenant_01"
+	config.GlobalConfig.DbConfig.TablePrefix = "sys_"
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperUser, int64](session, EntityMeta{
+		TypeName: "baseMapperUser",
+		Table:    "user",
+		Columns: []ColumnMeta{
+			{FieldName: "ID", FieldType: "int64", ColumnName: "id", PrimaryKey: true, AutoIncrement: true},
+			{FieldName: "Name", FieldType: "string", ColumnName: "name"},
+			{FieldName: "Status", FieldType: "string", ColumnName: "status"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	user, err := mapper.SelectByID(context.Background(), int64(7))
+	if err != nil {
+		t.Fatalf("select by id failed: %v", err)
+	}
+
+	if user == nil || user.ID != 7 || user.Name != "Alice" {
+		t.Fatalf("unexpected user %#v", user)
+	}
+	if state.query != `SELECT "id", "name", "status" FROM "tenant_01"."sys_user" WHERE "id" = $1` {
+		t.Fatalf("unexpected query %q", state.query)
+	}
+}
+
+func TestBaseMapper_DeleteByID_whenGlobalConfigProvidesLogicDeleteValues_shouldUseConfiguredValues(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	config := DefaultConfiguration()
+	config.GlobalConfig = DefaultGlobalConfig()
+	config.GlobalConfig.DbConfig.LogicDeleteValue = int64(1)
+	config.GlobalConfig.DbConfig.LogicNotDeleteValue = int64(0)
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperAuditUser, int64](session, baseMapperAuditUserEntity())
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	rows, err := mapper.DeleteByID(context.Background(), int64(7))
+	if err != nil {
+		t.Fatalf("delete by id failed: %v", err)
+	}
+
+	if rows != 1 {
+		t.Fatalf("unexpected rows affected %d", rows)
+	}
+	if state.exec != `UPDATE "sys_user" SET "deleted" = $1 WHERE "id" = $2 AND "deleted" = $3` {
+		t.Fatalf("unexpected exec SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: int64(1)},
+		{Ordinal: 2, Value: int64(7)},
+		{Ordinal: 3, Value: int64(0)},
+	}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected exec args %#v", state.execArgs)
+	}
+}
+
+func TestBaseMapper_DeleteByID_whenGlobalConfigNamesLogicDeleteField_shouldUseSoftDelete(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	config := DefaultConfiguration()
+	config.GlobalConfig = DefaultGlobalConfig()
+	config.GlobalConfig.DbConfig.LogicDeleteField = "Deleted"
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperAuditUser, int64](session, EntityMeta{
+		TypeName: "baseMapperAuditUser",
+		Table:    "sys_user",
+		Columns: []ColumnMeta{
+			{FieldName: "ID", FieldType: "int64", ColumnName: "id", PrimaryKey: true, AutoIncrement: true},
+			{FieldName: "Name", FieldType: "string", ColumnName: "name"},
+			{FieldName: "Deleted", FieldType: "bool", ColumnName: "deleted"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	rows, err := mapper.DeleteByID(context.Background(), int64(7))
+	if err != nil {
+		t.Fatalf("delete by id failed: %v", err)
+	}
+
+	if rows != 1 {
+		t.Fatalf("unexpected rows affected %d", rows)
+	}
+	if state.exec != `UPDATE "sys_user" SET "deleted" = $1 WHERE "id" = $2 AND "deleted" = $3` {
+		t.Fatalf("unexpected exec SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{
+		{Ordinal: 1, Value: true},
+		{Ordinal: 2, Value: int64(7)},
+		{Ordinal: 3, Value: false},
 	}
 	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
 		t.Fatalf("unexpected exec args %#v", state.execArgs)

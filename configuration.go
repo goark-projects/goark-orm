@@ -32,6 +32,7 @@ const (
 type Configuration struct {
 	Dialect                  Dialect
 	DatabaseID               string
+	GlobalConfig             GlobalConfig
 	LocalCacheEnabled        *bool
 	LocalCacheScope          LocalCacheScope
 	CacheEnabled             *bool
@@ -53,7 +54,14 @@ func DefaultConfiguration() Configuration {
 		LocalCacheScope:     LocalCacheScopeSession,
 		CacheEnabled:        &cacheEnabled,
 		DefaultExecutorType: ExecutorTypeSimple,
+		GlobalConfig:        DefaultGlobalConfig(),
 	}
+}
+
+// WithGlobalConfig 返回设置 MyBatis-Plus 风格全局配置后的配置副本。
+func (c Configuration) WithGlobalConfig(global GlobalConfig) Configuration {
+	c.GlobalConfig = global
+	return c
 }
 
 // WithLocalCache 返回显式设置一级缓存开关后的配置副本。
@@ -90,6 +98,9 @@ func WithConfiguration(config Configuration) SQLSessionOption {
 		session.cacheEnabled = boolValue(normalized.CacheEnabled, true)
 		session.mapUnderscoreToCamelCase = normalized.MapUnderscoreToCamelCase
 		session.metaObjectHandler = normalized.MetaObjectHandler
+		if normalized.GlobalConfig.IdentifierGenerator != nil {
+			session.identifierGenerator = normalized.GlobalConfig.IdentifierGenerator
+		}
 		if boolValue(normalized.LocalCacheEnabled, true) {
 			if session.localCache == nil {
 				session.localCache = newLocalCache()
@@ -111,6 +122,16 @@ func normalizeConfiguration(config Configuration, fallbackDialect Dialect) (Conf
 		out.Dialect = NewQuestionDialect()
 	}
 	out.DatabaseID = strings.TrimSpace(out.DatabaseID)
+	global, err := normalizeGlobalConfig(out.GlobalConfig)
+	if err != nil {
+		return Configuration{}, err
+	}
+	out.GlobalConfig = global
+	if out.MetaObjectHandler == nil {
+		out.MetaObjectHandler = out.GlobalConfig.MetaObjectHandler
+	} else if out.GlobalConfig.MetaObjectHandler == nil {
+		out.GlobalConfig.MetaObjectHandler = out.MetaObjectHandler
+	}
 	if out.LocalCacheEnabled == nil {
 		out.LocalCacheEnabled = boolPointer(boolValue(defaults.LocalCacheEnabled, true))
 	} else {

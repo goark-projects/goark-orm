@@ -98,8 +98,8 @@ func NewSQLSession(registry *Registry, executor SQLExecutor, dialect Dialect, op
 		localCache:          newLocalCache(),
 		localCacheScope:     LocalCacheScopeSession,
 		cacheEnabled:        true,
-		identifierGenerator: NewDefaultIdentifierGenerator(),
-		metaObjectHandler:   configuration.MetaObjectHandler,
+		identifierGenerator: firstIdentifierGenerator(configuration.GlobalConfig.IdentifierGenerator, NewDefaultIdentifierGenerator()),
+		metaObjectHandler:   firstMetaObjectHandler(configuration.MetaObjectHandler, configuration.GlobalConfig.MetaObjectHandler),
 	}
 	session.statementExecutor = defaultStatementExecutor{}
 	session.statementHandler = &defaultStatementHandler{session: session}
@@ -126,6 +126,11 @@ func (s *SQLSession) Configuration() Configuration {
 		return config
 	}
 	return cloneConfiguration(s.configuration)
+}
+
+// GlobalConfig 返回当前 Session 使用的全局配置快照。
+func (s *SQLSession) GlobalConfig() GlobalConfig {
+	return s.Configuration().GlobalConfig
 }
 
 // Dialect 返回当前 Session 使用的数据库方言。
@@ -273,10 +278,11 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 		renderArgs = rendered.Args
 	}
 	runtime := &StatementRuntime{
-		Meta:    meta,
-		SQL:     sqlText,
-		Args:    copyNamedArgs(renderArgs),
-		Dialect: s.Dialect(),
+		Meta:          meta,
+		SQL:           sqlText,
+		Args:          copyNamedArgs(renderArgs),
+		Dialect:       s.Dialect(),
+		Configuration: s.Configuration(),
 	}
 	if len(s.interceptors) > 0 {
 		invocation := &StatementInvocation{

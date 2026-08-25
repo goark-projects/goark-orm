@@ -13,11 +13,12 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - 生成 `RegisterGoarkORMMetadata`、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码。
-- `database/sql` Session、独立 `Configuration`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和基础结果扫描。
+- `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和基础结果扫描。
 - XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`。
 - MyBatis-Plus 风格 `BaseMapper` 通用 CRUD、`QueryWrapper` 条件构造器和 `Page` 分页模型。
 - MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作。
 - MyBatis-Plus 风格 `IDType` 主键策略：`AUTO`、`INPUT`、`ASSIGN_ID`、`ASSIGN_UUID`。
+- `DbConfig` 支持全局主键策略、tablePrefix、schema、logicDeleteField、logicDeleteValue 和 logicNotDeleteValue。
 - `BaseMapper` 支持 `SelectCount`、`SelectMaps`、`SelectObjs`、`DeleteBatchIDs` 和 `SaveOrUpdate`。
 - `BaseMapper` 已支持逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - MyBatis-Plus 风格 `MetaObjectHandler` 自动填充，支持 `fill='insert'`、`fill='update'`、`fill='insert_update'`，可用于 BaseMapper 和普通 Mapper 写语句。
@@ -155,7 +156,12 @@ config := orm.DefaultConfiguration().
 config.Dialect = orm.NewPostgresDialect()
 config.LocalCacheScope = orm.LocalCacheScopeSession
 config.DefaultExecutorType = orm.ExecutorTypeReuse
-config.MetaObjectHandler = auditFillHandler{}
+config.GlobalConfig.DbConfig.IDType = orm.IDTypeAssignID
+config.GlobalConfig.DbConfig.TablePrefix = "sys_"
+config.GlobalConfig.DbConfig.Schema = "tenant_01"
+config.GlobalConfig.DbConfig.LogicDeleteValue = int64(1)
+config.GlobalConfig.DbConfig.LogicNotDeleteValue = int64(0)
+config.GlobalConfig.MetaObjectHandler = auditFillHandler{}
 
 session, err := orm.NewSQLSession(registry, db, nil, orm.WithConfiguration(config))
 if err != nil {

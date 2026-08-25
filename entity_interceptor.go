@@ -52,7 +52,7 @@ func (i *entitySemanticInterceptor) Intercept(ctx context.Context, invocation *S
 	if !ok {
 		return invocation.Proceed(ctx)
 	}
-	columns, err := collectBaseMapperSemanticColumns(entity)
+	columns, err := collectBaseMapperSemanticColumnsWithDbConfig(entity, statement.Configuration.GlobalConfig.DbConfig)
 	if err != nil {
 		return err
 	}
@@ -127,21 +127,21 @@ func (i *entitySemanticInterceptor) applyLogicDelete(statement *StatementRuntime
 	if statement.Meta.Command == StatementCommandDelete {
 		where, ok := simpleDeleteWhere(statement.SQL)
 		if ok {
-			table, err := quoteIdentifierPath(statement.Dialect, entity.Table)
+			table, err := quoteIdentifierPath(statement.Dialect, effectiveTableName(entity.Table, statement.Configuration.GlobalConfig.DbConfig))
 			if err != nil {
 				return err
 			}
 			deleteArg := nextSQLArgName(statement.Args, baseMapperSoftDeleteDeleteArg)
 			liveArg := nextSQLArgName(statement.Args, baseMapperSoftDeleteLiveArg)
-			statement.Args[deleteArg] = true
-			statement.Args[liveArg] = false
+			statement.Args[deleteArg] = logicDeleteValue(statement.Configuration.GlobalConfig.DbConfig)
+			statement.Args[liveArg] = logicNotDeleteValue(statement.Configuration.GlobalConfig.DbConfig)
 			statement.SQL = "UPDATE " + table + " SET " + deletedColumn + " = #{" + deleteArg + "} WHERE " + where + " AND " + deletedColumn + " = #{" + liveArg + "}"
 			statement.Meta.Command = StatementCommandUpdate
 			return nil
 		}
 	}
 	liveArg := nextSQLArgName(statement.Args, baseMapperSoftDeleteLiveArg)
-	statement.Args[liveArg] = false
+	statement.Args[liveArg] = logicNotDeleteValue(statement.Configuration.GlobalConfig.DbConfig)
 	statement.SQL = appendSQLCondition(statement.SQL, deletedColumn+" = #{"+liveArg+"}")
 	return nil
 }

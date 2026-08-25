@@ -15,7 +15,7 @@ Goark 核心框架已经明确采用编译期生成注册代码，不做 Java �
 - 支持 MyBatis 风格 XML Mapper。
 - 支持 MyBatis 注解风格 Annotation Mapper。
 - XML Mapper 和 Annotation Mapper 可以在同一个接口中混用。
-- 统一实体元数据、Statement 元数据、参数绑定、结果映射、事务、Configuration、一级缓存、Mapper namespace 二级缓存和执行器内核。
+- 统一实体元数据、Statement 元数据、参数绑定、结果映射、事务、Configuration、GlobalConfig/DbConfig、一级缓存、Mapper namespace 二级缓存和执行器内核。
 - 使用独立 `goark-orm generate orm` 生成 Mapper 实现、分页签名、流式签名和静态元数据。
 - 支持 Go Mapper 接口在本包内通过接口嵌入复用公共方法。
 - Goark 主 CLI 不包含 ORM 子命令，也不依赖 `goark.dev/orm`。
@@ -549,7 +549,9 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 `SQLSession` 默认启用 Session 级一级缓存。缓存 key 由最终编译 SQL 和参数组成，写操作、`Commit`、`Rollback` 和 `Close` 会清空缓存。可通过 `WithLocalCache(false)` 关闭，也可以通过 `Configuration.LocalCacheScope` 设置为 `STATEMENT`，使缓存不跨语句复用。
 
-运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `MetaObjectHandler` 自动填充处理器。
+运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `GlobalConfig`。
+
+`GlobalConfig` 对齐 MyBatis-Plus 的全局扩展点，当前承载 `DbConfig`、`IdentifierGenerator` 和 `MetaObjectHandler`。`DbConfig` 已支持全局 `IDType`、`TablePrefix`、`Schema`、`LogicDeleteField`、`LogicDeleteValue` 和 `LogicNotDeleteValue`。BaseMapper 会读取这些配置：主键字段未显式声明 `id-type` 且不是自增时，使用全局 `IDType`；渲染物理表名时应用 tablePrefix/schema；逻辑删除默认值从 DbConfig 读取。显式实体 tag 优先于全局兜底配置。
 
 `MetaObjectHandler` 对齐 MyBatis-Plus 字段填充模型，但采用 Go 显式接口。BaseMapper 会在构造写入参数前填充实体；普通 Mapper 写语句会在拦截器改写后、方言占位符编译前填充运行时命名参数。`StrictInsertFill` 和 `StrictUpdateFill` 会读取 `ColumnMeta.Fill`，并兼容旧的 `created-at` / `updated-at` 语义。
 
@@ -627,6 +629,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 Annotation Mapper 的 `<script>` 动态 SQL 和显式注册 SQL Provider。
 - 已支持 `ResultHandler`、`QueryCursor`、`QueryEach` 和 `RowCursor` 逐行流式查询；游标查询绕过缓存写入，并拒绝 collection resultMap 多行聚合场景。
 - 已支持独立 `Configuration` API，用于统一配置方言、缓存策略、下划线转驼峰和默认执行器类型。
+- 已支持 MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`。
 - 已支持 `ExecutorType.REUSE` 预编译语句复用，按最终 SQL 在 Session 内缓存 prepared statement，并在 Session/事务生命周期结束时关闭。
 - 已支持 BaseMapper 逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - 已支持 `MetaObjectHandler` 自动填充及 `fill` 字段策略。

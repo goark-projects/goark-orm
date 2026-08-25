@@ -1381,6 +1381,45 @@ func TestSQLSession_QueryOne_whenConfigurationSetsDialect_shouldUseConfiguredDia
 	}
 }
 
+func TestSQLSession_Configuration_whenGlobalConfigProvided_shouldExposeSnapshot(t *testing.T) {
+	state := openTestSQLState(t)
+	registry := NewRegistry()
+	config := DefaultConfiguration()
+	config.GlobalConfig = DefaultGlobalConfig()
+	config.GlobalConfig.DbConfig.IDType = IDTypeAssignUUID
+	config.GlobalConfig.DbConfig.TablePrefix = "sys_"
+	config.GlobalConfig.DbConfig.Schema = "tenant_01"
+	config.GlobalConfig.IdentifierGenerator = fixedIdentifierGenerator{uuid: "uuid-1"}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	snapshot := session.Configuration()
+	snapshot.GlobalConfig.DbConfig.TablePrefix = "changed_"
+
+	if session.Configuration().GlobalConfig.DbConfig.IDType != IDTypeAssignUUID {
+		t.Fatalf("expected global id type snapshot, got %#v", session.Configuration().GlobalConfig.DbConfig)
+	}
+	if session.Configuration().GlobalConfig.DbConfig.TablePrefix != "sys_" {
+		t.Fatalf("configuration snapshot should not mutate session")
+	}
+	if session.IdentifierGenerator() == nil {
+		t.Fatalf("expected configured identifier generator")
+	}
+}
+
+func TestSQLSession_Configuration_whenGlobalDbConfigInvalid_shouldReject(t *testing.T) {
+	state := openTestSQLState(t)
+	config := DefaultConfiguration()
+	config.GlobalConfig.DbConfig.IDType = IDType("BAD")
+
+	_, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err == nil || !strings.Contains(err.Error(), "dbConfig idType") {
+		t.Fatalf("expected dbConfig validation error, got %v", err)
+	}
+}
+
 func TestSQLSession_QueryOne_whenConfigurationMapsUnderscoreToCamelCase_shouldScanAutoMappedField(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{

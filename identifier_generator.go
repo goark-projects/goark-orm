@@ -155,13 +155,7 @@ func ParseIDType(value string) (IDType, error) {
 }
 
 func effectiveColumnIDType(column ColumnMeta) IDType {
-	if column.IDType != "" {
-		return column.IDType
-	}
-	if column.AutoIncrement {
-		return IDTypeAuto
-	}
-	return IDTypeNone
+	return effectiveColumnIDTypeWithDbConfig(column, DbConfig{})
 }
 
 func randomIdentifierNode() int64 {

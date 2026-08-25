@@ -164,7 +164,7 @@ func TestSQLSession_Exec_whenMetaObjectHandlerConfigured_shouldFillMapperEntityA
 		ParameterType: "entitySemanticUser",
 	})
 	config := DefaultConfiguration()
-	config.MetaObjectHandler = auditMetaObjectHandler{user: "system"}
+	config.GlobalConfig.MetaObjectHandler = auditMetaObjectHandler{user: "system"}
 	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
 	if err != nil {
 		t.Fatalf("new SQL session failed: %v", err)

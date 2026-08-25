@@ -34,11 +34,17 @@ type metaObjectHandlerProvider interface {
 	MetaObjectHandler() MetaObjectHandler
 }
 
+type globalConfigProvider interface {
+	GlobalConfig() GlobalConfig
+}
+
 type baseMapperOptions struct {
 	dialect             Dialect
 	clock               func() time.Time
 	identifierGenerator IdentifierGenerator
 	metaObjectHandler   MetaObjectHandler
+	globalConfig        GlobalConfig
+	globalConfigSet     bool
 }
 
 // BaseMapperOption 配置 BaseMapper。
@@ -74,10 +80,19 @@ func WithBaseMapperMetaObjectHandler(handler MetaObjectHandler) BaseMapperOption
 	}
 }
 
+// WithBaseMapperGlobalConfig 指定 BaseMapper 使用的全局配置。
+func WithBaseMapperGlobalConfig(global GlobalConfig) BaseMapperOption {
+	return func(options *baseMapperOptions) {
+		options.globalConfig = global
+		options.globalConfigSet = true
+	}
+}
+
 // BaseMapper 提供 MyBatis-Plus 风格的实体通用 CRUD。
 type BaseMapper[T any, ID any] struct {
 	session             StatementSession
 	entity              EntityMeta
+	dbConfig            DbConfig
 	dialect             Dialect
 	clock               func() time.Time
 	identifierGenerator IdentifierGenerator
@@ -113,11 +128,26 @@ func NewBaseMapper[T any, ID any](session StatementSession, entity EntityMeta, o
 	if dialect == nil {
 		dialect = NewQuestionDialect()
 	}
+	globalConfig := DefaultGlobalConfig()
+	if provider, ok := session.(globalConfigProvider); ok {
+		globalConfig = provider.GlobalConfig()
+	}
+	if opts.globalConfigSet {
+		globalConfig = opts.globalConfig
+	}
+	normalizedGlobal, err := normalizeGlobalConfig(globalConfig)
+	if err != nil {
+		return nil, err
+	}
+	globalConfig = normalizedGlobal
 	identifierGenerator := opts.identifierGenerator
 	if identifierGenerator == nil {
 		if provider, ok := session.(identifierGeneratorProvider); ok {
 			identifierGenerator = provider.IdentifierGenerator()
 		}
+	}
+	if identifierGenerator == nil {
+		identifierGenerator = globalConfig.IdentifierGenerator
 	}
 	if identifierGenerator == nil {
 		identifierGenerator = NewDefaultIdentifierGenerator()
@@ -128,19 +158,22 @@ func NewBaseMapper[T any, ID any](session StatementSession, entity EntityMeta, o
 			metaObjectHandler = provider.MetaObjectHandler()
 		}
 	}
+	if metaObjectHandler == nil {
+		metaObjectHandler = globalConfig.MetaObjectHandler
+	}
 	copied := copyEntityMeta(entity)
 	primary, err := singlePrimaryColumn(copied)
 	if err != nil {
 		return nil, err
 	}
-	columns, err := collectBaseMapperSemanticColumns(copied)
+	columns, err := collectBaseMapperSemanticColumnsWithDbConfig(copied, globalConfig.DbConfig)
 	if err != nil {
 		return nil, err
 	}
 	if reflect.TypeFor[T]().Kind() == reflect.Pointer {
 		return nil, fmt.Errorf("goark-orm: BaseMapper entity type must be a struct, got pointer")
 	}
-	if _, err := quoteIdentifierPath(dialect, copied.Table); err != nil {
+	if _, err := quoteIdentifierPath(dialect, effectiveTableName(copied.Table, globalConfig.DbConfig)); err != nil {
 		return nil, err
 	}
 	for _, column := range copied.Columns {
@@ -151,6 +184,7 @@ func NewBaseMapper[T any, ID any](session StatementSession, entity EntityMeta, o
 	return &BaseMapper[T, ID]{
 		session:             session,
 		entity:              copied,
+		dbConfig:            globalConfig.DbConfig,
 		dialect:             dialect,
 		clock:               opts.clock,
 		identifierGenerator: identifierGenerator,
@@ -185,7 +219,7 @@ func (m *BaseMapper[T, ID]) SelectByID(ctx context.Context, id ID) (*T, error) {
 			return nil, err
 		}
 		sqlText += " AND " + live
-		args[baseMapperSoftDeleteLiveArg] = false
+		args[baseMapperSoftDeleteLiveArg] = logicNotDeleteValue(m.dbConfig)
 	}
 	var out T
 	if err := m.session.QueryOneStatement(ctx, m.statement("SelectByID", StatementCommandSelect, sqlText), args, &out); err != nil {
@@ -329,13 +363,13 @@ func (m *BaseMapper[T, ID]) Insert(ctx context.Context, entity *T) (Result, erro
 	sqlText := "INSERT INTO " + table + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	statement := m.statement("Insert", StatementCommandInsert, sqlText)
 	statement.ParameterType = m.entity.TypeName
-	statement.UseGeneratedKeys = effectiveColumnIDType(m.primary) == IDTypeAuto
+	statement.UseGeneratedKeys = m.effectiveColumnIDType(m.primary) == IDTypeAuto
 	statement.KeyProperty = m.primary.FieldName
 	return m.session.ExecStatement(ctx, statement, args)
 }
 
 func (m *BaseMapper[T, ID]) assignInsertID(ctx context.Context, entity reflect.Value) error {
-	idType := effectiveColumnIDType(m.primary)
+	idType := m.effectiveColumnIDType(m.primary)
 	if idType != IDTypeAssignID && idType != IDTypeAssignUUID {
 		return nil
 	}
@@ -428,7 +462,7 @@ func (m *BaseMapper[T, ID]) UpdateByID(ctx context.Context, entity *T) (int64, e
 	if m.hasVersion {
 		args[baseMapperVersionOldArg] = versionValue
 	}
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return 0, err
 	}
@@ -450,7 +484,7 @@ func (m *BaseMapper[T, ID]) UpdateByID(ctx context.Context, entity *T) (int64, e
 			return 0, err
 		}
 		whereParts = append(whereParts, live)
-		args[baseMapperSoftDeleteLiveArg] = false
+		args[baseMapperSoftDeleteLiveArg] = logicNotDeleteValue(m.dbConfig)
 	}
 	sqlText := "UPDATE " + table + " SET " + strings.Join(sets, ", ") + " WHERE " + strings.Join(whereParts, " AND ")
 	statement := m.statement("UpdateByID", StatementCommandUpdate, sqlText)
@@ -497,12 +531,12 @@ func (m *BaseMapper[T, ID]) Update(ctx context.Context, entity *T, wrapper *Quer
 			return 0, err
 		}
 		whereParts = append(whereParts, live)
-		rendered.Args[liveName] = false
+		rendered.Args[liveName] = logicNotDeleteValue(m.dbConfig)
 	}
 	for key, value := range rendered.Args {
 		args[key] = value
 	}
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return 0, err
 	}
@@ -536,9 +570,9 @@ func (m *BaseMapper[T, ID]) UpdateWithWrapper(ctx context.Context, wrapper *Upda
 			return 0, err
 		}
 		whereParts = append(whereParts, live)
-		rendered.Args[liveName] = false
+		rendered.Args[liveName] = logicNotDeleteValue(m.dbConfig)
 	}
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return 0, err
 	}
@@ -558,7 +592,7 @@ func (m *BaseMapper[T, ID]) DeleteByID(ctx context.Context, id ID) (int64, error
 	if m.hasSoftDelete {
 		return m.softDeleteByID(ctx, id)
 	}
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return 0, err
 	}
@@ -591,7 +625,7 @@ func (m *BaseMapper[T, ID]) Delete(ctx context.Context, wrapper *QueryWrapper[T]
 	if err != nil {
 		return 0, err
 	}
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return 0, err
 	}
@@ -621,7 +655,7 @@ func (m *BaseMapper[T, ID]) selectSQL(wrapper *QueryWrapper[T], includeOrder boo
 }
 
 func (m *BaseMapper[T, ID]) selectProjectionSQL(projection string, wrapper *QueryWrapper[T], includeOrder bool, start int) (string, NamedArgs, int, error) {
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return "", nil, start, err
 	}
@@ -641,7 +675,7 @@ func (m *BaseMapper[T, ID]) selectProjectionSQL(projection string, wrapper *Quer
 			return "", nil, start, err
 		}
 		conditions = append(conditions, live)
-		rendered.Args[liveName] = false
+		rendered.Args[liveName] = logicNotDeleteValue(m.dbConfig)
 		rendered.Next++
 	}
 	if len(conditions) > 0 {
@@ -663,7 +697,7 @@ func (m *BaseMapper[T, ID]) selectProjectionSQL(projection string, wrapper *Quer
 }
 
 func (m *BaseMapper[T, ID]) selectBaseSQL() (string, error) {
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return "", err
 	}
@@ -716,14 +750,14 @@ func wrapperSelects[T any](wrapper *QueryWrapper[T]) []Field[T] {
 }
 
 func (m *BaseMapper[T, ID]) insertColumns() (string, []string, []ColumnMeta, error) {
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return "", nil, nil, err
 	}
 	columns := make([]string, 0, len(m.entity.Columns))
 	fields := make([]ColumnMeta, 0, len(m.entity.Columns))
 	for _, column := range m.entity.Columns {
-		if column.PrimaryKey && effectiveColumnIDType(column) == IDTypeAuto {
+		if column.PrimaryKey && m.effectiveColumnIDType(column) == IDTypeAuto {
 			continue
 		}
 		quoted, err := quoteIdentifierPath(m.dialect, column.ColumnName)
@@ -853,11 +887,23 @@ type baseMapperSemanticColumns struct {
 }
 
 func collectBaseMapperSemanticColumns(entity EntityMeta) (baseMapperSemanticColumns, error) {
+	return collectBaseMapperSemanticColumnsWithDbConfig(entity, DbConfig{})
+}
+
+func collectBaseMapperSemanticColumnsWithDbConfig(entity EntityMeta, dbConfig DbConfig) (baseMapperSemanticColumns, error) {
 	softDelete, hasSoftDelete, err := singleSemanticColumn(entity, "soft-delete", func(column ColumnMeta) bool {
 		return column.SoftDelete
 	})
 	if err != nil {
 		return baseMapperSemanticColumns{}, err
+	}
+	if !hasSoftDelete && strings.TrimSpace(dbConfig.LogicDeleteField) != "" {
+		softDelete, hasSoftDelete, err = singleSemanticColumn(entity, "logic-delete", func(column ColumnMeta) bool {
+			return columnMatchesConfiguredLogicDelete(column, dbConfig.LogicDeleteField)
+		})
+		if err != nil {
+			return baseMapperSemanticColumns{}, err
+		}
 	}
 	version, hasVersion, err := singleSemanticColumn(entity, "version", func(column ColumnMeta) bool {
 		return column.Version
@@ -914,7 +960,7 @@ func (m *BaseMapper[T, ID]) softDeleteLiveCondition(argName string) (string, err
 }
 
 func (m *BaseMapper[T, ID]) softDeleteByID(ctx context.Context, id ID) (int64, error) {
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return 0, err
 	}
@@ -931,9 +977,9 @@ func (m *BaseMapper[T, ID]) softDeleteByID(ctx context.Context, id ID) (int64, e
 		return 0, err
 	}
 	args := NamedArgs{
-		baseMapperSoftDeleteDeleteArg: true,
+		baseMapperSoftDeleteDeleteArg: logicDeleteValue(m.dbConfig),
 		"id":                          id,
-		baseMapperSoftDeleteLiveArg:   false,
+		baseMapperSoftDeleteLiveArg:   logicNotDeleteValue(m.dbConfig),
 	}
 	sqlText := "UPDATE " + table + " SET " + deleted + " = #{" + baseMapperSoftDeleteDeleteArg + "} WHERE " + primary + " = #{id} AND " + live
 	result, err := m.session.ExecStatement(ctx, m.statement("DeleteByID", StatementCommandUpdate, sqlText), args)
@@ -948,7 +994,7 @@ func (m *BaseMapper[T, ID]) softDeleteRows(ctx context.Context, wrapper *QueryWr
 	if err != nil {
 		return 0, err
 	}
-	table, err := quoteIdentifierPath(m.dialect, m.entity.Table)
+	table, err := m.quotedTable()
 	if err != nil {
 		return 0, err
 	}
@@ -961,8 +1007,8 @@ func (m *BaseMapper[T, ID]) softDeleteRows(ctx context.Context, wrapper *QueryWr
 	if err != nil {
 		return 0, err
 	}
-	rendered.Args[baseMapperSoftDeleteDeleteArg] = true
-	rendered.Args[liveName] = false
+	rendered.Args[baseMapperSoftDeleteDeleteArg] = logicDeleteValue(m.dbConfig)
+	rendered.Args[liveName] = logicNotDeleteValue(m.dbConfig)
 	sqlText := "UPDATE " + table + " SET " + deleted + " = #{" + baseMapperSoftDeleteDeleteArg + "} WHERE " + rendered.WhereSQL + " AND " + live
 	if rendered.LastSQL != "" {
 		sqlText += " " + rendered.LastSQL
@@ -990,6 +1036,14 @@ func (m *BaseMapper[T, ID]) fillInsertTimeFields(entity reflect.Value) error {
 		}
 	}
 	return nil
+}
+
+func (m *BaseMapper[T, ID]) quotedTable() (string, error) {
+	return quoteIdentifierPath(m.dialect, effectiveTableName(m.entity.Table, m.dbConfig))
+}
+
+func (m *BaseMapper[T, ID]) effectiveColumnIDType(column ColumnMeta) IDType {
+	return effectiveColumnIDTypeWithDbConfig(column, m.dbConfig)
 }
 
 func (m *BaseMapper[T, ID]) fillUpdateTimeFields(entity reflect.Value) error {

@@ -8,10 +8,11 @@ import (
 
 // StatementRuntime 描述一次执行中的可变 SQL 模板。
 type StatementRuntime struct {
-	Meta    StatementMeta
-	SQL     string
-	Args    NamedArgs
-	Dialect Dialect
+	Meta          StatementMeta
+	SQL           string
+	Args          NamedArgs
+	Dialect       Dialect
+	Configuration Configuration
 }
 
 func (r *StatementRuntime) ensureArgs() {
