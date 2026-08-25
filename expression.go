@@ -193,7 +193,10 @@ func (p *expressionParser) parseComparison() (bool, error) {
 		}
 		return compareExpression(left, operator, right, p.lookup)
 	}
-	value, ok := expressionValue(left, p.lookup)
+	value, ok, err := expressionValue(left, p.lookup)
+	if err != nil {
+		return false, err
+	}
 	if !ok {
 		return false, nil
 	}
@@ -203,12 +206,36 @@ func (p *expressionParser) parseComparison() (bool, error) {
 func (p *expressionParser) consumeValue() (string, error) {
 	token := p.peek()
 	switch token.kind {
-	case expressionTokenWord, expressionTokenString:
+	case expressionTokenWord:
+		if strings.EqualFold(token.value, "len") && p.nextKindIs(expressionTokenLParen) {
+			return p.consumeLengthCall()
+		}
+		p.pos++
+		return token.value, nil
+	case expressionTokenString:
 		p.pos++
 		return token.value, nil
 	default:
 		return "", fmt.Errorf("goark-orm: expected dynamic SQL value, got %q", token.value)
 	}
+}
+
+func (p *expressionParser) consumeLengthCall() (string, error) {
+	p.pos += 2
+	token := p.peek()
+	if token.kind != expressionTokenWord {
+		return "", fmt.Errorf("goark-orm: len() requires a dynamic SQL parameter path")
+	}
+	name := token.value
+	p.pos++
+	if !p.matchKind(expressionTokenRParen) {
+		return "", fmt.Errorf("goark-orm: len() missing closing parenthesis")
+	}
+	return "len(" + name + ")", nil
+}
+
+func (p *expressionParser) nextKindIs(kind expressionTokenKind) bool {
+	return p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].kind == kind
 }
 
 func (p *expressionParser) matchComparisonOperator() (string, bool) {
@@ -271,7 +298,10 @@ func evalValueExpression(expression string, lookup valueLookup) (any, error) {
 	if len(parts) > 1 {
 		var builder strings.Builder
 		for _, part := range parts {
-			value, ok := expressionValue(part, lookup)
+			value, ok, err := expressionValue(part, lookup)
+			if err != nil {
+				return nil, err
+			}
 			if !ok {
 				return nil, fmt.Errorf("SQL value expression variable %q is missing", part)
 			}
@@ -281,7 +311,10 @@ func evalValueExpression(expression string, lookup valueLookup) (any, error) {
 		}
 		return builder.String(), nil
 	}
-	value, ok := expressionValue(expression, lookup)
+	value, ok, err := expressionValue(expression, lookup)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("SQL value expression variable %q is missing", expression)
 	}
@@ -364,8 +397,14 @@ func cutOperator(expression string, operator string) (string, string, bool) {
 }
 
 func compareExpressionValues(left string, right string, lookup valueLookup) (bool, error) {
-	leftValue, _ := expressionValue(left, lookup)
-	rightValue, _ := expressionValue(right, lookup)
+	leftValue, _, err := expressionValue(left, lookup)
+	if err != nil {
+		return false, err
+	}
+	rightValue, _, err := expressionValue(right, lookup)
+	if err != nil {
+		return false, err
+	}
 	if isNilValue(leftValue) || isNilValue(rightValue) {
 		return isNilValue(leftValue) && isNilValue(rightValue), nil
 	}
@@ -404,9 +443,15 @@ func compareExpression(left string, operator string, right string, lookup valueL
 }
 
 func compareExpressionOrder(left string, right string, lookup valueLookup) (int, bool, error) {
-	leftValue, _ := expressionValue(left, lookup)
-	rightValue, _ := expressionValue(right, lookup)
-	if isNilValue(leftValue) || isNilValue(rightValue) {
+	leftValue, leftOK, err := expressionValue(left, lookup)
+	if err != nil {
+		return 0, false, err
+	}
+	rightValue, rightOK, err := expressionValue(right, lookup)
+	if err != nil {
+		return 0, false, err
+	}
+	if !leftOK || !rightOK || isNilValue(leftValue) || isNilValue(rightValue) {
 		return 0, false, nil
 	}
 	leftNumber, leftNumberOK := numericExpressionValue(leftValue)
@@ -465,66 +510,69 @@ func numericExpressionValue(value any) (float64, bool) {
 	}
 }
 
-func expressionValue(raw string, lookup valueLookup) (any, bool) {
+func expressionValue(raw string, lookup valueLookup) (any, bool, error) {
 	raw = strings.TrimSpace(raw)
 	lower := strings.ToLower(raw)
 	switch {
 	case lower == "nil" || lower == "null":
-		return nil, true
+		return nil, true, nil
 	case lower == "true":
-		return true, true
+		return true, true, nil
 	case lower == "false":
-		return false, true
+		return false, true, nil
 	case strings.HasPrefix(raw, "'") && strings.HasSuffix(raw, "'") && len(raw) >= 2:
-		return strings.TrimSuffix(strings.TrimPrefix(raw, "'"), "'"), true
+		return strings.TrimSuffix(strings.TrimPrefix(raw, "'"), "'"), true, nil
 	case strings.HasPrefix(raw, "\"") && strings.HasSuffix(raw, "\""):
 		value, err := strconv.Unquote(raw)
-		if err == nil {
-			return value, true
+		if err != nil {
+			return nil, false, fmt.Errorf("goark-orm: invalid dynamic SQL string literal %q", raw)
 		}
+		return value, true, nil
 	case strings.HasPrefix(lower, "len(") && strings.HasSuffix(raw, ")"):
-		return expressionLength(strings.TrimSpace(raw[4:len(raw)-1]), lookup)
-	case isExpressionNumber(raw):
-		if strings.ContainsAny(raw, ".eE") {
-			parsed, err := strconv.ParseFloat(raw, 64)
-			return parsed, err == nil
+		value, ok := expressionLength(strings.TrimSpace(raw[4:len(raw)-1]), lookup)
+		return value, ok, nil
+	case isExpressionNumberCandidate(raw):
+		value, err := parseExpressionNumber(raw)
+		if err != nil {
+			return nil, false, err
 		}
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		return parsed, err == nil
+		return value, true, nil
 	case raw != "":
 		if value, ok := expressionSizeProperty(raw, lookup); ok {
-			return value, true
+			return value, true, nil
 		}
 		value, ok := lookup(raw)
-		return value, ok
+		return value, ok, nil
 	}
-	return nil, false
+	return nil, false, nil
 }
 
-func isExpressionNumber(raw string) bool {
+func isExpressionNumberCandidate(raw string) bool {
 	if raw == "" {
 		return false
 	}
-	start := 0
 	if raw[0] == '-' || raw[0] == '+' {
 		if len(raw) == 1 {
 			return false
 		}
-		start = 1
+		raw = raw[1:]
 	}
-	digit := false
-	for index := start; index < len(raw); index++ {
-		ch := raw[index]
-		if ch >= '0' && ch <= '9' {
-			digit = true
-			continue
+	return raw[0] == '.' || (raw[0] >= '0' && raw[0] <= '9')
+}
+
+func parseExpressionNumber(raw string) (any, error) {
+	if strings.ContainsAny(raw, ".eE") {
+		parsed, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return nil, fmt.Errorf("goark-orm: invalid dynamic SQL numeric literal %q", raw)
 		}
-		if ch == '.' || ch == 'e' || ch == 'E' || ch == '-' || ch == '+' {
-			continue
-		}
-		return false
+		return parsed, nil
 	}
-	return digit
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("goark-orm: invalid dynamic SQL numeric literal %q", raw)
+	}
+	return parsed, nil
 }
 
 func expressionSizeProperty(raw string, lookup valueLookup) (any, bool) {

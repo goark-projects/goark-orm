@@ -356,7 +356,7 @@ func (s *SQLSession) compileRuntime(ctx context.Context, runtime *StatementRunti
 	if err != nil {
 		return CompiledSQL{}, bindingFailure(runtime.Meta.FullName, "bind", err)
 	}
-	compiled, err := CompileSQL(runtime.SQL, boundArgs, runtime.Dialect)
+	compiled, err := CompileSQLContext(ctx, runtime.SQL, boundArgs, runtime.Dialect)
 	if err != nil {
 		return CompiledSQL{}, bindingFailure(runtime.Meta.FullName, "compile", err)
 	}

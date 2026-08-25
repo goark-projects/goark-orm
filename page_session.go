@@ -173,7 +173,7 @@ func (s *SQLSession) compileSQLText(ctx context.Context, meta StatementMeta, dia
 	if err != nil {
 		return CompiledSQL{}, fmt.Errorf("goark-orm: bind statement %s failed: %w", meta.FullName, err)
 	}
-	compiled, err := CompileSQL(sqlText, boundArgs, dialect)
+	compiled, err := CompileSQLContext(ctx, sqlText, boundArgs, dialect)
 	if err != nil {
 		return CompiledSQL{}, fmt.Errorf("goark-orm: compile statement %s failed: %w", meta.FullName, err)
 	}

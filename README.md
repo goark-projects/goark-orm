@@ -172,6 +172,8 @@ func (s UserStatus) EnumValue() any {
 }
 ```
 
+枚举值转换需要读取调用方上下文时，可以实现 `EnumValuerContext`；`SQLSession` 会在编译参数时透传当前 `context.Context`。
+
 通用 SQLSession 可以按需启用 MP 风格插件：
 
 ```go

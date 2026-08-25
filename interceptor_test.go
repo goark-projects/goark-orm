@@ -81,6 +81,30 @@ func TestBlockAttackInterceptor_whenUpdateWithoutWhere_shouldReject(t *testing.T
 	}
 }
 
+func TestBlockAttackInterceptor_whenWhereKeywordIsQuotedIdentifier_shouldReject(t *testing.T) {
+	state := openTestSQLState(t)
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "UnsafeUpdate",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.UnsafeUpdate",
+		Command:   StatementCommandUpdate,
+		Source:    StatementSourceAnnotation,
+		SQL:       `update sys_user set [where] = #{name}`,
+	})
+	session, err := NewSQLSession(registry, state.db, NewSQLServerDialect(), WithInterceptors(NewBlockAttackInterceptor()))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	_, err = session.Exec(context.Background(), "system.user.UserMapper.UnsafeUpdate", NamedArgs{"name": "Alice"})
+	if err == nil || !strings.Contains(err.Error(), "blocked full-table update") {
+		t.Fatalf("expected block attack error, got %v", err)
+	}
+	if state.exec != "" {
+		t.Fatalf("unsafe SQL should not execute, got %q", state.exec)
+	}
+}
+
 func TestSQLObserverInterceptor_whenStatementRewritten_shouldObserveFinalTemplate(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{columns: []string{"id"}, values: nil}

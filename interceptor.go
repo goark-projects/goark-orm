@@ -800,6 +800,9 @@ func findSQLKeyword(query string, keyword string) int {
 			}
 			index = next
 			continue
+		case '[':
+			index = skipSQLBracketQuotedIdentifier(query, index)
+			continue
 		}
 		if isSQLIdentStart(query[index]) {
 			start := index
@@ -838,6 +841,33 @@ func skipSQLComment(query string, index int) (int, bool) {
 		return len(query), true
 	}
 	return index, false
+}
+
+func skipSQLBracketQuotedIdentifier(query string, index int) int {
+	index++
+	for index < len(query) {
+		if query[index] != ']' {
+			index++
+			continue
+		}
+		if index+1 < len(query) && query[index+1] == ']' {
+			index += 2
+			continue
+		}
+		return index + 1
+	}
+	return len(query)
+}
+
+func hasSQLKeywordAt(query string, index int, keyword string) bool {
+	if index < 0 || index >= len(query) || !isSQLIdentStart(query[index]) {
+		return false
+	}
+	start := index
+	for index < len(query) && isSQLIdentPart(query[index]) {
+		index++
+	}
+	return strings.EqualFold(query[start:index], keyword)
 }
 
 func skipSQLSingleQuoted(query string, index int) int {

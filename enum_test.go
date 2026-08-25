@@ -2,6 +2,8 @@ package orm
 
 import (
 	"context"
+	"database/sql/driver"
+	"reflect"
 	"testing"
 )
 
@@ -44,5 +46,34 @@ func TestDatabaseEnumValue_whenContextEnumProvided_shouldUseContextValue(t *test
 	}
 	if value != "CTX" {
 		t.Fatalf("unexpected enum value %#v", value)
+	}
+}
+
+func TestSQLSession_Exec_whenContextEnumProvided_shouldUseCallerContext(t *testing.T) {
+	t.Parallel()
+
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "UpdateStatus",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.UpdateStatus",
+		Command:   StatementCommandUpdate,
+		SQL:       "update sys_user set status = #{status} where id = #{id}",
+	})
+	state := openTestSQLState(t)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	ctx := context.WithValue(context.Background(), enumContextKey{}, "CTX")
+	_, err = session.Exec(ctx, "system.user.UserMapper.UpdateStatus", NamedArgs{
+		"id":     int64(7),
+		"status": contextEnumValue{},
+	})
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+	expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: "CTX"}, {Ordinal: 2, Value: int64(7)}}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected args %#v", state.execArgs)
 	}
 }

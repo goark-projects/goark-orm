@@ -223,5 +223,51 @@ func quoteDoubleIdentifier(identifier string) string {
 }
 
 func containsOrderBy(query string) bool {
-	return strings.Contains(strings.ToLower(query), " order by ")
+	depth := 0
+	for index := 0; index < len(query); {
+		if next, ok := skipSQLComment(query, index); ok {
+			index = next
+			continue
+		}
+		switch query[index] {
+		case '\'':
+			index = skipSQLSingleQuoted(query, index)
+			continue
+		case '"', '`':
+			_, _, next, ok := readSQLQuotedIdentifier(query, index)
+			if !ok {
+				return false
+			}
+			index = next
+			continue
+		case '[':
+			index = skipSQLBracketQuotedIdentifier(query, index)
+			continue
+		case '(':
+			depth++
+			index++
+			continue
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			index++
+			continue
+		}
+		if depth == 0 && isSQLIdentStart(query[index]) {
+			start := index
+			for index < len(query) && isSQLIdentPart(query[index]) {
+				index++
+			}
+			if strings.EqualFold(query[start:index], "order") {
+				next := skipSQLSpacesAndComments(query, index)
+				if hasSQLKeywordAt(query, next, "by") {
+					return true
+				}
+			}
+			continue
+		}
+		index++
+	}
+	return false
 }

@@ -18,6 +18,14 @@ type CompiledSQL struct {
 
 // CompileSQL 将 #{name} 改写为数据库方言占位符，并按出现顺序绑定参数。
 func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, error) {
+	return CompileSQLContext(context.Background(), query, args, dialect)
+}
+
+// CompileSQLContext 将 #{name} 改写为数据库方言占位符，并使用调用方上下文完成参数转换。
+func CompileSQLContext(ctx context.Context, query string, args NamedArgs, dialect Dialect) (CompiledSQL, error) {
+	if ctx == nil {
+		return CompiledSQL{}, bindingErrorf("context is nil")
+	}
 	if dialect == nil {
 		dialect = NewQuestionDialect()
 	}
@@ -51,7 +59,7 @@ func CompileSQL(query string, args NamedArgs, dialect Dialect) (CompiledSQL, err
 				Message:   fmt.Sprintf("SQL parameter %q is missing", name),
 			}
 		}
-		value, err = databaseEnumValue(context.Background(), value)
+		value, err = databaseEnumValue(ctx, value)
 		if err != nil {
 			return CompiledSQL{}, &BindingError{Parameter: name, Err: err}
 		}

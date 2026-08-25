@@ -1,6 +1,9 @@
 package orm
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEvalExpression_whenParenthesesComparisonAndNotProvided_shouldEvaluateSafely(t *testing.T) {
 	t.Parallel()
@@ -58,6 +61,64 @@ func TestEvalExpression_whenCollectionSizeProvided_shouldCompareLength(t *testin
 				t.Fatalf("expected expression %q to match", expression)
 			}
 		})
+	}
+}
+
+func TestEvalExpression_whenLenFunctionProvided_shouldCompareLength(t *testing.T) {
+	t.Parallel()
+
+	args := NamedArgs{
+		"ids":  []int64{7, 8, 9},
+		"name": "Alice",
+	}
+	tests := []string{
+		"len(ids) == 3",
+		"len ( ids ) > 2",
+		"len(name) >= 5",
+	}
+	for _, expression := range tests {
+		expression := expression
+		t.Run(expression, func(t *testing.T) {
+			t.Parallel()
+			ok, err := evalExpression(expression, func(name string) (any, bool) {
+				value, ok := args[name]
+				return value, ok
+			})
+			if err != nil {
+				t.Fatalf("eval expression failed: %v", err)
+			}
+			if !ok {
+				t.Fatalf("expected expression %q to match", expression)
+			}
+		})
+	}
+}
+
+func TestEvalExpression_whenInvalidNumericLiteralProvided_shouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	_, err := evalExpression("age > 1e", func(name string) (any, bool) {
+		if name == "age" {
+			return 20, true
+		}
+		return nil, false
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid dynamic SQL numeric literal") {
+		t.Fatalf("expected invalid numeric literal error, got %v", err)
+	}
+}
+
+func TestEvalExpression_whenInvalidStringLiteralProvided_shouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	_, err := evalExpression(`name == "bad\q"`, func(name string) (any, bool) {
+		if name == "name" {
+			return "Alice", true
+		}
+		return nil, false
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid dynamic SQL string literal") {
+		t.Fatalf("expected invalid string literal error, got %v", err)
 	}
 }
 

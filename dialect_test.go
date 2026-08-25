@@ -119,3 +119,25 @@ func TestNewDialect_whenUnsupportedDbTypeProvided_shouldReturnError(t *testing.T
 		t.Fatalf("expected unsupported db type error")
 	}
 }
+
+func TestSQLServerDialect_LimitOffsetSQL_whenOrderByUsesFlexibleWhitespace_shouldKeepOrder(t *testing.T) {
+	t.Parallel()
+
+	query := "select * from sys_user\nORDER\tBY id"
+	paged := limitOffsetSQL(NewSQLServerDialect(), query, "@p1", "@p2")
+	expected := "select * from sys_user\nORDER\tBY id OFFSET @p2 ROWS FETCH NEXT @p1 ROWS ONLY"
+	if paged != expected {
+		t.Fatalf("unexpected paged SQL %q", paged)
+	}
+}
+
+func TestSQLServerDialect_LimitOffsetSQL_whenOrderIdentifierQuoted_shouldAppendFallbackOrder(t *testing.T) {
+	t.Parallel()
+
+	query := "select [order] from sys_user"
+	paged := limitOffsetSQL(NewSQLServerDialect(), query, "@p1", "@p2")
+	expected := "select [order] from sys_user ORDER BY (SELECT 0) OFFSET @p2 ROWS FETCH NEXT @p1 ROWS ONLY"
+	if paged != expected {
+		t.Fatalf("unexpected paged SQL %q", paged)
+	}
+}
