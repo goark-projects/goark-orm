@@ -97,3 +97,38 @@ func BenchmarkSQLSessionQueryOneScan(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkAppendSQLCondition_GroupedQuery(b *testing.B) {
+	query := `select status, count(*) from sys_user where active = #{active} and exists (select 1 from audit_log where audit_log.user_id = sys_user.id and audit_log.type = #{type}) group by status having count(*) > #{min} order by status`
+	condition := `"tenant_id" = #{tenantID}`
+	expected := `select status, count(*) from sys_user where active = #{active} and exists (select 1 from audit_log where audit_log.user_id = sys_user.id and audit_log.type = #{type}) AND "tenant_id" = #{tenantID} group by status having count(*) > #{min} order by status`
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		actual := appendSQLCondition(query, condition)
+		if actual != expected {
+			b.Fatalf("unexpected SQL %q", actual)
+		}
+	}
+}
+
+func BenchmarkCountSQLBase_NestedOrderBy(b *testing.B) {
+	query := `select * from (select id, user_id from audit_log where level = #{level} order by id) audit where audit.user_id = #{userID} and audit.created_at >= #{begin} order by audit.id`
+	expected := `select * from (select id, user_id from audit_log where level = #{level} order by id) audit where audit.user_id = #{userID} and audit.created_at >= #{begin}`
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		actual := countSQLBase(query)
+		if actual != expected {
+			b.Fatalf("unexpected SQL %q", actual)
+		}
+	}
+}
+
+func BenchmarkContainsOrderBy_BracketIdentifiers(b *testing.B) {
+	query := `select [id], [order]],name] from [sys_user] where [where] = #{where} order by [id]`
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if !containsOrderBy(query) {
+			b.Fatalf("expected order by")
+		}
+	}
+}

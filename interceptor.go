@@ -374,11 +374,17 @@ func appendSQLCondition(query string, condition string) string {
 	if containsSQLKeyword(head, "where") {
 		operator = " AND "
 	}
-	rewritten := strings.TrimRight(head, " \t\r\n") + operator + condition
+	trimmedHead := strings.TrimRight(head, " \t\r\n")
+	var builder strings.Builder
+	builder.Grow(len(trimmedHead) + len(operator) + len(condition) + len(tail) + 1)
+	builder.WriteString(trimmedHead)
+	builder.WriteString(operator)
+	builder.WriteString(condition)
 	if tail != "" {
-		rewritten += " " + tail
+		builder.WriteByte(' ')
+		builder.WriteString(tail)
 	}
-	return rewritten
+	return builder.String()
 }
 
 func appendTenantInsertColumn(query string, rawColumn string, quotedColumn string, argName string) (string, bool, error) {
@@ -703,8 +709,7 @@ func findSQLTailStart(query string, includeGrouping bool) int {
 			for index < len(query) && isSQLIdentPart(query[index]) {
 				index++
 			}
-			token := strings.ToLower(query[start:index])
-			if isSQLTailClause(query, index, token, includeGrouping) {
+			if isSQLTailClause(query, start, index, includeGrouping) {
 				return start
 			}
 			continue
@@ -714,23 +719,24 @@ func findSQLTailStart(query string, includeGrouping bool) int {
 	return -1
 }
 
-func isSQLTailClause(query string, tokenEnd int, token string, includeGrouping bool) bool {
+func isSQLTailClause(query string, tokenStart int, tokenEnd int, includeGrouping bool) bool {
 	next := skipSQLSpacesAndComments(query, tokenEnd)
-	switch token {
-	case "order":
+	switch {
+	case sqlTokenEquals(query, tokenStart, tokenEnd, "order"):
 		return hasSQLKeywordAt(query, next, "by")
-	case "group":
+	case sqlTokenEquals(query, tokenStart, tokenEnd, "group"):
 		return includeGrouping && hasSQLKeywordAt(query, next, "by")
-	case "having":
+	case sqlTokenEquals(query, tokenStart, tokenEnd, "having"):
 		return includeGrouping && !sqlTokenFollowedByPredicateOperator(query, next)
-	case "fetch":
+	case sqlTokenEquals(query, tokenStart, tokenEnd, "fetch"):
 		return hasSQLKeywordAt(query, next, "first") || hasSQLKeywordAt(query, next, "next")
-	case "for":
+	case sqlTokenEquals(query, tokenStart, tokenEnd, "for"):
 		return hasSQLKeywordAt(query, next, "update") ||
 			hasSQLKeywordAt(query, next, "share") ||
 			hasSQLKeywordAt(query, next, "no") ||
 			hasSQLKeywordAt(query, next, "key")
-	case "limit", "offset":
+	case sqlTokenEquals(query, tokenStart, tokenEnd, "limit") ||
+		sqlTokenEquals(query, tokenStart, tokenEnd, "offset"):
 		return !sqlTokenFollowedByPredicateOperator(query, next)
 	default:
 		return false
@@ -872,12 +878,10 @@ func lookupTableReplacement(replacements map[string]string, identifier string) (
 }
 
 func tableLeadKeyword(token string) bool {
-	switch strings.ToLower(token) {
-	case "from", "join", "update", "into":
-		return true
-	default:
-		return false
-	}
+	return strings.EqualFold(token, "from") ||
+		strings.EqualFold(token, "join") ||
+		strings.EqualFold(token, "update") ||
+		strings.EqualFold(token, "into")
 }
 
 func containsSQLKeyword(query string, keyword string) bool {
@@ -930,7 +934,7 @@ func findSQLKeyword(query string, keyword string) int {
 			for index < len(query) && isSQLIdentPart(query[index]) {
 				index++
 			}
-			if strings.ToLower(query[start:index]) == keyword {
+			if sqlTokenEquals(query, start, index, keyword) {
 				return start
 			}
 			continue
@@ -979,8 +983,19 @@ func skipSQLPlaceholder(query string, index int) (int, bool) {
 }
 
 func skipSQLBracketQuotedIdentifier(query string, index int) int {
-	_, next, _ := readSQLBracketQuotedIdentifier(query, index)
-	return next
+	index++
+	for index < len(query) {
+		if query[index] != ']' {
+			index++
+			continue
+		}
+		if index+1 < len(query) && query[index+1] == ']' {
+			index += 2
+			continue
+		}
+		return index + 1
+	}
+	return len(query)
 }
 
 func readSQLBracketQuotedIdentifier(query string, index int) (string, int, bool) {
@@ -1010,7 +1025,11 @@ func hasSQLKeywordAt(query string, index int, keyword string) bool {
 	for index < len(query) && isSQLIdentPart(query[index]) {
 		index++
 	}
-	return strings.EqualFold(query[start:index], keyword)
+	return sqlTokenEquals(query, start, index, keyword)
+}
+
+func sqlTokenEquals(query string, start int, end int, keyword string) bool {
+	return start >= 0 && end <= len(query) && end-start == len(keyword) && strings.EqualFold(query[start:end], keyword)
 }
 
 func skipSQLSingleQuoted(query string, index int) int {
