@@ -14,6 +14,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和基础结果扫描。
+- MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
 - XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`。
 - MyBatis-Plus 风格 `BaseMapper` 通用 CRUD、`QueryWrapper` 条件构造器和 `Page` 分页模型。
 - MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作。
@@ -164,6 +165,35 @@ config.GlobalConfig.DbConfig.LogicDeleteValue = int64(1)
 config.GlobalConfig.DbConfig.LogicNotDeleteValue = int64(0)
 config.GlobalConfig.MetaObjectHandler = auditFillHandler{}
 
+session, err := orm.NewSQLSession(registry, db, nil, orm.WithConfiguration(config))
+if err != nil {
+	return err
+}
+```
+
+也可以使用 MyBatis 命名风格的 Go 化配置模型构建运行期配置：
+
+```go
+cacheEnabled := false
+mybatisConfig := orm.MyBatisConfig{
+	Settings: orm.MyBatisSettings{
+		CacheEnabled:             &cacheEnabled,
+		MapUnderscoreToCamelCase: true,
+		DefaultExecutorType:      orm.ExecutorTypeReuse,
+		DatabaseID:               "mysql8",
+	},
+	Environment: orm.MyBatisEnvironment{
+		ID:     "prod",
+		DbType: orm.DbTypeMySQL,
+	},
+	TypeAliases: []orm.TypeAlias{{Alias: "User", TypeName: "system.User"}},
+	Mappers:     []orm.MapperRef{{Resource: "mapper/user_mapper.xml", Namespace: "system.user.UserMapper"}},
+}
+
+config, err := mybatisConfig.BuildConfiguration()
+if err != nil {
+	return err
+}
 session, err := orm.NewSQLSession(registry, db, nil, orm.WithConfiguration(config))
 if err != nil {
 	return err
