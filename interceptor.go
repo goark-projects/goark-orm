@@ -669,7 +669,7 @@ func splitSQLConditionTail(query string) (string, string) {
 
 func findSQLTailStart(query string, includeGrouping bool) int {
 	depth := 0
-	for index := 0; index < len(query); {
+	for index := sqlTailScanStart(query); index < len(query); {
 		if next, ok := skipSQLComment(query, index); ok {
 			index = next
 			continue
@@ -719,6 +719,25 @@ func findSQLTailStart(query string, includeGrouping bool) int {
 	return -1
 }
 
+func sqlTailScanStart(query string) int {
+	index := skipSQLSpacesAndComments(query, 0)
+	if hasSQLKeywordAt(query, index, "select") {
+		fromIndex := findSQLKeyword(query, "from")
+		if fromIndex < 0 {
+			return len(query)
+		}
+		return fromIndex + len("from")
+	}
+	if !hasSQLKeywordAt(query, index, "with") || findSQLKeyword(query, "select") < 0 {
+		return 0
+	}
+	fromIndex := findSQLKeyword(query, "from")
+	if fromIndex < 0 {
+		return len(query)
+	}
+	return fromIndex + len("from")
+}
+
 func isSQLTailClause(query string, tokenStart int, tokenEnd int, includeGrouping bool) bool {
 	next := skipSQLSpacesAndComments(query, tokenEnd)
 	switch {
@@ -737,10 +756,24 @@ func isSQLTailClause(query string, tokenStart int, tokenEnd int, includeGrouping
 			hasSQLKeywordAt(query, next, "key")
 	case sqlTokenEquals(query, tokenStart, tokenEnd, "limit") ||
 		sqlTokenEquals(query, tokenStart, tokenEnd, "offset"):
-		return !sqlTokenFollowedByPredicateOperator(query, next)
+		return sqlTailArgumentStartsAt(query, next)
 	default:
 		return false
 	}
+}
+
+func sqlTailArgumentStartsAt(query string, index int) bool {
+	if index >= len(query) {
+		return false
+	}
+	ch := query[index]
+	return (ch >= '0' && ch <= '9') ||
+		ch == '?' ||
+		ch == ':' ||
+		ch == '(' ||
+		ch == '#' ||
+		ch == '$' ||
+		hasSQLKeywordAt(query, index, "all")
 }
 
 func sqlTokenFollowedByPredicateOperator(query string, index int) bool {

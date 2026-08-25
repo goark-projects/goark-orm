@@ -171,3 +171,33 @@ func TestCountSQLBase_whenTailKeywordIsPredicateColumn_shouldStripOnlyRealTail(t
 		t.Fatalf("unexpected count SQL base %q", actual)
 	}
 }
+
+func TestCountSQLBase_whenTailKeywordsAreProjectionColumns_shouldStripOnlyRealTail(t *testing.T) {
+	t.Parallel()
+
+	query := "select limit, offset from sys_user where status = #{status} order by id"
+	expected := "select limit, offset from sys_user where status = #{status}"
+	if actual := countSQLBase(query); actual != expected {
+		t.Fatalf("unexpected count SQL base %q", actual)
+	}
+}
+
+func TestCountSQLBase_whenLimitOffsetTailProvided_shouldStripTail(t *testing.T) {
+	t.Parallel()
+
+	query := "select id from sys_user where status = #{status} limit #{limit} offset #{offset}"
+	expected := "select id from sys_user where status = #{status}"
+	if actual := countSQLBase(query); actual != expected {
+		t.Fatalf("unexpected count SQL base %q", actual)
+	}
+}
+
+func TestCountSQLBase_whenCTESelectHasProjectionTailKeyword_shouldStripOnlyRealTail(t *testing.T) {
+	t.Parallel()
+
+	query := "with active_users as (select id from sys_user where active = true) select limit from active_users where id = #{id} order by id"
+	expected := "with active_users as (select id from sys_user where active = true) select limit from active_users where id = #{id}"
+	if actual := countSQLBase(query); actual != expected {
+		t.Fatalf("unexpected count SQL base %q", actual)
+	}
+}

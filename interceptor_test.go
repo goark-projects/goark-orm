@@ -201,9 +201,25 @@ func TestAppendSQLCondition_whenTailKeywordsArePredicateColumns_shouldAppendAnd(
 	}
 }
 
+func TestAppendSQLCondition_whenTailKeywordsAreProjectionColumns_shouldAppendAnd(t *testing.T) {
+	actual := appendSQLCondition(`select limit, offset, having from sys_user where status = #{status}`, `"tenant_id" = #{tenantID}`)
+	expected := `select limit, offset, having from sys_user where status = #{status} AND "tenant_id" = #{tenantID}`
+	if actual != expected {
+		t.Fatalf("unexpected SQL %q", actual)
+	}
+}
+
 func TestAppendSQLCondition_whenOrderByTailExists_shouldAppendBeforeTail(t *testing.T) {
 	actual := appendSQLCondition(`select id from sys_user where status = #{status} order by id`, `"tenant_id" = #{tenantID}`)
 	expected := `select id from sys_user where status = #{status} AND "tenant_id" = #{tenantID} order by id`
+	if actual != expected {
+		t.Fatalf("unexpected SQL %q", actual)
+	}
+}
+
+func TestAppendSQLCondition_whenLimitOffsetTailExists_shouldAppendBeforeTail(t *testing.T) {
+	actual := appendSQLCondition(`select id from sys_user where status = #{status} limit #{limit} offset #{offset}`, `"tenant_id" = #{tenantID}`)
+	expected := `select id from sys_user where status = #{status} AND "tenant_id" = #{tenantID} limit #{limit} offset #{offset}`
 	if actual != expected {
 		t.Fatalf("unexpected SQL %q", actual)
 	}
