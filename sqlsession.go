@@ -710,6 +710,9 @@ func (s *SQLSession) scanValue(ctx context.Context, scanner interface{ Scan(dest
 		return s.scanValue(ctx, scanner, columns, statement, target.Elem())
 	}
 	if target.Kind() == reflect.Struct {
+		if err, ok := s.scanWithRegisteredRowScanner(ctx, scanner, columns, statement, target); ok {
+			return err
+		}
 		return s.scanStruct(ctx, scanner, columns, statement, target)
 	}
 	if target.Kind() == reflect.Map {
@@ -856,6 +859,20 @@ func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(des
 		}
 	}
 	return nil
+}
+
+func (s *SQLSession) scanWithRegisteredRowScanner(ctx context.Context, row RowScannerRow, columns []string, statement StatementMeta, target reflect.Value) (error, bool) {
+	if s == nil || s.registry == nil || row == nil || !target.IsValid() || !target.CanAddr() {
+		return nil, false
+	}
+	scanner, ok := s.registry.RowScanner(target.Type().Name())
+	if !ok {
+		return nil, false
+	}
+	if err := scanner.ScanRow(ctx, columns, row, target.Addr().Interface()); err != nil {
+		return mappingFailure(statement, err), true
+	}
+	return nil, true
 }
 
 func (s *SQLSession) columnBindings(statement StatementMeta, typ reflect.Type) map[string]columnBinding {

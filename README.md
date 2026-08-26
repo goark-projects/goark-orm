@@ -10,11 +10,11 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete`、`call` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点和显式 SQL Provider。
 - XML Mapper 静态语句、动态 SQL 基础节点、`call`、`parameter`、`resultSet`、`bind`、`selectKey`、`databaseId`、`resultMap`、`constructor/idArg/arg`、`association`、`collection`、`extends`、`autoMapping`、`discriminator`、`columnPrefix`、`notNullColumn` 元数据和 namespace/类型一致性校验。
 - XML 与注解在同一个 Mapper 接口中混用。
-- 生成 `RegisterGoarkORMMetadata`、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
+- 生成 `RegisterGoarkORMMetadata`、实体 RowScanner、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package。
 - `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector` 和 `ReverseEngineer` 扩展 SPI，可由外部数据库适配层做 schema 反向工程或自定义模板；core 不直接依赖数据库驱动。
-- `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和基础结果扫描。
+- `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
 - MyBatis `${}` 原样替换的 Go 化安全版本：默认拒绝普通字符串，只允许 `RawSQLToken`，内置 `RawIdentifier` 和 `RawOrderBy` 白名单 token。
 - XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`；`test` 表达式支持安全 OGNL：括号、`and/or`、`not/!`、比较别名、四则运算、取模、三元表达式、`in/not in`、列表字面量、`empty`、确定性参数路径和白名单只读方法。
@@ -34,6 +34,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - Registry / Session 级 `TypeHandler` SPI，内建 `json`、`time`、`decimal` 处理器。
 - `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
 - `SQLSession` 支持 `StatementExecutor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler` 四层 middleware，业务可用 decorator 方式扩展执行、编译、参数绑定和结果映射链路。
+- `Registry.RegisterRowScanner` 支持显式注册生成式实体行扫描器，普通实体查询和存储过程多结果集会先走 RowScanner，复杂 ResultMap、TypeHandler 字段和未注册实体保持反射 fallback。
 - 非观测 SQL 治理拦截器：`SQLGuardRule` / `NewSQLGuardInterceptor` 可组合业务规则，`NewIllegalSQLInterceptor` 默认拒绝多语句、顶层 `SELECT *` 和无 WHERE 写语句，`NewReadOnlyInterceptor` 可保护只读会话。
 - Mapper 注解和 XML 语句支持 `interceptorIgnore`，可按语句跳过 `block-attack`、`tenant`、`data-permission`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-guard`、`illegal-sql`、`read-only` 或 `all`。
 - 独立 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。

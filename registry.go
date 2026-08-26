@@ -7,26 +7,28 @@ import (
 
 // Registry 保存编译期生成的 ORM 元数据。
 type Registry struct {
-	mu         sync.RWMutex
-	entities   map[string]EntityMeta
-	mappers    map[string]MapperMeta
-	statements map[string]StatementMeta
-	caches     map[string]Cache
-	cacheRefs  map[string]string
-	handlers   map[string]TypeHandler
-	providers  map[string]SQLProvider
+	mu          sync.RWMutex
+	entities    map[string]EntityMeta
+	mappers     map[string]MapperMeta
+	statements  map[string]StatementMeta
+	caches      map[string]Cache
+	cacheRefs   map[string]string
+	handlers    map[string]TypeHandler
+	providers   map[string]SQLProvider
+	rowScanners map[string]RowScanner
 }
 
 // NewRegistry 创建空的 ORM 元数据注册表。
 func NewRegistry() *Registry {
 	return &Registry{
-		entities:   make(map[string]EntityMeta),
-		mappers:    make(map[string]MapperMeta),
-		statements: make(map[string]StatementMeta),
-		caches:     make(map[string]Cache),
-		cacheRefs:  make(map[string]string),
-		handlers:   defaultTypeHandlers(),
-		providers:  make(map[string]SQLProvider),
+		entities:    make(map[string]EntityMeta),
+		mappers:     make(map[string]MapperMeta),
+		statements:  make(map[string]StatementMeta),
+		caches:      make(map[string]Cache),
+		cacheRefs:   make(map[string]string),
+		handlers:    defaultTypeHandlers(),
+		providers:   make(map[string]SQLProvider),
+		rowScanners: make(map[string]RowScanner),
 	}
 }
 
@@ -177,6 +179,38 @@ func (r *Registry) SQLProvider(name string) (SQLProvider, bool) {
 	defer r.mu.RUnlock()
 	provider, ok := r.providers[strings.TrimSpace(name)]
 	return provider, ok
+}
+
+// RegisterRowScanner 注册或替换指定实体类型的生成式行扫描器。
+func (r *Registry) RegisterRowScanner(typeName string, scanner RowScanner) error {
+	if r == nil {
+		return registryErrorf("registry", "", "registry is nil")
+	}
+	typeName = strings.TrimSpace(typeName)
+	if typeName == "" {
+		return registryErrorf("row-scanner", "", "row scanner type name is required")
+	}
+	if scanner == nil {
+		return registryErrorf("row-scanner", typeName, "row scanner for %s is nil", typeName)
+	}
+	if scannerFunc, ok := scanner.(RowScannerFunc); ok && scannerFunc == nil {
+		return registryErrorf("row-scanner", typeName, "row scanner for %s is nil", typeName)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rowScanners[typeName] = scanner
+	return nil
+}
+
+// RowScanner 按实体类型名读取生成式行扫描器。
+func (r *Registry) RowScanner(typeName string) (RowScanner, bool) {
+	if r == nil {
+		return nil, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	scanner, ok := r.rowScanners[strings.TrimSpace(typeName)]
+	return scanner, ok
 }
 
 // Cache 按 mapper namespace 读取二级缓存，自动解析 cache-ref。

@@ -1,6 +1,9 @@
 package orm
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestRegistry_whenRegisterMapper_shouldIndexStatements(t *testing.T) {
 	registry := NewRegistry()
@@ -67,5 +70,36 @@ func TestRegistry_whenReturnedEntityMutated_shouldKeepStoredMetadata(t *testing.
 	}
 	if entity.Columns[0].ColumnName != "id" {
 		t.Fatalf("registry returned mutable metadata: %#v", entity.Columns[0])
+	}
+}
+
+func TestRegistry_whenRegisterRowScanner_shouldExposeScanner(t *testing.T) {
+	registry := NewRegistry()
+	scanner := RowScannerFunc(func(ctx context.Context, columns []string, row RowScannerRow, dest any) error {
+		return nil
+	})
+
+	if err := registry.RegisterRowScanner("User", scanner); err != nil {
+		t.Fatalf("register row scanner failed: %v", err)
+	}
+
+	actual, ok := registry.RowScanner("User")
+	if !ok || actual == nil {
+		t.Fatal("expected row scanner")
+	}
+}
+
+func TestRegistry_whenRegisterRowScannerInvalid_shouldReject(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.RegisterRowScanner("", RowScannerFunc(func(ctx context.Context, columns []string, row RowScannerRow, dest any) error {
+		return nil
+	})); err == nil {
+		t.Fatal("expected empty type name error")
+	}
+	if err := registry.RegisterRowScanner("User", nil); err == nil {
+		t.Fatal("expected nil scanner error")
+	}
+	if err := registry.RegisterRowScanner("User", RowScannerFunc(nil)); err == nil {
+		t.Fatal("expected nil scanner function error")
 	}
 }

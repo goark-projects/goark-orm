@@ -98,6 +98,45 @@ func BenchmarkSQLSessionQueryOneScan(b *testing.B) {
 	}
 }
 
+func BenchmarkSQLSessionQueryOneGeneratedRowScanner(b *testing.B) {
+	registry := newSQLSessionRegistry(b, StatementMeta{
+		ID:         "FindByID",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.FindByID",
+		Command:    StatementCommandSelect,
+		SQL:        "select id, name, status from sys_user where id = #{id}",
+		ResultType: "sqlSessionUser",
+	})
+	if err := registry.RegisterRowScanner("sqlSessionUser", RowScannerFunc(func(ctx context.Context, columns []string, row RowScannerRow, dest any) error {
+		_ = ctx
+		_ = columns
+		user := dest.(*sqlSessionUser)
+		var discard any
+		return row.Scan(&user.ID, &user.Name, &discard)
+	})); err != nil {
+		b.Fatalf("register row scanner failed: %v", err)
+	}
+	state := openTestSQLState(b)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name", "status"},
+		values:  [][]driver.Value{{int64(7), "Alice", "ACTIVE"}},
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithLocalCache(false))
+	if err != nil {
+		b.Fatalf("new SQL session failed: %v", err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var user sqlSessionUser
+		if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &user); err != nil {
+			b.Fatalf("query one failed: %v", err)
+		}
+		if user.ID != 7 {
+			b.Fatalf("unexpected user %#v", user)
+		}
+	}
+}
+
 func BenchmarkAppendSQLCondition_GroupedQuery(b *testing.B) {
 	query := `select status, count(*) from sys_user where active = #{active} and exists (select 1 from audit_log where audit_log.user_id = sys_user.id and audit_log.type = #{type}) group by status having count(*) > #{min} order by status`
 	condition := `"tenant_id" = #{tenantID}`

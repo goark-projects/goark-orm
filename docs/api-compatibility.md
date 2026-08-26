@@ -9,8 +9,8 @@
 以下内容进入 V1 兼容范围：
 
 - `goark.dev/orm` module path。
-- `Session`、`ManagedSession`、`StatementSession`、`CallSession`、`StatementCallSession`、`SQLSession`、`SQLSessionFactory`、`TxSession`、`BatchSession`、`BaseMapper`、`Service`、`QueryWrapper`、`UpdateWrapper`、`Page`、`Lazy`、`Cache`、`TypeHandler`、`StatementInterceptor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler`、`IdentifierGenerator`、`MetaObjectHandler` 等导出运行时接口和类型。
-- `CallResult`、`ResultSetRows`、`EntityMeta`、`ColumnMeta`、`MapperMeta`、`StatementMeta`、`StatementType`、`ParameterMode`、`ParameterMeta`、`ResultSetMeta`、`ResultMapMeta`、`DynamicSQLNode` 等导出运行时和元数据结构。
+- `Session`、`ManagedSession`、`StatementSession`、`CallSession`、`StatementCallSession`、`SQLSession`、`SQLSessionFactory`、`TxSession`、`BatchSession`、`BaseMapper`、`Service`、`QueryWrapper`、`UpdateWrapper`、`Page`、`Lazy`、`Cache`、`TypeHandler`、`RowScanner`、`StatementInterceptor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler`、`IdentifierGenerator`、`MetaObjectHandler` 等导出运行时接口和类型。
+- `CallResult`、`ResultSetRows`、`RowScannerRow`、`RowScannerFunc`、`EntityMeta`、`ColumnMeta`、`MapperMeta`、`StatementMeta`、`StatementType`、`ParameterMode`、`ParameterMeta`、`ResultSetMeta`、`ResultMapMeta`、`DynamicSQLNode` 等导出运行时和元数据结构。
 - `ormgen.GenerateSpec`、`ormgen.PackageModel`、`ormgen.EntityModel`、`ormgen.MapperModel`、`ormgen.StatementModel` 和 `goark-orm generate orm` 主命令。
 - `//goark-orm:entity`、`//goark-orm:mapper`、`//goark-orm:select`、`//goark-orm:insert`、`//goark-orm:update`、`//goark-orm:delete`、`//goark-orm:call` 注解前缀和 `goark-orm` struct tag key。
 

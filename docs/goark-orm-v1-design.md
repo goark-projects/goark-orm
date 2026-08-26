@@ -17,7 +17,7 @@ Goark 核心框架已经明确采用编译期生成注册代码，不做 Java �
 - 支持存储过程和 callable statement，覆盖 IN、OUT、INOUT 参数及多结果集。
 - XML Mapper 和 Annotation Mapper 可以在同一个接口中混用。
 - 统一实体元数据、Statement 元数据、参数绑定、结果映射、事务、Configuration、GlobalConfig/DbConfig、一级缓存、Mapper namespace 二级缓存和执行器内核。
-- 使用独立 `goark-orm generate orm` 生成 Mapper 实现、分页签名、流式签名和静态元数据。
+- 使用独立 `goark-orm generate orm` 生成 Mapper 实现、实体 RowScanner、分页签名、流式签名和静态元数据。
 - 支持 Go Mapper 接口在本包内通过接口嵌入复用公共方法。
 - 支持独立多数据源路由 Session，把生成 Mapper 调用转发到不同逻辑数据源。
 - Goark 主 CLI 不包含 ORM 子命令，也不依赖 `goark.dev/orm`。
@@ -44,7 +44,7 @@ goark-orm generate orm
 zz_goark_orm_<package>_gen.go
         │
         ▼
-EntityMeta / StatementMeta / Mapper Impl / Binding Func
+EntityMeta / StatementMeta / RowScanner / Mapper Impl / Binding Func
         │
         ▼
 Session / Executor / Dialect / TypeHandler / Interceptor
@@ -454,7 +454,8 @@ type SQLProvider func(ctx context.Context, statement StatementMeta, args NamedAr
 1. 所有数据库操作必须接受 context.Context。
 2. 不在热路径解析 XML、注解或 struct tag。
 3. 不在热路径做全量反射字段扫描。
-4. Mapper 实现和行扫描函数由生成器生成。
+4. Mapper 实现和普通实体 RowScanner 由生成器生成。
+5. 复杂 ResultMap、TypeHandler 字段、collection 聚合和 nested select 保持显式 fallback，避免生成器吞掉映射语义。
 5. 事务和连接生命周期由 goark-orm 自身抽象承载，默认实现基于 database/sql。
 ```
 
@@ -652,7 +653,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 
 - 实现 `//goark-orm:mapper`。
 - 实现 `select`、`insert`、`update`、`delete` 方法注解。
-- 生成 Mapper 实现、参数绑定和结果扫描。
+- 生成 Mapper 实现、参数绑定和普通实体 RowScanner。
 - 校验 namespace 唯一性和方法签名。
 
 ### V1.3 XML Mapper 静态 SQL
@@ -700,6 +701,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 `ormgen.TemplateRenderer` 自定义模板 SPI，以及 `SchemaIntrospector` / `ReverseEngineer` 反向工程扩展 SPI；core 不引入数据库驱动。
 - 已支持存储过程和 callable statement：XML `<call>`、`//goark-orm:call`、IN/OUT/INOUT 参数、多结果集和生成 Mapper `orm.Call` 调用。
 - 已支持动态 SQL 安全 OGNL 表达式，包含算术、三元、集合、`empty`、`in/not in` 和白名单只读方法；不开放任意反射调用。
+- 已支持 `Registry.RegisterRowScanner` 显式注册生成式实体行扫描器；普通实体查询和 callable 多结果集优先走 RowScanner，复杂映射继续使用受控 fallback。
 - 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。
 - 已新增核心热路径 benchmark 和环境变量门控的真实数据库 smoke 测试；数据库方言矩阵记录在 `docs/database-matrix.md`。
 

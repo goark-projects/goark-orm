@@ -51,7 +51,7 @@ func Render(model *PackageModel) ([]byte, error) {
 
 func writeImports(builder *bytes.Buffer, model *PackageModel) {
 	builder.WriteString("import (\n")
-	if len(model.Mappers) > 0 {
+	if len(model.Mappers) > 0 || modelHasGeneratedRowScanners(model) {
 		builder.WriteString(strconv.Quote("context"))
 		builder.WriteByte('\n')
 	}
@@ -67,6 +67,13 @@ func writeRegisterFunction(builder *bytes.Buffer, model *PackageModel) {
 		builder.WriteString("if err := registry.RegisterEntity(")
 		builder.WriteString(entityMetaFunctionName(entity))
 		builder.WriteString("()); err != nil {\nreturn err\n}\n")
+		if generatedRowScannerSupported(entity) {
+			builder.WriteString("if err := registry.RegisterRowScanner(")
+			builder.WriteString(strconv.Quote(entity.TypeName))
+			builder.WriteString(", orm.RowScannerFunc(")
+			builder.WriteString(entityRowScannerFunctionName(entity))
+			builder.WriteString(")); err != nil {\nreturn err\n}\n")
+		}
 	}
 	for _, mapper := range model.Mappers {
 		builder.WriteString("if err := registry.RegisterMapper(")
@@ -82,6 +89,9 @@ func writeEntitySupport(builder *bytes.Buffer, model *PackageModel) {
 		writeEntityMetaFunction(builder, entity)
 		writeEntityFields(builder, entity)
 		writeEntityTypedFields(builder, entity)
+		if generatedRowScannerSupported(entity) {
+			writeEntityRowScanner(builder, entity)
+		}
 		if primary, ok := singleBaseMapperPrimaryColumn(entity); ok {
 			writeBaseMapperFactory(builder, entity, primary)
 			writeServiceFactory(builder, entity, primary)
@@ -181,6 +191,52 @@ func writeEntityTypedFields(builder *bytes.Buffer, entity EntityModel) {
 		builder.WriteString(strconv.Quote(column.ColumnName))
 		builder.WriteString("),\n")
 	}
+	builder.WriteString("}\n\n")
+}
+
+func writeEntityRowScanner(builder *bytes.Buffer, entity EntityModel) {
+	scannerName := entityRowScannerFunctionName(entity)
+	localName := lowerFirst(entity.TypeName)
+	if localName == "" || localName == entity.TypeName {
+		localName = "out"
+	}
+	builder.WriteString("func ")
+	builder.WriteString(scannerName)
+	builder.WriteString("(ctx context.Context, columns []string, row orm.RowScannerRow, dest any) error {\n")
+	builder.WriteString("_ = ctx\n")
+	builder.WriteString(localName)
+	builder.WriteString(", ok := dest.(*")
+	builder.WriteString(entity.TypeName)
+	builder.WriteString(")\n")
+	builder.WriteString("if !ok || ")
+	builder.WriteString(localName)
+	builder.WriteString(" == nil {\nreturn &orm.MappingError{Message:")
+	builder.WriteString(strconv.Quote("row scanner destination must be *" + entity.TypeName))
+	builder.WriteString("}\n}\n")
+	builder.WriteString("targets := make([]any, len(columns))\n")
+	builder.WriteString("for index, column := range columns {\n")
+	builder.WriteString("switch goarkORMColumnKey(column) {\n")
+	for _, column := range entity.Columns {
+		keys := generatedColumnMatchKeys(column)
+		if len(keys) == 0 {
+			continue
+		}
+		builder.WriteString("case ")
+		for index, key := range keys {
+			if index > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(strconv.Quote(key))
+		}
+		builder.WriteString(":\n")
+		builder.WriteString("targets[index] = &")
+		builder.WriteString(localName)
+		builder.WriteByte('.')
+		builder.WriteString(column.FieldName)
+		builder.WriteByte('\n')
+	}
+	builder.WriteString("default:\nvar discard any\ntargets[index] = &discard\n}\n}\n")
+	builder.WriteString("return row.Scan(targets...)\n")
 	builder.WriteString("}\n\n")
 }
 
@@ -1043,11 +1099,81 @@ func propertyAlias(fieldName string) string {
 }
 
 func writeHelperFunctions(builder *bytes.Buffer, model *PackageModel) {
-	if !modelNeedsPointerHelpers(model) {
-		return
+	if modelNeedsPointerHelpers(model) {
+		builder.WriteString("func goarkORMBoolPtr(value bool) *bool {\nreturn &value\n}\n\n")
+		builder.WriteString("func goarkORMIntPtr(value int) *int {\nreturn &value\n}\n\n")
 	}
-	builder.WriteString("func goarkORMBoolPtr(value bool) *bool {\nreturn &value\n}\n\n")
-	builder.WriteString("func goarkORMIntPtr(value int) *int {\nreturn &value\n}\n\n")
+	if modelHasGeneratedRowScanners(model) {
+		builder.WriteString("func goarkORMColumnKey(value string) string {\n")
+		builder.WriteString("runes := make([]rune, 0, len(value))\n")
+		builder.WriteString("for _, item := range value {\n")
+		builder.WriteString("switch item {\ncase '_', '-', '.', ' ', '\\t', '\\n', '\\r':\ncontinue\n}\n")
+		builder.WriteString("if item >= 'A' && item <= 'Z' {\nitem += 'a' - 'A'\n}\n")
+		builder.WriteString("runes = append(runes, item)\n}\n")
+		builder.WriteString("return string(runes)\n}\n\n")
+	}
+}
+
+func modelHasGeneratedRowScanners(model *PackageModel) bool {
+	if model == nil {
+		return false
+	}
+	for _, entity := range model.Entities {
+		if generatedRowScannerSupported(entity) {
+			return true
+		}
+	}
+	return false
+}
+
+func generatedRowScannerSupported(entity EntityModel) bool {
+	if strings.TrimSpace(entity.TypeName) == "" || len(entity.Columns) == 0 {
+		return false
+	}
+	for _, column := range entity.Columns {
+		if strings.TrimSpace(column.FieldName) == "" || column.Transient || strings.TrimSpace(column.TypeHandler) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func generatedColumnMatchKeys(column ColumnModel) []string {
+	seen := make(map[string]struct{}, 2)
+	keys := make([]string, 0, 2)
+	for _, value := range []string{column.ColumnName, column.FieldName} {
+		key := generatorColumnKey(value)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func generatorColumnKey(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, r := range value {
+		switch r {
+		case '_', '-', '.', ' ', '\t', '\n', '\r':
+			continue
+		default:
+			builder.WriteRune(toLowerASCIIRune(r))
+		}
+	}
+	return builder.String()
+}
+
+func toLowerASCIIRune(value rune) rune {
+	if value >= 'A' && value <= 'Z' {
+		return value + 'a' - 'A'
+	}
+	return value
 }
 
 func modelNeedsPointerHelpers(model *PackageModel) bool {
@@ -1072,6 +1198,10 @@ func entityMetaFunctionName(entity EntityModel) string {
 	return "goarkORM" + entity.TypeName + "EntityMeta"
 }
 
+func entityRowScannerFunctionName(entity EntityModel) string {
+	return "goarkORMScan" + entity.TypeName + "Row"
+}
+
 func entityFieldsTypeName(entity EntityModel) string {
 	return "goarkORM" + entity.TypeName + "Fields"
 }
@@ -1094,6 +1224,18 @@ func generatedTypedFieldValueType(fieldType string) string {
 		return "any"
 	}
 	return fieldType
+}
+
+func lowerFirst(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if runes[0] >= 'A' && runes[0] <= 'Z' {
+		runes[0] += 'a' - 'A'
+	}
+	return string(runes)
 }
 
 func singleBaseMapperPrimaryColumn(entity EntityModel) (ColumnModel, bool) {

@@ -148,6 +148,11 @@ type UserMapper interface {
 	}
 	output := string(source)
 	expected := []string{
+		`registry.RegisterRowScanner("User", orm.RowScannerFunc(goarkORMScanUserRow))`,
+		`registry.RegisterRowScanner("Role", orm.RowScannerFunc(goarkORMScanRoleRow))`,
+		`func goarkORMScanUserRow(ctx context.Context, columns []string, row orm.RowScannerRow, dest any) error`,
+		`user, ok := dest.(*User)`,
+		`targets[index] = &user.ID`,
 		`Command: orm.StatementCommand("call")`,
 		`StatementType: orm.StatementTypeCallable`,
 		`ParameterModes: []orm.ParameterMeta{{Name: "status"}, {Name: "total", Mode: orm.ParameterModeOut, JDBCType: "BIGINT"}}`,

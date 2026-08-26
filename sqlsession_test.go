@@ -103,6 +103,58 @@ func TestSQLSession_QueryOne_whenStructPointerDestination_shouldScanEntityColumn
 	}
 }
 
+func TestSQLSession_QueryOne_whenRowScannerRegistered_shouldUseFastPath(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user where id = #{id}",
+	})
+	calls := 0
+	if err := registry.RegisterRowScanner("sqlSessionUser", RowScannerFunc(func(ctx context.Context, columns []string, row RowScannerRow, dest any) error {
+		_ = ctx
+		calls++
+		user, ok := dest.(*sqlSessionUser)
+		if !ok || user == nil {
+			t.Fatalf("unexpected scanner destination %#v", dest)
+		}
+		if !reflect.DeepEqual(columns, []string{"id", "name"}) {
+			t.Fatalf("unexpected columns %#v", columns)
+		}
+		if err := row.Scan(&user.ID, &user.Name); err != nil {
+			return err
+		}
+		user.Name = "fast:" + user.Name
+		return nil
+	})); err != nil {
+		t.Fatalf("register row scanner failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var user sqlSessionUser
+	err = session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &user)
+	if err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf("expected row scanner once, got %d", calls)
+	}
+	if user.ID != 7 || user.Name != "fast:Alice" {
+		t.Fatalf("unexpected user %#v", user)
+	}
+}
+
 func TestSQLSession_whenDefaultStatementTimeoutConfigured_shouldApplyDeadline(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{
@@ -211,6 +263,59 @@ func TestSQLSession_Query_whenSliceDestination_shouldScanRows(t *testing.T) {
 	}
 
 	if len(users) != 2 || users[0].ID != 7 || users[1].Name != "Bob" {
+		t.Fatalf("unexpected users %#v", users)
+	}
+}
+
+func TestSQLSession_Query_whenRowScannerRegistered_shouldScanSliceWithFastPath(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values: [][]driver.Value{
+			{int64(7), "Alice"},
+			{int64(8), "Bob"},
+		},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "List",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.List",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id, name from sys_user",
+	})
+	calls := 0
+	if err := registry.RegisterRowScanner("sqlSessionUser", RowScannerFunc(func(ctx context.Context, columns []string, row RowScannerRow, dest any) error {
+		_ = ctx
+		_ = columns
+		calls++
+		user, ok := dest.(*sqlSessionUser)
+		if !ok || user == nil {
+			t.Fatalf("unexpected scanner destination %#v", dest)
+		}
+		if err := row.Scan(&user.ID, &user.Name); err != nil {
+			return err
+		}
+		user.Name = strings.ToUpper(user.Name)
+		return nil
+	})); err != nil {
+		t.Fatalf("register row scanner failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, NewQuestionDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var users []sqlSessionUser
+	err = session.Query(context.Background(), "system.user.UserMapper.List", nil, &users)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if calls != 2 {
+		t.Fatalf("expected row scanner twice, got %d", calls)
+	}
+	if len(users) != 2 || users[0].Name != "ALICE" || users[1].Name != "BOB" {
 		t.Fatalf("unexpected users %#v", users)
 	}
 }
