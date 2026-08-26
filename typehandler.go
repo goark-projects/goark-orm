@@ -1,13 +1,15 @@
 package orm
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"goark.dev/orm/internal/jsoncodec"
 )
 
 // TypeHandler 负责 Go 值与数据库值之间的双向转换。
@@ -50,10 +52,8 @@ func (jsonTypeHandler) ToDB(ctx context.Context, value any) (any, error) {
 		return typed, nil
 	case string:
 		return typed, nil
-	case json.RawMessage:
-		return []byte(typed), nil
 	default:
-		data, err := json.Marshal(value)
+		data, err := jsoncodec.Marshal(value)
 		if err != nil {
 			return nil, fmt.Errorf("marshal json failed: %w", err)
 		}
@@ -74,20 +74,24 @@ func (jsonTypeHandler) FromDB(ctx context.Context, value any, target any) error 
 	case []byte:
 		data = typed
 	case string:
-		data = []byte(typed)
-	case json.RawMessage:
-		data = []byte(typed)
+		if strings.TrimSpace(typed) == "" {
+			return nil
+		}
+		if err := jsoncodec.UnmarshalString(typed, target); err != nil {
+			return fmt.Errorf("unmarshal json failed: %w", err)
+		}
+		return nil
 	default:
-		encoded, err := json.Marshal(value)
+		encoded, err := jsoncodec.Marshal(value)
 		if err != nil {
 			return fmt.Errorf("marshal database json value failed: %w", err)
 		}
 		data = encoded
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
+	if len(bytes.TrimSpace(data)) == 0 {
 		return nil
 	}
-	if err := json.Unmarshal(data, target); err != nil {
+	if err := jsoncodec.Unmarshal(data, target); err != nil {
 		return fmt.Errorf("unmarshal json failed: %w", err)
 	}
 	return nil

@@ -171,3 +171,55 @@ func BenchmarkContainsOrderBy_BracketIdentifiers(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkJSONTypeHandler_ToDB(b *testing.B) {
+	handler := NewJSONTypeHandler()
+	value := benchmarkJSONProfile{
+		ID:    1001,
+		Name:  "Alice",
+		Roles: []string{"admin", "auditor", "operator"},
+		Settings: benchmarkJSONSettings{
+			Theme:         "dark",
+			Notifications: true,
+			Limits:        []int{10, 20, 50},
+		},
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		databaseValue, err := handler.ToDB(context.Background(), value)
+		if err != nil {
+			b.Fatalf("json ToDB failed: %v", err)
+		}
+		if len(databaseValue.([]byte)) == 0 {
+			b.Fatalf("expected encoded json")
+		}
+	}
+}
+
+func BenchmarkJSONTypeHandler_FromDB(b *testing.B) {
+	handler := NewJSONTypeHandler()
+	data := []byte(`{"id":1001,"name":"Alice","roles":["admin","auditor","operator"],"settings":{"theme":"dark","notifications":true,"limits":[10,20,50]}}`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var value benchmarkJSONProfile
+		if err := handler.FromDB(context.Background(), data, &value); err != nil {
+			b.Fatalf("json FromDB failed: %v", err)
+		}
+		if value.ID != 1001 || value.Settings.Theme != "dark" {
+			b.Fatalf("unexpected decoded value %#v", value)
+		}
+	}
+}
+
+type benchmarkJSONProfile struct {
+	ID       int64                 `json:"id"`
+	Name     string                `json:"name"`
+	Roles    []string              `json:"roles"`
+	Settings benchmarkJSONSettings `json:"settings"`
+}
+
+type benchmarkJSONSettings struct {
+	Theme         string `json:"theme"`
+	Notifications bool   `json:"notifications"`
+	Limits        []int  `json:"limits"`
+}

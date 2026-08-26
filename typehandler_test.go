@@ -3,10 +3,11 @@ package orm
 import (
 	"context"
 	"database/sql/driver"
-	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
+
+	"goark.dev/orm/internal/jsoncodec"
 )
 
 func TestRegistry_whenCreated_shouldIncludeBuiltinTypeHandlers(t *testing.T) {
@@ -27,7 +28,7 @@ func TestJSONTypeHandler_whenStructValue_shouldMarshalAndUnmarshal(t *testing.T)
 		t.Fatalf("json ToDB failed: %v", err)
 	}
 	data, ok := databaseValue.([]byte)
-	if !ok || !json.Valid(data) {
+	if !ok || !jsoncodec.Valid(data) {
 		t.Fatalf("expected valid json bytes, got %#v", databaseValue)
 	}
 

@@ -422,7 +422,7 @@ mapping       EntityMeta、ColumnMeta、ResultMap
 statement     StatementMeta、Provider、动态 SQL AST、参数绑定计划
 executor      Query、QueryOne、Exec、Batch、结果映射
 session       Session、Configuration、事务上下文、一级缓存
-typehandler   JSON、Time、Decimal、自定义类型处理器
+typehandler   ByteDance Sonic JSON、Time、Decimal、自定义类型处理器
 interceptor   SQL 日志、分页、租户、乐观锁、逻辑删除、指标
 xmlmapper     XML 解析模型
 ormgen        生成器模型、校验器、代码渲染
@@ -701,6 +701,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 `goark-orm generate orm --config` JSON 配置文件、多包批量输出、配置级 databaseId 和 typeHandlers 默认值。
 - 已支持 `ormgen.TemplateRenderer` 自定义模板 SPI、`ReverseEngineerWithRenderer` 串联入口，以及 `SchemaIntrospector` / `SQLSchemaIntrospector` / `SQLSchemaDialect` 反向工程扩展 SPI；core 不引入具体数据库驱动。
 - 已支持存储过程和 callable statement：XML `<call>`、`//goark-orm:call`、IN/OUT/INOUT 参数、多结果集和生成 Mapper `orm.Call` 调用。
+- 已支持内建 JSON TypeHandler 使用 ByteDance Sonic，生成器配置和测试套件中的 JSON 解析也统一通过内部 JSON codec 封装。
 - 已支持动态 SQL 安全 OGNL 表达式，包含算术、三元、集合、`empty`、`in/not in` 和白名单只读方法；不开放任意反射调用。
 - 已支持 `Registry.RegisterRowScanner` 显式注册生成式实体行扫描器；普通实体查询和 callable 多结果集优先走 RowScanner，复杂映射继续使用受控 fallback。
 - 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。

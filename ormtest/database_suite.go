@@ -4,7 +4,6 @@ package ormtest
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	orm "goark.dev/orm"
+	"goark.dev/orm/internal/jsoncodec"
 )
 
 const (
@@ -165,7 +165,7 @@ func ParseSQLList(value string, separator string) ([]string, error) {
 	}
 	if strings.HasPrefix(value, "[") {
 		var items []string
-		if err := json.Unmarshal([]byte(value), &items); err != nil {
+		if err := jsoncodec.UnmarshalString(value, &items); err != nil {
 			return nil, err
 		}
 		return compactSQLList(items), nil

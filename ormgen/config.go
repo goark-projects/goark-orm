@@ -1,11 +1,12 @@
 package ormgen
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"goark.dev/orm/internal/jsoncodec"
 )
 
 // GenerateConfig 描述可提交的 ORM 生成器配置文件。
@@ -44,10 +45,8 @@ func LoadGenerateConfig(path string) (GenerateConfig, error) {
 		return GenerateConfig{}, err
 	}
 	defer file.Close()
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
 	var config GenerateConfig
-	if err := decoder.Decode(&config); err != nil {
+	if err := jsoncodec.DecodeStrict(file, &config); err != nil {
 		return GenerateConfig{}, fmt.Errorf("goark-orm: decode generate config %s failed: %w", path, err)
 	}
 	return config, nil
