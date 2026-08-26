@@ -13,7 +13,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - 生成 `RegisterGoarkORMMetadata`、实体 RowScanner、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package。
-- `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector` 和 `ReverseEngineer` 扩展 SPI，可由外部数据库适配层做 schema 反向工程或自定义模板；core 不直接依赖数据库驱动。
+- `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector`、`SQLSchemaIntrospector`、多数据库 `SQLSchemaDialect` 和 `ReverseEngineerWithRenderer`，可由外部数据库适配层或业务测试包做 schema 反向工程与自定义模板渲染；core 不直接依赖数据库驱动。
 - `ormtest` 提供环境变量门控的真实数据库兼容性测试套件，调用方在自己的测试二进制中显式 blank import 驱动后即可复用 ping、setup/cleanup、查询、分页、写语句和 callable statement 用例。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
 - MyBatis 风格 statement 级 `timeout`、`fetchSize`、`resultSetType`、`resultOrdered` 和 `keyColumn` 执行选项；语句级声明优先于全局默认值，并通过可选执行器接口传递给驱动适配层。
@@ -129,7 +129,7 @@ _ = page
 goark-orm generate orm --config goark-orm.json
 ```
 
-需要接入数据库反向工程时，应在业务侧或独立 adapter 实现 `ormgen.SchemaIntrospector`，再把 schema 中间模型交给 `ormgen.ReverseEngineer` / `ormgen.Render`；`goark-orm` core 不连接数据库、不提交 schema 脚本。
+需要接入数据库反向工程时，可在业务侧或独立 adapter 实现 `ormgen.SchemaIntrospector`，也可以把已注册驱动的 `*sql.DB` / `*sql.Tx` 交给 `ormgen.NewSQLSchemaIntrospector`。schema 中间模型交给 `ormgen.ReverseEngineer` / `ormgen.Render`，或者用 `ormgen.ReverseEngineerWithRenderer` 直接走自定义模板；`goark-orm` core 不 blank import 具体数据库驱动、不提交 schema 脚本。
 
 真实数据库测试建议放在业务侧或本地 Mac 测试包中，由测试包显式注册驱动，再复用 `ormtest` 套件。setup/cleanup SQL 可通过环境变量传入 JSON 字符串数组或 `GOARK_ORM_INTEGRATION_SQL_SEPARATOR` 分隔文本，仓库不保存私有 SQL：
 

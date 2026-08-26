@@ -1,6 +1,9 @@
 package ormgen
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // TemplateRenderer 渲染已经扫描或反向工程得到的包模型。
 type TemplateRenderer interface {
@@ -26,6 +29,18 @@ func DefaultTemplateRenderer() TemplateRenderer {
 // GenerateWithRenderer 使用自定义模板渲染器生成源码。
 func GenerateWithRenderer(spec GenerateSpec, renderer TemplateRenderer) ([]byte, error) {
 	model, err := ScanPackage(spec)
+	if err != nil {
+		return nil, err
+	}
+	if renderer == nil {
+		renderer = DefaultTemplateRenderer()
+	}
+	return renderer.RenderPackage(model)
+}
+
+// ReverseEngineerWithRenderer 读取 schema 并使用指定模板渲染。
+func ReverseEngineerWithRenderer(ctx context.Context, introspector SchemaIntrospector, spec ReverseEngineerSpec, renderer TemplateRenderer) ([]byte, error) {
+	model, err := ReverseEngineer(ctx, introspector, spec)
 	if err != nil {
 		return nil, err
 	}

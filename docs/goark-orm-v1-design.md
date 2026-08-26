@@ -533,7 +533,7 @@ zz_goark_orm_<package>_gen.go
 6. packages：多包生成目标列表，每个条目支持 dir/package/output/databaseId/typeHandlers。
 ```
 
-配置文件中的相对路径按配置文件所在目录解析。配置模式只负责源码扫描和文件输出，不连接数据库，也不提交 schema 脚本。需要 schema 反向工程时，通过外部 adapter 实现 `ormgen.SchemaIntrospector`，再由 `ormgen.ReverseEngineer` 把 schema 中间模型转换为 `PackageModel`；模板替换通过 `ormgen.TemplateRenderer` 完成。
+配置文件中的相对路径按配置文件所在目录解析。配置模式只负责源码扫描和文件输出，不连接数据库，也不提交 schema 脚本。需要 schema 反向工程时，可以通过外部 adapter 实现 `ormgen.SchemaIntrospector`，也可以用 `ormgen.SQLSchemaIntrospector` 组合已注册驱动的 `database/sql` 连接和 `SQLSchemaDialect` 读取 PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 或 Oracle 元数据，再由 `ormgen.ReverseEngineer` 把 schema 中间模型转换为 `PackageModel`；模板替换通过 `ormgen.TemplateRenderer` 或 `ReverseEngineerWithRenderer` 完成。
 
 ## 生成期校验
 
@@ -699,7 +699,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 MyBatis-Plus 风格 `SQLInjector` 显式通用方法注入、无全局会话的 `Db` 快捷门面，以及 `EnumValuer` 枚举入库值接口。
 - 已支持 Mapper 本包内接口嵌入展平，公共查询/写入接口可以复用到具体 Mapper。
 - 已支持 `goark-orm generate orm --config` JSON 配置文件、多包批量输出、配置级 databaseId 和 typeHandlers 默认值。
-- 已支持 `ormgen.TemplateRenderer` 自定义模板 SPI，以及 `SchemaIntrospector` / `ReverseEngineer` 反向工程扩展 SPI；core 不引入数据库驱动。
+- 已支持 `ormgen.TemplateRenderer` 自定义模板 SPI、`ReverseEngineerWithRenderer` 串联入口，以及 `SchemaIntrospector` / `SQLSchemaIntrospector` / `SQLSchemaDialect` 反向工程扩展 SPI；core 不引入具体数据库驱动。
 - 已支持存储过程和 callable statement：XML `<call>`、`//goark-orm:call`、IN/OUT/INOUT 参数、多结果集和生成 Mapper `orm.Call` 调用。
 - 已支持动态 SQL 安全 OGNL 表达式，包含算术、三元、集合、`empty`、`in/not in` 和白名单只读方法；不开放任意反射调用。
 - 已支持 `Registry.RegisterRowScanner` 显式注册生成式实体行扫描器；普通实体查询和 callable 多结果集优先走 RowScanner，复杂映射继续使用受控 fallback。
