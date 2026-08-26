@@ -517,7 +517,7 @@ zz_goark_orm_<package>_gen.go
 6. packages：多包生成目标列表，每个条目支持 dir/package/output/databaseId/typeHandlers。
 ```
 
-配置文件中的相对路径按配置文件所在目录解析。配置模式只负责源码扫描和文件输出，不连接数据库，也不做 schema 反向工程。
+配置文件中的相对路径按配置文件所在目录解析。配置模式只负责源码扫描和文件输出，不连接数据库，也不提交 schema 脚本。需要 schema 反向工程时，通过外部 adapter 实现 `ormgen.SchemaIntrospector`，再由 `ormgen.ReverseEngineer` 把 schema 中间模型转换为 `PackageModel`；模板替换通过 `ormgen.TemplateRenderer` 完成。
 
 ## 生成期校验
 
@@ -681,6 +681,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 MyBatis-Plus 风格 `SQLInjector` 显式通用方法注入、无全局会话的 `Db` 快捷门面，以及 `EnumValuer` 枚举入库值接口。
 - 已支持 Mapper 本包内接口嵌入展平，公共查询/写入接口可以复用到具体 Mapper。
 - 已支持 `goark-orm generate orm --config` JSON 配置文件、多包批量输出、配置级 databaseId 和 typeHandlers 默认值。
+- 已支持 `ormgen.TemplateRenderer` 自定义模板 SPI，以及 `SchemaIntrospector` / `ReverseEngineer` 反向工程扩展 SPI；core 不引入数据库驱动。
 - 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。
 - 已新增核心热路径 benchmark 和环境变量门控的真实数据库 smoke 测试；数据库方言矩阵记录在 `docs/database-matrix.md`。
 
