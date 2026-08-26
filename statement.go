@@ -34,21 +34,24 @@ func CompileSQLContext(ctx context.Context, query string, args NamedArgs, dialec
 		return CompiledSQL{}, err
 	}
 	query = rendered
-	matches := statementParamPattern.FindAllStringSubmatchIndex(query, -1)
-	if len(matches) == 0 {
-		if strings.Contains(query, "#{") {
-			return CompiledSQL{}, bindingErrorf("SQL contains invalid parameter placeholder")
-		}
+	if !strings.Contains(query, "#{") {
 		return CompiledSQL{SQL: query}, nil
 	}
-
 	var builder strings.Builder
 	builder.Grow(len(query))
-	compiled := CompiledSQL{Args: make([]any, 0, len(matches))}
+	compiled := CompiledSQL{Args: make([]any, 0, 4)}
 	offset := 0
-	for index, match := range matches {
-		builder.WriteString(query[offset:match[0]])
-		name := strings.TrimSpace(query[match[2]:match[3]])
+	ordinal := 1
+	for index := 0; index < len(query); {
+		if index+1 >= len(query) || query[index] != '#' || query[index+1] != '{' {
+			index++
+			continue
+		}
+		end, name, err := readSQLPlaceholderName(query, index)
+		if err != nil {
+			return CompiledSQL{}, bindingErrorf("SQL contains invalid parameter placeholder")
+		}
+		builder.WriteString(query[offset:index])
 		value, ok, err := resolveNamedArg(args, name)
 		if err != nil {
 			return CompiledSQL{}, &BindingError{Parameter: name, Err: err}
@@ -63,9 +66,11 @@ func CompileSQLContext(ctx context.Context, query string, args NamedArgs, dialec
 		if err != nil {
 			return CompiledSQL{}, &BindingError{Parameter: name, Err: err}
 		}
-		builder.WriteString(dialect.Placeholder(index + 1))
+		builder.WriteString(dialect.Placeholder(ordinal))
+		ordinal++
 		compiled.Args = append(compiled.Args, value)
-		offset = match[1]
+		offset = end
+		index = end
 	}
 	builder.WriteString(query[offset:])
 	compiled.SQL = builder.String()
@@ -76,19 +81,22 @@ func CompileSQLContext(ctx context.Context, query string, args NamedArgs, dialec
 }
 
 func renderRawSQL(query string, args NamedArgs, dialect Dialect) (string, error) {
-	matches := rawSQLParamPattern.FindAllStringSubmatchIndex(query, -1)
-	if len(matches) == 0 {
-		if strings.Contains(query, "${") {
-			return "", bindingErrorf("SQL contains invalid raw placeholder")
-		}
+	if !strings.Contains(query, "${") {
 		return query, nil
 	}
 	var builder strings.Builder
 	builder.Grow(len(query))
 	offset := 0
-	for _, match := range matches {
-		builder.WriteString(query[offset:match[0]])
-		name := strings.TrimSpace(query[match[2]:match[3]])
+	for index := 0; index < len(query); {
+		if index+1 >= len(query) || query[index] != '$' || query[index+1] != '{' {
+			index++
+			continue
+		}
+		end, name, err := readSQLPlaceholderName(query, index)
+		if err != nil {
+			return "", bindingErrorf("SQL contains invalid raw placeholder")
+		}
+		builder.WriteString(query[offset:index])
 		value, ok, err := resolveNamedArg(args, name)
 		if err != nil {
 			return "", &BindingError{Parameter: name, Err: err}
@@ -111,7 +119,8 @@ func renderRawSQL(query string, args NamedArgs, dialect Dialect) (string, error)
 			return "", &BindingError{Parameter: name, Err: err}
 		}
 		builder.WriteString(rendered)
-		offset = match[1]
+		offset = end
+		index = end
 	}
 	builder.WriteString(query[offset:])
 	rendered := builder.String()
@@ -119,4 +128,21 @@ func renderRawSQL(query string, args NamedArgs, dialect Dialect) (string, error)
 		return "", bindingErrorf("SQL contains invalid raw placeholder")
 	}
 	return rendered, nil
+}
+
+func readSQLPlaceholderName(query string, start int) (int, string, error) {
+	if start+1 >= len(query) || query[start+1] != '{' {
+		return start, "", bindingErrorf("placeholder is missing opening brace")
+	}
+	contentStart := start + 2
+	relativeEnd := strings.IndexByte(query[contentStart:], '}')
+	if relativeEnd < 0 {
+		return start, "", bindingErrorf("placeholder is not closed")
+	}
+	contentEnd := contentStart + relativeEnd
+	content := query[contentStart:contentEnd]
+	if strings.ContainsAny(content, "{}") {
+		return start, "", bindingErrorf("placeholder contains nested brace")
+	}
+	return contentEnd + 1, strings.TrimSpace(content), nil
 }
