@@ -96,6 +96,10 @@ func (c Command) runGenerate(args []string) int {
 func (c Command) runGenerateORM(args []string) int {
 	var output string
 	var configPath string
+	var dryRun bool
+	var validate bool
+	var check bool
+	var diff bool
 	var typeHandlers stringList
 	spec := ormgen.GenerateSpec{Dir: "."}
 	flags := flag.NewFlagSet("goark-orm generate orm", flag.ContinueOnError)
@@ -104,6 +108,10 @@ func (c Command) runGenerateORM(args []string) int {
 	flags.StringVar(&spec.Dir, "dir", ".", "待扫描 Go package 目录")
 	flags.StringVar(&spec.PackageName, "package", "", "待扫描 package 名称，默认自动推导")
 	flags.StringVar(&output, "output", "", "输出文件路径，留空时输出到 stdout；扫描 ./... 时不允许指定")
+	flags.BoolVar(&dryRun, "dry-run", false, "只扫描和渲染，不写入生成文件")
+	flags.BoolVar(&validate, "validate", false, "只验证元数据和生成结果能否渲染")
+	flags.BoolVar(&check, "check", false, "检查生成文件是否与当前元数据一致")
+	flags.BoolVar(&diff, "diff", false, "输出生成文件与当前元数据的差异")
 	flags.Var(&typeHandlers, "type-handler", "额外已注册 TypeHandler 名称，可重复")
 
 	if err := flags.Parse(args); err != nil {
@@ -116,16 +124,21 @@ func (c Command) runGenerateORM(args []string) int {
 		return 2
 	}
 	spec.TypeHandlers = append(spec.TypeHandlers, typeHandlers...)
+	mode, err := generateORMModeFromFlags(dryRun, validate, check, diff)
+	if err != nil {
+		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
+		return 2
+	}
 	if configPath != "" {
 		if flags.NArg() != 0 {
 			_, _ = fmt.Fprint(c.Err, "--config 不能与 pattern 参数同时使用\n")
 			return 2
 		}
-		return c.runGenerateORMConfig(configPath)
+		return c.runGenerateORMConfig(configPath, mode)
 	}
 	switch flags.NArg() {
 	case 0:
-		return c.runGenerateORMSingle(spec, output)
+		return c.runGenerateORMSingle(spec, output, mode)
 	case 1:
 		pattern := flags.Arg(0)
 		if strings.HasSuffix(pattern, "...") {
@@ -133,10 +146,10 @@ func (c Command) runGenerateORM(args []string) int {
 				_, _ = fmt.Fprint(c.Err, "扫描 ./... 时不能指定 --output\n")
 				return 2
 			}
-			return c.runGenerateORMPattern(pattern, spec)
+			return c.runGenerateORMPattern(pattern, spec, mode)
 		}
 		spec.Dir = pattern
-		return c.runGenerateORMSingle(spec, output)
+		return c.runGenerateORMSingle(spec, output, mode)
 	default:
 		_, _ = fmt.Fprintf(c.Err, "多余参数: %s\n\n", strings.Join(flags.Args(), " "))
 		c.printGenerateORMHelp(c.Err)
@@ -144,7 +157,7 @@ func (c Command) runGenerateORM(args []string) int {
 	}
 }
 
-func (c Command) runGenerateORMConfig(path string) int {
+func (c Command) runGenerateORMConfig(path string, mode generateORMMode) int {
 	config, err := ormgen.LoadGenerateConfig(path)
 	if err != nil {
 		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
@@ -170,34 +183,39 @@ func (c Command) runGenerateORMConfig(path string) int {
 		if output == "" {
 			output = filepath.Join(model.Dir, ormgen.DefaultOutputName(model.PackageName))
 		}
-		if err := writeFile(output, source); err != nil {
-			_, _ = fmt.Fprintf(c.Err, "写入生成文件失败: %v\n", err)
-			return 1
+		if code := c.finishGeneratedFile(output, source, mode); code != 0 {
+			return code
 		}
-		_, _ = fmt.Fprintf(c.Err, "generated %s\n", output)
 	}
 	return 0
 }
 
-func (c Command) runGenerateORMSingle(spec ormgen.GenerateSpec, output string) int {
-	source, err := ormgen.Generate(spec)
+func (c Command) runGenerateORMSingle(spec ormgen.GenerateSpec, output string, mode generateORMMode) int {
+	model, err := ormgen.ScanPackage(spec)
 	if err != nil {
 		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
 		return 2
 	}
+	source, err := ormgen.Render(model)
+	if err != nil {
+		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
+		return 2
+	}
+	if output == "" && mode.requiresGeneratedFile() {
+		output = filepath.Join(model.Dir, ormgen.DefaultOutputName(model.PackageName))
+	}
 	if output == "" {
+		if mode == generateORMModeValidate {
+			_, _ = fmt.Fprintf(c.Err, "validated %s\n", model.Dir)
+			return 0
+		}
 		_, _ = c.Out.Write(source)
 		return 0
 	}
-	if err := writeFile(output, source); err != nil {
-		_, _ = fmt.Fprintf(c.Err, "写入生成文件失败: %v\n", err)
-		return 1
-	}
-	_, _ = fmt.Fprintf(c.Err, "generated %s\n", output)
-	return 0
+	return c.finishGeneratedFile(output, source, mode)
 }
 
-func (c Command) runGenerateORMPattern(pattern string, spec ormgen.GenerateSpec) int {
+func (c Command) runGenerateORMPattern(pattern string, spec ormgen.GenerateSpec, mode generateORMMode) int {
 	dirs, err := ormgen.DiscoverPackages(pattern)
 	if err != nil {
 		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
@@ -222,11 +240,9 @@ func (c Command) runGenerateORMPattern(pattern string, spec ormgen.GenerateSpec)
 			return 2
 		}
 		output := filepath.Join(model.Dir, ormgen.DefaultOutputName(model.PackageName))
-		if err := writeFile(output, source); err != nil {
-			_, _ = fmt.Fprintf(c.Err, "写入生成文件失败: %v\n", err)
-			return 1
+		if code := c.finishGeneratedFile(output, source, mode); code != 0 {
+			return code
 		}
-		_, _ = fmt.Fprintf(c.Err, "generated %s\n", output)
 		generated++
 	}
 	if generated == 0 {
@@ -277,6 +293,10 @@ Flags:
   --dir path                 Go package directory to scan. Defaults to current directory.
   --package string           Package name to scan when directory contains multiple packages.
   --output path              Output file path for single package generation. Defaults to stdout.
+  --dry-run                  Render but do not write generated files.
+  --validate                 Validate metadata and generated source without writing files.
+  --check                    Fail if generated files are missing or out of date.
+  --diff                     Print a unified diff when generated files are out of date.
   --type-handler string      Extra registered TypeHandler name. Repeatable.
 
 Examples:

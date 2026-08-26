@@ -75,6 +75,154 @@ func TestCommand_whenGenerateORMToFile_shouldWriteFileAndReportToStderr(t *testi
 	}
 }
 
+func TestCommand_whenGenerateORMDryRun_shouldNotWriteFile(t *testing.T) {
+	dir := writeORMFixture(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	output := filepath.Join(dir, "zz_goark_orm_sample_gen.go")
+
+	code := Main([]string{
+		"generate", "orm",
+		"--dir", dir,
+		"--output", output,
+		"--dry-run",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout should be empty, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "dry-run generated "+output) {
+		t.Fatalf("expected dry-run path on stderr, got %q", stderr.String())
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not write output, stat err=%v", err)
+	}
+}
+
+func TestCommand_whenGenerateORMValidate_shouldOnlyValidate(t *testing.T) {
+	dir := writeORMFixture(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := Main([]string{
+		"generate", "orm",
+		"--dir", dir,
+		"--validate",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout should be empty, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "validated "+dir) {
+		t.Fatalf("expected validation output, got %q", stderr.String())
+	}
+}
+
+func TestCommand_whenGenerateORMCheck_shouldCompareGeneratedFile(t *testing.T) {
+	dir := writeORMFixture(t)
+	output := filepath.Join(dir, "zz_goark_orm_sample_gen.go")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := Main([]string{
+		"generate", "orm",
+		"--dir", dir,
+		"--output", output,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("initial generate failed with code %d, stderr=%s", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+
+	code = Main([]string{
+		"generate", "orm",
+		"--dir", dir,
+		"--output", output,
+		"--check",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected check exit code 0, got %d, stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "checked "+output) {
+		t.Fatalf("expected checked output, got %q", stderr.String())
+	}
+
+	if err := os.WriteFile(output, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale output failed: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{
+		"generate", "orm",
+		"--dir", dir,
+		"--output", output,
+		"--check",
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected stale check exit code 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "generated file out of date") {
+		t.Fatalf("expected stale check message, got %q", stderr.String())
+	}
+}
+
+func TestCommand_whenGenerateORMDiff_shouldPrintGeneratedDiff(t *testing.T) {
+	dir := writeORMFixture(t)
+	output := filepath.Join(dir, "zz_goark_orm_sample_gen.go")
+	if err := os.WriteFile(output, []byte("stale\n"), 0o644); err != nil {
+		t.Fatalf("write stale output failed: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := Main([]string{
+		"generate", "orm",
+		"--dir", dir,
+		"--output", output,
+		"--diff",
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected diff exit code 1, got %d", code)
+	}
+	diff := stdout.String()
+	if !strings.Contains(diff, "--- "+output) || !strings.Contains(diff, "+++ generated") || !strings.Contains(diff, "-stale") {
+		t.Fatalf("unexpected diff output:\n%s", diff)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr should be empty, got %q", stderr.String())
+	}
+}
+
+func TestCommand_whenGenerateORMModesConflict_shouldReject(t *testing.T) {
+	dir := writeORMFixture(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := Main([]string{
+		"generate", "orm",
+		"--dir", dir,
+		"--dry-run",
+		"--diff",
+	}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "不能同时使用") {
+		t.Fatalf("expected mode conflict error, got %q", stderr.String())
+	}
+}
+
 func TestCommand_whenGenerateORMConfigProvided_shouldGenerateConfiguredPackages(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "user")
