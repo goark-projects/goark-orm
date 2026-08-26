@@ -6,9 +6,12 @@ import (
 	"strings"
 )
 
-// scanWithRegisteredResultMapRowScanner 对简单 ResultMap 复用生成式 RowScanner。
+// scanWithRegisteredResultMapRowScanner 对可安全拆解的 ResultMap 复用生成式 RowScanner。
 func (s *SQLSession) scanWithRegisteredResultMapRowScanner(ctx context.Context, row RowScannerRow, columns []string, statement StatementMeta, resultMap ResultMapMeta, target reflect.Value) (error, bool) {
 	if !resultMapRowScannerSupported(resultMap) {
+		if resultMapAssociationRowScannerSupported(resultMap) {
+			return s.scanResultMapAssociationsWithRegisteredRowScanners(ctx, row, columns, statement, resultMap, target)
+		}
 		return nil, false
 	}
 	scannerColumns := resultMapRowScannerColumns(resultMap, columns)

@@ -663,6 +663,83 @@ func TestSQLSession_QueryOne_whenResultMapUsesAssociation_shouldScanNestedStruct
 	}
 }
 
+func TestSQLSession_QueryOne_whenAssociationResultMapHasRowScanners_shouldUseComposedFastPath(t *testing.T) {
+	disabled := false
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"order_id", "order_name", "user_id", "user_name"},
+		values:  [][]driver.Value{{int64(100), "Order-100", int64(7), "Alice"}},
+	}
+	statement := StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.order.OrderMapper",
+		FullName:  "system.order.OrderMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceXML,
+		SQL:       "select * from orders where id = #{id}",
+		ResultMap: "OrderResult",
+	}
+	registry := NewRegistry()
+	if err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: "system.order.OrderMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:          "OrderResult",
+				TypeName:    "sqlSessionOrder",
+				AutoMapping: &disabled,
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "order_id", ID: true},
+					{Property: "Name", Column: "order_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property: "User",
+						TypeName: "sqlSessionUser",
+						Fields: []ResultFieldMeta{
+							{Property: "ID", Column: "user_id", ID: true},
+							{Property: "Name", Column: "user_name"},
+						},
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{statement},
+	}); err != nil {
+		t.Fatalf("register mapper failed: %v", err)
+	}
+	orderScanner := &recordingOrderRowScanner{}
+	userScanner := &recordingResultMapRowScanner{}
+	if err := registry.RegisterRowScanner("sqlSessionOrder", orderScanner); err != nil {
+		t.Fatalf("register order row scanner failed: %v", err)
+	}
+	if err := registry.RegisterRowScanner("sqlSessionUser", userScanner); err != nil {
+		t.Fatalf("register user row scanner failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var order sqlSessionOrder
+	if err := session.QueryOne(context.Background(), "system.order.OrderMapper.FindByID", NamedArgs{"id": int64(100)}, &order); err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if order.ID != 100 || order.Name != "Order-100" || order.User.ID != 7 || order.User.Name != "Alice" {
+		t.Fatalf("unexpected order %#v", order)
+	}
+	if orderScanner.calls != 1 || userScanner.calls != 1 {
+		t.Fatalf("expected composed row scanners once, got order=%d user=%d", orderScanner.calls, userScanner.calls)
+	}
+	if strings.Join(orderScanner.columns, ",") != "ID,Name,__goark_orm_discard_2,__goark_orm_discard_3" {
+		t.Fatalf("unexpected order scanner columns %#v", orderScanner.columns)
+	}
+	if strings.Join(userScanner.columns, ",") != "__goark_orm_discard_0,__goark_orm_discard_1,ID,Name" {
+		t.Fatalf("unexpected user scanner columns %#v", userScanner.columns)
+	}
+}
+
 func TestSQLSession_Query_whenResultMapDiscriminatorUsesInlineCase_shouldScanCaseFields(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{
@@ -776,6 +853,63 @@ func TestSQLSession_Query_whenResultMapUsesCollection_shouldAggregateRowsByRootI
 	if len(orders[0].Items) != 2 || orders[0].Items[0].SKU != "SKU-1" || orders[0].Items[1].ID != 502 {
 		t.Fatalf("unexpected collection %#v", orders[0].Items)
 	}
+}
+
+func TestSQLSession_Query_whenResultMapUsesCollection_shouldNotUseComposedFastPath(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"order_id", "order_name", "user_id", "user_name", "item_id", "item_sku"},
+		values: [][]driver.Value{
+			{int64(100), "Order-100", int64(7), "Alice", int64(501), "SKU-1"},
+			{int64(100), "Order-100", int64(7), "Alice", int64(502), "SKU-2"},
+		},
+	}
+	registry := newOrderSessionRegistry(t)
+	if err := registry.RegisterRowScanner("sqlSessionOrder", RowScannerFunc(func(context.Context, []string, RowScannerRow, any) error {
+		t.Fatalf("collection resultMap must not use composed row scanner")
+		return nil
+	})); err != nil {
+		t.Fatalf("register order row scanner failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var orders []sqlSessionOrder
+	if err := session.Query(context.Background(), "system.order.OrderMapper.FindByID", NamedArgs{"id": int64(100)}, &orders); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(orders) != 1 || len(orders[0].Items) != 2 {
+		t.Fatalf("unexpected orders %#v", orders)
+	}
+}
+
+type recordingOrderRowScanner struct {
+	calls   int
+	columns []string
+}
+
+func (s *recordingOrderRowScanner) ScanRow(_ context.Context, columns []string, row RowScannerRow, dest any) error {
+	s.calls++
+	s.columns = append([]string(nil), columns...)
+	order, ok := dest.(*sqlSessionOrder)
+	if !ok || order == nil {
+		return fmt.Errorf("destination must be *sqlSessionOrder")
+	}
+	targets := make([]any, len(columns))
+	for index, column := range columns {
+		switch column {
+		case "ID":
+			targets[index] = &order.ID
+		case "Name":
+			targets[index] = &order.Name
+		default:
+			var discard any
+			targets[index] = &discard
+		}
+	}
+	return row.Scan(targets...)
 }
 
 func TestSQLSession_Query_whenResultMapUsesConstructorPrefixNotNullAndAutoMappingFalse_shouldScanExplicitGraph(t *testing.T) {

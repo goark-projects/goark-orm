@@ -37,7 +37,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - Registry / Session 级 `TypeHandler` SPI，支持 `RegisterTypeHandlers` / `WithTypeHandlers` 批量装配和 `NewTypeHandler` 函数适配器；内建基于 ByteDance Sonic 的 `json` 处理器，以及 `time`、`decimal`、`string`、`bool`、`bytes` 处理器。
 - `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
 - `SQLSession` 支持 `StatementExecutor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler` 四层 middleware，业务可用 decorator 方式扩展执行、编译、参数绑定和结果映射链路。
-- `Registry.RegisterRowScanner` 支持显式注册生成式实体行扫描器，普通实体查询、存储过程多结果集和无 TypeHandler/嵌套结构的简单 ResultMap 会先走 RowScanner，复杂 ResultMap、TypeHandler 字段和未注册实体保持反射 fallback。
+- `Registry.RegisterRowScanner` 支持显式注册生成式实体行扫描器，普通实体查询、存储过程多结果集、无 TypeHandler 的简单 ResultMap 和关闭自动映射的 association ResultMap 会先走 RowScanner，collection、discriminator、nested select、TypeHandler 字段和未注册实体保持反射 fallback。
 - 非观测 SQL 治理拦截器：`SQLGuardRule` / `NewSQLGuardInterceptor` 可组合业务规则，`NewIllegalSQLInterceptor` 默认拒绝多语句、顶层 `SELECT *` 和无 WHERE 写语句，`NewReadOnlyInterceptor` 可保护只读会话。
 - Mapper 注解和 XML 语句支持 `interceptorIgnore`，可按语句跳过 `block-attack`、`tenant`、`data-permission`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-guard`、`illegal-sql`、`read-only` 或 `all`。
 - 独立 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。
