@@ -14,6 +14,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package。
 - `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector` 和 `ReverseEngineer` 扩展 SPI，可由外部数据库适配层做 schema 反向工程或自定义模板；core 不直接依赖数据库驱动。
+- `ormtest` 提供环境变量门控的真实数据库兼容性测试套件，调用方在自己的测试二进制中显式 blank import 驱动后即可复用 ping、setup/cleanup、查询、分页、写语句和 callable statement 用例。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
 - MyBatis 风格 statement 级 `timeout`、`fetchSize`、`resultSetType`、`resultOrdered` 和 `keyColumn` 执行选项；语句级声明优先于全局默认值，并通过可选执行器接口传递给驱动适配层。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
@@ -77,7 +78,7 @@ GOWORK=off go vet ./...
 GOWORK=off go test -run '^$' -bench . -benchmem ./
 ```
 
-真实数据库 smoke 默认跳过；需要时设置 `GOARK_ORM_INTEGRATION_DRIVER` 和 `GOARK_ORM_INTEGRATION_DSN`。数据库方言和验证矩阵见 `docs/database-matrix.md`。
+真实数据库兼容性套件默认跳过；需要时设置 `GOARK_ORM_INTEGRATION_DRIVER` 和 `GOARK_ORM_INTEGRATION_DSN`，并在调用方测试二进制中显式注册数据库驱动。数据库方言和验证矩阵见 `docs/database-matrix.md`。
 
 生成示例：
 
@@ -129,6 +130,23 @@ goark-orm generate orm --config goark-orm.json
 ```
 
 需要接入数据库反向工程时，应在业务侧或独立 adapter 实现 `ormgen.SchemaIntrospector`，再把 schema 中间模型交给 `ormgen.ReverseEngineer` / `ormgen.Render`；`goark-orm` core 不连接数据库、不提交 schema 脚本。
+
+真实数据库测试建议放在业务侧或本地 Mac 测试包中，由测试包显式注册驱动，再复用 `ormtest` 套件。setup/cleanup SQL 可通过环境变量传入 JSON 字符串数组或 `GOARK_ORM_INTEGRATION_SQL_SEPARATOR` 分隔文本，仓库不保存私有 SQL：
+
+```go
+package user_test
+
+import (
+	"testing"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"goark.dev/orm/ormtest"
+)
+
+func TestORMDatabaseCompatibility(t *testing.T) {
+	ormtest.RunDatabaseSuiteFromEnv(t)
+}
+```
 
 存储过程使用显式 `call` 语句，不通过运行时扫描发现 Mapper。OUT / INOUT 参数必须绑定到指针参数，多结果集必须声明名称并绑定到对应的 slice 指针：
 

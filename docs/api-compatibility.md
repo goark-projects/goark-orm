@@ -9,6 +9,7 @@
 以下内容进入 V1 兼容范围：
 
 - `goark.dev/orm` module path。
+- `goark.dev/orm/ormtest` 真实数据库测试辅助包；该包仅依赖 `database/sql` 和 core ORM，不引入具体数据库驱动。
 - `Session`、`ManagedSession`、`StatementSession`、`CallSession`、`StatementCallSession`、`SQLSession`、`SQLSessionFactory`、`TxSession`、`BatchSession`、`BaseMapper`、`Service`、`QueryWrapper`、`UpdateWrapper`、`Page`、`Lazy`、`Cache`、`TypeHandler`、`RowScanner`、`StatementInterceptor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler`、`IdentifierGenerator`、`MetaObjectHandler` 等导出运行时接口和类型。
 - `CallResult`、`ResultSetRows`、`RowScannerRow`、`RowScannerFunc`、`EntityMeta`、`ColumnMeta`、`MapperMeta`、`StatementMeta`、`StatementOptions`、`StatementType`、`ResultSetType`、`ParameterMode`、`ParameterMeta`、`ResultSetMeta`、`ResultMapMeta`、`DynamicSQLNode` 等导出运行时和元数据结构。
 - `ormgen.GenerateSpec`、`ormgen.PackageModel`、`ormgen.EntityModel`、`ormgen.MapperModel`、`ormgen.StatementModel` 和 `goark-orm generate orm` 主命令。

@@ -24,17 +24,30 @@ GOWORK=off go vet ./...
 GOWORK=off go test -run '^$' -bench . -benchmem ./
 ```
 
-## 真实数据库 Smoke
+## 真实数据库兼容性套件
 
-默认不会执行真实数据库连接。需要验证具体驱动时，业务工程或 CI 显式提供驱动导入和 DSN：
+默认不会执行真实数据库连接。需要验证具体驱动时，业务工程或 CI 显式提供驱动导入和 DSN。`goark-orm` core 不 blank import 任何具体驱动，真实库测试二进制必须由调用方注册驱动：
 
 ```bash
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
 GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=disable' \
-GOWORK=off go test -run TestIntegrationDatabaseSmoke_whenConfigured ./...
+GOARK_ORM_INTEGRATION_DBTYPE=postgres \
+GOWORK=off go test -run TestIntegrationDatabaseSuite_whenConfigured ./...
 ```
 
-core 仓库不提交临时 SQL、不生成迁移草稿、不硬编码私有 DSN。真实库用例应只做可回滚的 smoke 或在外部测试库中执行。
+`ormtest.RunDatabaseSuiteFromEnv` 会读取以下环境变量：
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `GOARK_ORM_INTEGRATION_DRIVER` | 已注册的 `database/sql` driver 名称 |
+| `GOARK_ORM_INTEGRATION_DSN` | 真实数据库 DSN |
+| `GOARK_ORM_INTEGRATION_DBTYPE` | 可选方言类型，支持 `postgres`、`mysql`、`mariadb`、`sqlite`、`sqlserver`、`oracle` |
+| `GOARK_ORM_INTEGRATION_SETUP_SQL` | 可选 setup SQL，支持 JSON 字符串数组或分隔符文本 |
+| `GOARK_ORM_INTEGRATION_CLEANUP_SQL` | 可选 cleanup SQL，支持 JSON 字符串数组或分隔符文本 |
+| `GOARK_ORM_INTEGRATION_SQL_SEPARATOR` | 可选多 SQL 分隔符，默认是 `-- goark-orm statement --` 独立分隔段 |
+| `GOARK_ORM_INTEGRATION_TIMEOUT` | 可选用例超时，支持 Go duration 或整数秒 |
+
+core 仓库不提交临时 SQL、不生成迁移草稿、不硬编码私有 DSN。真实库用例应只做可回滚的兼容性检查，或者在外部测试库中执行。
 
 ## 存储过程能力
 
