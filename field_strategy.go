@@ -17,6 +17,8 @@ const (
 	FieldStrategyNotNull FieldStrategy = "NOT_NULL"
 	// FieldStrategyNotEmpty 表示字段值非 nil 且非空字符串、切片、数组或 map 时参与 SQL。
 	FieldStrategyNotEmpty FieldStrategy = "NOT_EMPTY"
+	// FieldStrategyNotZero 表示字段值非 nil 且非 Go 零值时参与 SQL。
+	FieldStrategyNotZero FieldStrategy = "NOT_ZERO"
 	// FieldStrategyNever 表示字段永不参与对应 SQL。
 	FieldStrategyNever FieldStrategy = "NEVER"
 )
@@ -34,6 +36,8 @@ func ParseFieldStrategy(value string) (FieldStrategy, error) {
 		return FieldStrategyNotNull, nil
 	case FieldStrategyNotEmpty:
 		return FieldStrategyNotEmpty, nil
+	case FieldStrategyNotZero:
+		return FieldStrategyNotZero, nil
 	case FieldStrategyNever:
 		return FieldStrategyNever, nil
 	default:

@@ -133,7 +133,7 @@ type User struct {
 8. soft-delete=true 在同一个实体内最多只能出现一次。
 9. created-at=true 和 updated-at=true 允许各出现一次。
 10. fill 支持 insert、update、insert_update，运行期由 MetaObjectHandler 执行严格填充。
-11. insert-strategy、update-strategy 和 where-strategy 支持 always、not-null、not-empty、never，字段级策略优先于 DbConfig 全局策略。
+11. insert-strategy、update-strategy 和 where-strategy 支持 always、not-null、not-empty、not-zero、never，字段级策略优先于 DbConfig 全局策略。
 12. select=false 表示该字段不进入 BaseMapper 默认查询投影，显式 QueryWrapper.Select 仍以调用方声明为准。
 ```
 
@@ -580,7 +580,7 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `GlobalConfig`。
 
-`GlobalConfig` 对齐 MyBatis-Plus 的全局扩展点，当前承载 `DbConfig`、`IdentifierGenerator` 和 `MetaObjectHandler`。`DbConfig` 已支持全局 `IDType`、`TablePrefix`、`Schema`、`LogicDeleteField`、`LogicDeleteValue`、`LogicNotDeleteValue`、`InsertStrategy`、`UpdateStrategy` 和 `WhereStrategy`。BaseMapper 会读取这些配置：主键字段未显式声明 `id-type` 且不是自增时，使用全局 `IDType`；渲染物理表名时应用 tablePrefix/schema；逻辑删除默认值从 DbConfig 读取；通用 INSERT/UPDATE 按字段级或全局字段策略过滤列。显式实体 tag 优先于全局兜底配置。
+`GlobalConfig` 对齐 MyBatis-Plus 的全局扩展点，当前承载 `DbConfig`、`IdentifierGenerator` 和 `MetaObjectHandler`。`DbConfig` 已支持全局 `IDType`、`TablePrefix`、`Schema`、`LogicDeleteField`、`LogicDeleteValue`、`LogicNotDeleteValue`、`InsertStrategy`、`UpdateStrategy` 和 `WhereStrategy`。BaseMapper 会读取这些配置：主键字段未显式声明 `id-type` 且不是自增时，使用全局 `IDType`；渲染物理表名时应用 tablePrefix/schema；逻辑删除默认值从 DbConfig 读取；通用 INSERT/UPDATE 按字段级或全局字段策略过滤列；实体条件查询按字段级或全局 whereStrategy 过滤 WHERE 字段，并读取字段 condition 渲染条件模板。显式实体 tag 优先于全局兜底配置。
 
 `MetaObjectHandler` 对齐 MyBatis-Plus 字段填充模型，但采用 Go 显式接口。BaseMapper 会在构造写入参数前填充实体；普通 Mapper 写语句会在拦截器改写后、方言占位符编译前填充运行时命名参数。`StrictInsertFill` 和 `StrictUpdateFill` 会读取 `ColumnMeta.Fill`，并兼容旧的 `created-at` / `updated-at` 语义。
 
@@ -676,6 +676,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 `IDType` 主键策略、默认 ASSIGN_ID/ASSIGN_UUID 生成器、XML `<bind>` 和 `databaseId` 语句选择。
 - 已支持 `QueryWrapper` / `UpdateWrapper` 嵌套条件、EXISTS/NOT EXISTS、Apply、Last、Between/NotBetween、NotLike、LikeLeft/LikeRight、NotIn，以及 QueryWrapper 的 GroupBy/Having/Select/AllEq/条件化 OrderBy。
 - 已支持 BaseMapper 的 SelectCount、SelectMaps、SelectObjs、DeleteBatchIDs 和 SaveOrUpdate。
+- 已支持 BaseMapper / Service 的实体条件查询，字段 condition 和 whereStrategy 会进入 WHERE 构造；默认 whereStrategy 使用 Go 化 not-zero，避免基础类型零值误匹配。
 - 已支持 MyBatis-Plus 风格 Service 层、QueryChain、UpdateChain，并由生成器为单主键实体输出 `New<Entity>Service` 工厂。
 - 已支持 MyBatis-Plus 风格 `SQLInjector` 显式通用方法注入、无全局会话的 `Db` 快捷门面，以及 `EnumValuer` 枚举入库值接口。
 - 已支持 Mapper 本包内接口嵌入展平，公共查询/写入接口可以复用到具体 Mapper。

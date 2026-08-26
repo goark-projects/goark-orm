@@ -24,6 +24,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `DbConfig` 支持全局主键策略、tablePrefix、schema、logicDeleteField、logicDeleteValue、logicNotDeleteValue、insertStrategy、updateStrategy 和 whereStrategy。
 - 实体字段支持 `key-column`、`numeric-scale`、`condition`、`select=false`、`insert-strategy`、`update-strategy` 和 `where-strategy` 元数据；`BaseMapper` 会按字段/全局 insert/update 策略过滤通用 INSERT/UPDATE 列。
 - `BaseMapper` 支持 `SelectCount`、`SelectMaps`、`SelectObjs`、`DeleteBatchIDs` 和 `SaveOrUpdate`。
+- `BaseMapper` / `Service` 支持实体条件查询：`SelectListByEntity`、`SelectCountByEntity`、`DeleteByEntity`、`ListByEntity`、`CountByEntity` 和 `RemoveByEntity`，字段 `condition` / `where-strategy` 会参与 WHERE 构造。
 - `BaseMapper` 已支持逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - MyBatis-Plus 风格 `MetaObjectHandler` 自动填充，支持 `fill='insert'`、`fill='update'`、`fill='insert_update'`，可用于 BaseMapper 和普通 Mapper 写语句。
 - `QueryWrapper` / `UpdateWrapper` 支持嵌套条件、`EXISTS` / `NOT EXISTS`、`Apply`、`Last`、`Between`、`NotBetween`、`NotLike`、`LikeLeft`、`LikeRight`、`NotIn`，查询 Wrapper 额外支持 `GroupBy` / `Having` / `Select` / `AllEq` / 条件化 `OrderBy`。
@@ -492,7 +493,17 @@ UpdatedAt time.Time `goark-orm:"column='updated_at';updated-at=true"`
 Remark    string    `goark-orm:"column='remark';select=false;insert-strategy='not-empty';update-strategy='not-empty'"`
 ```
 
-字段策略取值支持 `always`、`not-null`、`not-empty` 和 `never`。字段级策略优先于 `DbConfig` 全局策略；未声明时保持 V1 旧行为，通用 INSERT/UPDATE 默认包含零值字段。
+字段策略取值支持 `always`、`not-null`、`not-empty`、`not-zero` 和 `never`。字段级策略优先于 `DbConfig` 全局策略；未声明时保持 V1 旧行为，通用 INSERT/UPDATE 默认包含零值字段。实体条件构造默认使用 Go 化 `not-zero` 策略，避免基础类型零值误参与 WHERE。
+
+实体条件查询会读取字段级 `condition` 和 `where-strategy`：
+
+```go
+users, err := userService.ListByEntity(ctx, &User{Name: "%Alice%"})
+if err != nil {
+	return err
+}
+_ = users
+```
 
 Goark 主 CLI 不包含 ORM 子命令，也不依赖 `goark.dev/orm`。ORM 代码生成统一使用本仓库自带的独立 `goark-orm` 命令。
 

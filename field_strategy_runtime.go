@@ -20,6 +20,8 @@ func fieldIncludedByStrategy(value any, strategy FieldStrategy) bool {
 		return !isNilValue(value)
 	case FieldStrategyNotEmpty:
 		return !isEmptyStrategyValue(value)
+	case FieldStrategyNotZero:
+		return !isZeroStrategyValue(value)
 	default:
 		return true
 	}
@@ -42,4 +44,18 @@ func isEmptyStrategyValue(value any) bool {
 	default:
 		return false
 	}
+}
+
+func isZeroStrategyValue(value any) bool {
+	if isNilValue(value) {
+		return true
+	}
+	current := reflect.ValueOf(value)
+	for current.Kind() == reflect.Interface || current.Kind() == reflect.Pointer {
+		if current.IsNil() {
+			return true
+		}
+		current = current.Elem()
+	}
+	return current.IsZero()
 }

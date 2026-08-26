@@ -117,6 +117,15 @@ func (s *Service[T, ID]) Remove(ctx context.Context, wrapper *QueryWrapper[T]) (
 	return mapper.Delete(ctx, wrapper)
 }
 
+// RemoveByEntity 按实体非零字段删除实体。
+func (s *Service[T, ID]) RemoveByEntity(ctx context.Context, entity *T) (int64, error) {
+	mapper, err := s.requireMapper()
+	if err != nil {
+		return 0, err
+	}
+	return mapper.DeleteByEntity(ctx, entity)
+}
+
 // UpdateByID 按主键更新实体。
 func (s *Service[T, ID]) UpdateByID(ctx context.Context, entity *T) (bool, error) {
 	mapper, err := s.requireMapper()
@@ -195,6 +204,15 @@ func (s *Service[T, ID]) List(ctx context.Context, wrapper *QueryWrapper[T]) ([]
 	return mapper.SelectList(ctx, wrapper)
 }
 
+// ListByEntity 按实体非零字段查询实体列表。
+func (s *Service[T, ID]) ListByEntity(ctx context.Context, entity *T) ([]T, error) {
+	mapper, err := s.requireMapper()
+	if err != nil {
+		return nil, err
+	}
+	return mapper.SelectListByEntity(ctx, entity)
+}
+
 // ListByIDs 按主键集合查询实体列表。
 func (s *Service[T, ID]) ListByIDs(ctx context.Context, ids []ID) ([]T, error) {
 	mapper, err := s.requireMapper()
@@ -229,6 +247,15 @@ func (s *Service[T, ID]) Count(ctx context.Context, wrapper *QueryWrapper[T]) (i
 		return 0, err
 	}
 	return mapper.Count(ctx, wrapper)
+}
+
+// CountByEntity 按实体非零字段统计记录数。
+func (s *Service[T, ID]) CountByEntity(ctx context.Context, entity *T) (int64, error) {
+	mapper, err := s.requireMapper()
+	if err != nil {
+		return 0, err
+	}
+	return mapper.SelectCountByEntity(ctx, entity)
 }
 
 // Page 按条件分页查询实体列表。

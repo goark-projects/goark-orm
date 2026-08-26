@@ -686,6 +686,8 @@ func fieldStrategyExpression(value orm.FieldStrategy) string {
 		return "orm.FieldStrategyNotNull"
 	case orm.FieldStrategyNotEmpty:
 		return "orm.FieldStrategyNotEmpty"
+	case orm.FieldStrategyNotZero:
+		return "orm.FieldStrategyNotZero"
 	case orm.FieldStrategyNever:
 		return "orm.FieldStrategyNever"
 	default:
