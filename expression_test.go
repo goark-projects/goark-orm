@@ -94,6 +94,117 @@ func TestEvalExpression_whenLenFunctionProvided_shouldCompareLength(t *testing.T
 	}
 }
 
+func TestEvalExpression_whenArithmeticTernaryAndMembershipProvided_shouldEvaluateOGNL(t *testing.T) {
+	t.Parallel()
+
+	args := NamedArgs{
+		"age":    18,
+		"bonus":  3,
+		"status": "ACTIVE",
+		"id":     int64(8),
+		"ids":    []int64{7, 8, 9},
+		"empty":  []string{},
+	}
+	tests := []string{
+		"(age + bonus) >= 21",
+		"(bonus * 2 + age) % 2 == 0",
+		"status in {'ACTIVE', 'LOCKED'}",
+		"status not in {'DELETED', 'DISABLED'}",
+		"ids.contains(id)",
+		"empty.isEmpty()",
+		"(status == 'ACTIVE' ? age + bonus : 0) == 21",
+	}
+	for _, expression := range tests {
+		expression := expression
+		t.Run(expression, func(t *testing.T) {
+			t.Parallel()
+			ok, err := evalExpression(expression, func(name string) (any, bool) {
+				value, ok, err := resolveNamedArg(args, name)
+				if err != nil || !ok {
+					return nil, false
+				}
+				return value, true
+			})
+			if err != nil {
+				t.Fatalf("eval expression failed: %v", err)
+			}
+			if !ok {
+				t.Fatalf("expected expression %q to match", expression)
+			}
+		})
+	}
+}
+
+func TestEvalExpression_whenStringAndMapMethodsProvided_shouldEvaluateWhitelistMethods(t *testing.T) {
+	t.Parallel()
+
+	args := NamedArgs{
+		"name": " Alice ",
+		"meta": map[string]any{
+			"tenant": "goark",
+			"count":  int64(3),
+		},
+	}
+	tests := []string{
+		"name.trim().startsWith('Alice')",
+		"name.trim().toLowerCase() == 'alice'",
+		"name.trim().equalsIgnoreCase('alice')",
+		"meta.containsKey('tenant')",
+		"meta.containsValue(3)",
+	}
+	for _, expression := range tests {
+		expression := expression
+		t.Run(expression, func(t *testing.T) {
+			t.Parallel()
+			ok, err := evalExpression(expression, func(name string) (any, bool) {
+				value, ok, err := resolveNamedArg(args, name)
+				if err != nil || !ok {
+					return nil, false
+				}
+				return value, true
+			})
+			if err != nil {
+				t.Fatalf("eval expression failed: %v", err)
+			}
+			if !ok {
+				t.Fatalf("expected expression %q to match", expression)
+			}
+		})
+	}
+}
+
+func TestEvalValueExpression_whenTernaryAndStringConcatProvided_shouldReturnValue(t *testing.T) {
+	t.Parallel()
+
+	args := NamedArgs{
+		"name": "",
+	}
+	value, err := evalValueExpression("'%' + (name != '' ? name : 'guest') + '%'", func(name string) (any, bool) {
+		value, ok := args[name]
+		return value, ok
+	})
+	if err != nil {
+		t.Fatalf("eval value expression failed: %v", err)
+	}
+	if value != "%guest%" {
+		t.Fatalf("unexpected value %#v", value)
+	}
+}
+
+func TestEvalExpression_whenUnsafeMethodProvided_shouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	_, err := evalExpression("name.Format()", func(name string) (any, bool) {
+		if name == "name" {
+			return "Alice", true
+		}
+		return nil, false
+	})
+	if err == nil || !strings.Contains(err.Error(), "method \"Format\" is not allowed") {
+		t.Fatalf("expected disallowed method error, got %v", err)
+	}
+}
+
 func TestEvalExpression_whenInvalidNumericLiteralProvided_shouldReturnError(t *testing.T) {
 	t.Parallel()
 
