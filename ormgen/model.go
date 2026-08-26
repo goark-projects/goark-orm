@@ -86,6 +86,7 @@ type StatementModel struct {
 	Namespace          string
 	FullName           string
 	Command            orm.StatementCommand
+	StatementType      orm.StatementType
 	Source             orm.StatementSource
 	SQL                string
 	Provider           string
@@ -99,6 +100,8 @@ type StatementModel struct {
 	UseCache           orm.StatementCachePolicy
 	FlushCache         orm.StatementCachePolicy
 	Parameters         []string
+	ParameterModes     []orm.ParameterMeta
+	ResultSets         []orm.ResultSetMeta
 	DynamicSQL         []orm.DynamicSQLNode
 	InterceptorIgnores []string
 }

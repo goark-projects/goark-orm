@@ -151,6 +151,9 @@ func (s *BatchSession) ExecStatement(ctx context.Context, statement StatementMet
 	if statement.Command == StatementCommandSelect {
 		return Result{}, fmt.Errorf("goark-orm: statement %s is select; use Query or QueryOne", statement.FullName)
 	}
+	if statement.Command == StatementCommandCall {
+		return Result{}, fmt.Errorf("goark-orm: statement %s is call; use Call", statement.FullName)
+	}
 	if s.statementSession == nil && statement.FullName == "" {
 		return Result{}, fmt.Errorf("goark-orm: batch delegate does not support anonymous statement execution")
 	}

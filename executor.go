@@ -189,6 +189,9 @@ func (defaultStatementExecutor) Exec(ctx context.Context, session *SQLSession, m
 	if meta.Command == StatementCommandSelect {
 		return Result{}, fmt.Errorf("goark-orm: statement %s is select; use Query or QueryOne", meta.FullName)
 	}
+	if meta.Command == StatementCommandCall {
+		return Result{}, fmt.Errorf("goark-orm: statement %s is call; use Call", meta.FullName)
+	}
 	execArgs := copyNamedArgs(args)
 	if execArgs == nil {
 		execArgs = NamedArgs{}

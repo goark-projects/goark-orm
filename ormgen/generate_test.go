@@ -108,6 +108,101 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenXMLCallUsesOutAndResultSets_shouldRenderCallableMapper(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name'"`+"`"+`
+}
+
+//goark-orm:entity(table="sys_role")
+type Role struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Code string `+"`"+`goark-orm:"column='code'"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper", xml="mapper/user_mapper.xml")
+type UserMapper interface {
+	CallReport(ctx context.Context, status string, total *int64, users *[]User, roles *[]Role) error
+}
+`)
+	mustWriteFile(t, filepath.Join(dir, "mapper", "user_mapper.xml"), `<mapper namespace="system.user.UserMapper">
+  <call id="CallReport" statementType="CALLABLE">
+    call load_user_report(#{status}, #{total})
+    <parameter property="status" mode="IN"/>
+    <parameter property="total" mode="OUT" jdbcType="BIGINT"/>
+    <resultSet name="users" resultType="User"/>
+    <resultSet name="roles" resultType="Role"/>
+  </call>
+</mapper>
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := string(source)
+	expected := []string{
+		`Command: orm.StatementCommand("call")`,
+		`StatementType: orm.StatementTypeCallable`,
+		`ParameterModes: []orm.ParameterMeta{{Name: "status"}, {Name: "total", Mode: orm.ParameterModeOut, JDBCType: "BIGINT"}}`,
+		`ResultSets: []orm.ResultSetMeta{{Name: "users", ResultType: "User"}, {Name: "roles", ResultType: "Role"}}`,
+		`func (m *goarkORMUserMapper) CallReport(ctx context.Context, status string, total *int64, users *[]User, roles *[]Role) error`,
+		`_, err := orm.Call(ctx, m.session, "system.user.UserMapper.CallReport", orm.NamedArgs{"param1": status, "param2": total, "status": status, "total": total}, users, roles)`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, output)
+		}
+	}
+}
+
+func TestGenerate_whenAnnotationCallUsesOutAndCallResult_shouldRenderCallResult(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import (
+	"context"
+
+	orm "goark.dev/orm"
+)
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name'"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper")
+type UserMapper interface {
+	//goark-orm:call(sql="call count_users(#{status}, #{total})", parameters="status:IN,total:OUT:BIGINT")
+	CountByStatus(ctx context.Context, status string, total *int64) (orm.CallResult, error)
+}
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := string(source)
+	expected := []string{
+		`StatementType: orm.StatementTypeCallable`,
+		`ParameterModes: []orm.ParameterMeta{{Name: "status"}, {Name: "total", Mode: orm.ParameterModeOut, JDBCType: "BIGINT"}}`,
+		`func (m *goarkORMUserMapper) CountByStatus(ctx context.Context, status string, total *int64) (orm.CallResult, error)`,
+		`return orm.Call(ctx, m.session, "system.user.UserMapper.CountByStatus", orm.NamedArgs{"param1": status, "param2": total, "status": status, "total": total})`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, output)
+		}
+	}
+}
+
 func TestGenerate_whenAnnotationUsesRawSQLToken_shouldKeepRawPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

@@ -620,7 +620,7 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 	var selected annotation
 	command := orm.StatementCommand("")
 	count := 0
-	for _, name := range []string{"select", "insert", "update", "delete"} {
+	for _, name := range []string{"select", "insert", "update", "delete", "call"} {
 		item, ok := findAnnotation(annotations, name)
 		if !ok {
 			continue
@@ -647,6 +647,14 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 	if err != nil {
 		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses script failed: %w", methodName, selected.Name, err)
 	}
+	parameters, err := parseAnnotationCallableParameters(selected.Args)
+	if err != nil {
+		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses parameters failed: %w", methodName, selected.Name, err)
+	}
+	resultSets, err := parseAnnotationResultSets(selected.Args["resultSets"])
+	if err != nil {
+		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses resultSets failed: %w", methodName, selected.Name, err)
+	}
 	useGeneratedKeys := false
 	if value := strings.TrimSpace(selected.Args["useGeneratedKeys"]); value != "" {
 		switch value {
@@ -663,18 +671,153 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 		Namespace:          namespace,
 		FullName:           namespace + "." + methodName,
 		Command:            command,
+		StatementType:      annotationStatementType(selected.Args["statementType"], command),
 		Source:             orm.StatementSourceAnnotation,
 		SQL:                sql,
 		Provider:           provider,
 		UseGeneratedKeys:   useGeneratedKeys,
 		KeyProperty:        strings.TrimSpace(selected.Args["keyProperty"]),
 		Parameters:         statementParameters(sql),
+		ParameterModes:     parameters,
+		ResultSets:         resultSets,
 		DynamicSQL:         dynamicSQL,
 		InterceptorIgnores: parseInterceptorIgnores(selected.Args["interceptorIgnore"]),
 	}
 	statement.Parameters = append(statement.Parameters, dynamicStatementParameters(statement.DynamicSQL)...)
+	statement.Parameters = append(statement.Parameters, callableParameterNames(statement.ParameterModes)...)
 	statement.Parameters = uniqueSorted(statement.Parameters)
 	return statement, true, nil
+}
+
+func annotationStatementType(value string, command orm.StatementCommand) orm.StatementType {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(orm.StatementTypePrepared):
+		return orm.StatementTypePrepared
+	case string(orm.StatementTypeCallable):
+		return orm.StatementTypeCallable
+	default:
+		if command == orm.StatementCommandCall {
+			return orm.StatementTypeCallable
+		}
+		return ""
+	}
+}
+
+func parseAnnotationCallableParameters(args map[string]string) ([]orm.ParameterMeta, error) {
+	parameters := make([]orm.ParameterMeta, 0)
+	if raw := strings.TrimSpace(args["parameters"]); raw != "" {
+		parsed, err := parseCallableParameterList(raw)
+		if err != nil {
+			return nil, err
+		}
+		parameters = append(parameters, parsed...)
+	}
+	for _, item := range []struct {
+		key  string
+		mode orm.ParameterMode
+	}{
+		{key: "out", mode: orm.ParameterModeOut},
+		{key: "inout", mode: orm.ParameterModeInOut},
+	} {
+		for _, name := range splitAnnotationList(args[item.key]) {
+			parameters = upsertCallableParameter(parameters, orm.ParameterMeta{Name: name, Mode: item.mode})
+		}
+	}
+	return parameters, nil
+}
+
+func parseCallableParameterList(raw string) ([]orm.ParameterMeta, error) {
+	parts := splitAnnotationList(raw)
+	parameters := make([]orm.ParameterMeta, 0, len(parts))
+	for _, part := range parts {
+		fields := strings.Split(part, ":")
+		for index := range fields {
+			fields[index] = strings.TrimSpace(fields[index])
+		}
+		if fields[0] == "" {
+			return nil, fmt.Errorf("parameter name is required")
+		}
+		mode := orm.ParameterModeIn
+		if len(fields) > 1 && fields[1] != "" {
+			parsed, err := orm.ParseParameterMode(fields[1])
+			if err != nil {
+				return nil, err
+			}
+			mode = parsed
+		}
+		parameter := orm.ParameterMeta{Name: fields[0], Mode: mode}
+		if len(fields) > 2 {
+			parameter.JDBCType = fields[2]
+		}
+		if len(fields) > 3 {
+			parameter.TypeHandler = fields[3]
+		}
+		if len(fields) > 4 {
+			return nil, fmt.Errorf("parameter %q has too many fields", fields[0])
+		}
+		parameters = upsertCallableParameter(parameters, parameter)
+	}
+	return parameters, nil
+}
+
+func upsertCallableParameter(parameters []orm.ParameterMeta, parameter orm.ParameterMeta) []orm.ParameterMeta {
+	parameter.Name = strings.TrimSpace(parameter.Name)
+	if parameter.Name == "" {
+		return parameters
+	}
+	for index := range parameters {
+		if parameters[index].Name != parameter.Name {
+			continue
+		}
+		if parameter.Mode != "" {
+			parameters[index].Mode = parameter.Mode
+		}
+		if parameter.JDBCType != "" {
+			parameters[index].JDBCType = parameter.JDBCType
+		}
+		if parameter.TypeHandler != "" {
+			parameters[index].TypeHandler = parameter.TypeHandler
+		}
+		return parameters
+	}
+	return append(parameters, parameter)
+}
+
+func parseAnnotationResultSets(raw string) ([]orm.ResultSetMeta, error) {
+	parts := splitAnnotationList(raw)
+	resultSets := make([]orm.ResultSetMeta, 0, len(parts))
+	for _, part := range parts {
+		fields := strings.Split(part, ":")
+		for index := range fields {
+			fields[index] = strings.TrimSpace(fields[index])
+		}
+		if fields[0] == "" {
+			return nil, fmt.Errorf("result set name is required")
+		}
+		resultSet := orm.ResultSetMeta{Name: fields[0]}
+		if len(fields) > 1 {
+			resultSet.ResultType = fields[1]
+		}
+		if len(fields) > 2 {
+			resultSet.ResultMap = fields[2]
+		}
+		if len(fields) > 3 {
+			return nil, fmt.Errorf("result set %q has too many fields", fields[0])
+		}
+		resultSets = append(resultSets, resultSet)
+	}
+	return resultSets, nil
+}
+
+func splitAnnotationList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';'
+	})
+	return trimmedStrings(parts)
 }
 
 func validateMethodStatement(model *PackageModel, method MethodModel) error {
@@ -710,6 +853,14 @@ func validateMethodStatement(model *PackageModel, method MethodModel) error {
 			return fmt.Errorf("goark-orm: mapper method %s command %s must return (int64, error)", method.Name, method.Statement.Command)
 		}
 		return validateSQLParameters(model, method)
+	case orm.StatementCommandCall:
+		if resultType := strings.TrimSpace(method.ResultType); resultType != "" && !isCallResultType(resultType) {
+			return fmt.Errorf("goark-orm: mapper method %s call must return error or (orm.CallResult, error)", method.Name)
+		}
+		if err := validateCallableMethod(model, method); err != nil {
+			return err
+		}
+		return validateSQLParameters(model, method)
 	default:
 		return fmt.Errorf("goark-orm: mapper method %s has unsupported command %q", method.Name, method.Statement.Command)
 	}
@@ -734,6 +885,83 @@ func validateStatementTypes(model *PackageModel, method MethodModel) error {
 		}
 	}
 	return nil
+}
+
+func validateCallableMethod(model *PackageModel, method MethodModel) error {
+	params := methodParameterMap(method)
+	for _, parameter := range method.Statement.ParameterModes {
+		mode := orm.NormalizeParameterMode(parameter.Mode)
+		if mode == orm.ParameterModeIn {
+			continue
+		}
+		param, ok := params[strings.TrimSpace(parameter.Name)]
+		if !ok {
+			return fmt.Errorf("goark-orm: mapper method %s OUT parameter %q has no matching method parameter", method.Name, parameter.Name)
+		}
+		if !isPointerType(param.Type) {
+			return fmt.Errorf("goark-orm: mapper method %s OUT parameter %q requires pointer parameter", method.Name, parameter.Name)
+		}
+	}
+	for _, resultSet := range method.Statement.ResultSets {
+		param, ok := params[strings.TrimSpace(resultSet.Name)]
+		if !ok {
+			return fmt.Errorf("goark-orm: mapper method %s resultSet %q has no matching method parameter", method.Name, resultSet.Name)
+		}
+		if !isPointerToSliceType(param.Type) {
+			return fmt.Errorf("goark-orm: mapper method %s resultSet %q requires pointer to slice parameter", method.Name, resultSet.Name)
+		}
+		if err := validateCallableResultSetType(model, method, resultSet, param); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateCallableResultSetType(model *PackageModel, method MethodModel, resultSet orm.ResultSetMeta, param ParamModel) error {
+	expected := normalizeResultType(resultSet.ResultType)
+	if expected == "" {
+		return nil
+	}
+	actual := normalizeResultType(slicePointerElementType(param.Type))
+	if actual != expected {
+		return fmt.Errorf("goark-orm: mapper method %s resultSet %q resultType %q does not match parameter %s %s", method.Name, resultSet.Name, resultSet.ResultType, param.Name, param.Type)
+	}
+	if !isScalarType(expected) && !entityExists(model, expected) {
+		return fmt.Errorf("goark-orm: mapper method %s resultSet %q uses unknown resultType %q", method.Name, resultSet.Name, resultSet.ResultType)
+	}
+	return nil
+}
+
+func methodParameterMap(method MethodModel) map[string]ParamModel {
+	out := make(map[string]ParamModel, len(method.Params))
+	for _, param := range method.Params[1:] {
+		out[param.Name] = param
+	}
+	return out
+}
+
+func isPointerType(typ string) bool {
+	return strings.HasPrefix(strings.TrimSpace(typ), "*")
+}
+
+func isPointerToSliceType(typ string) bool {
+	typ = strings.TrimSpace(typ)
+	if !strings.HasPrefix(typ, "*") {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(typ, "*")), "[]")
+}
+
+func slicePointerElementType(typ string) string {
+	typ = strings.TrimSpace(typ)
+	typ = strings.TrimSpace(strings.TrimPrefix(typ, "*"))
+	typ = strings.TrimSpace(strings.TrimPrefix(typ, "[]"))
+	return typ
+}
+
+func isCallResultType(resultType string) bool {
+	resultType = strings.TrimSpace(resultType)
+	return resultType == "orm.CallResult" || resultType == "CallResult"
 }
 
 func validateParameterType(model *PackageModel, method MethodModel) error {
@@ -951,7 +1179,7 @@ func validateSQLParameters(model *PackageModel, method MethodModel) error {
 
 func availableParameters(model *PackageModel, method MethodModel) map[string]struct{} {
 	out := make(map[string]struct{})
-	dataParams := methodDataParams(method)
+	dataParams := methodBindableParams(method)
 	for index, param := range dataParams {
 		out[param.Name] = struct{}{}
 		out[fmt.Sprintf("param%d", index+1)] = struct{}{}
@@ -984,6 +1212,28 @@ func methodDataParams(method MethodModel) []ParamModel {
 	out := make([]ParamModel, 0, len(method.Params))
 	for index, param := range method.Params {
 		if index == 0 || isPageRequestType(param.Type) || isResultHandlerType(param.Type) {
+			continue
+		}
+		out = append(out, param)
+	}
+	return out
+}
+
+func methodBindableParams(method MethodModel) []ParamModel {
+	dataParams := methodDataParams(method)
+	if method.Statement.Command != orm.StatementCommandCall || len(method.Statement.ResultSets) == 0 {
+		return dataParams
+	}
+	resultSetParams := make(map[string]struct{}, len(method.Statement.ResultSets))
+	for _, resultSet := range method.Statement.ResultSets {
+		name := strings.TrimSpace(resultSet.Name)
+		if name != "" {
+			resultSetParams[name] = struct{}{}
+		}
+	}
+	out := dataParams[:0]
+	for _, param := range dataParams {
+		if _, ok := resultSetParams[param.Name]; ok {
 			continue
 		}
 		out = append(out, param)

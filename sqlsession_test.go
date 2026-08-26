@@ -827,6 +827,148 @@ func TestSQLSession_Exec_whenGeneratedKeys_shouldReturnLastInsertID(t *testing.T
 	}
 }
 
+func TestSQLSession_Call_whenOutParameterConfigured_shouldBindSQLOut(t *testing.T) {
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:            "CountByStatus",
+		Namespace:     "system.user.UserMapper",
+		FullName:      "system.user.UserMapper.CountByStatus",
+		Command:       StatementCommandCall,
+		StatementType: StatementTypeCallable,
+		SQL:           "call count_users(#{status}, #{total})",
+		ParameterModes: []ParameterMeta{
+			{Name: "status", Mode: ParameterModeIn},
+			{Name: "total", Mode: ParameterModeOut},
+		},
+	})
+	state := openTestSQLState(t)
+	state.outValues = []any{int64(42)}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	var total int64
+	result, err := session.Call(context.Background(), "system.user.UserMapper.CountByStatus", NamedArgs{
+		"status": "ACTIVE",
+		"total":  &total,
+	})
+	if err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+	if result.RowsAffected != 0 {
+		t.Fatalf("unexpected rows affected %d", result.RowsAffected)
+	}
+	if total != 42 {
+		t.Fatalf("unexpected OUT value %d", total)
+	}
+	if state.exec != "call count_users($1, $2)" {
+		t.Fatalf("unexpected SQL %q", state.exec)
+	}
+	if len(state.execArgs) != 2 || state.execArgs[0].Value != "ACTIVE" {
+		t.Fatalf("unexpected args %#v", state.execArgs)
+	}
+	out, ok := state.execArgs[1].Value.(sql.Out)
+	if !ok {
+		t.Fatalf("second arg is %T, want sql.Out", state.execArgs[1].Value)
+	}
+	if out.In {
+		t.Fatalf("OUT parameter must not carry input value")
+	}
+	if out.Dest != &total {
+		t.Fatalf("unexpected OUT destination %#v", out.Dest)
+	}
+}
+
+func TestSQLSession_Call_whenInOutParameterConfigured_shouldBindInputAndOutput(t *testing.T) {
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:            "NextRevision",
+		Namespace:     "system.user.UserMapper",
+		FullName:      "system.user.UserMapper.NextRevision",
+		Command:       StatementCommandCall,
+		StatementType: StatementTypeCallable,
+		SQL:           "call next_revision(#{revision})",
+		ParameterModes: []ParameterMeta{
+			{Name: "revision", Mode: ParameterModeInOut},
+		},
+	})
+	state := openTestSQLState(t)
+	state.outValues = []any{int64(8)}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	revision := int64(7)
+	if _, err := session.Call(context.Background(), "system.user.UserMapper.NextRevision", NamedArgs{"revision": &revision}); err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+	if revision != 8 {
+		t.Fatalf("unexpected INOUT value %d", revision)
+	}
+	if len(state.execArgs) != 1 {
+		t.Fatalf("unexpected args %#v", state.execArgs)
+	}
+	out, ok := state.execArgs[0].Value.(sql.Out)
+	if !ok {
+		t.Fatalf("first arg is %T, want sql.Out", state.execArgs[0].Value)
+	}
+	if !out.In {
+		t.Fatalf("INOUT parameter must carry input value")
+	}
+}
+
+func TestSQLSession_Call_whenMultipleResultSets_shouldScanAllDestinations(t *testing.T) {
+	type callRole struct {
+		ID   int64
+		Code string
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:            "LoadUserReport",
+		Namespace:     "system.user.UserMapper",
+		FullName:      "system.user.UserMapper.LoadUserReport",
+		Command:       StatementCommandCall,
+		StatementType: StatementTypeCallable,
+		SQL:           "call load_user_report(#{status})",
+		ParameterModes: []ParameterMeta{
+			{Name: "status", Mode: ParameterModeIn},
+		},
+		ResultSets: []ResultSetMeta{
+			{Name: "users", ResultType: "User"},
+			{Name: "roles", ResultType: "callRole"},
+		},
+	})
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+		resultSets: []testRowsData{
+			{
+				columns: []string{"id", "code"},
+				values:  [][]driver.Value{{int64(10), "admin"}, {int64(11), "audit"}},
+			},
+		},
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	var users []sqlSessionUser
+	var roles []callRole
+	if _, err := session.Call(context.Background(), "system.user.UserMapper.LoadUserReport", NamedArgs{"status": "ACTIVE"}, &users, &roles); err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+	if len(users) != 1 || users[0].ID != 7 || users[0].Name != "Alice" {
+		t.Fatalf("unexpected users %#v", users)
+	}
+	if len(roles) != 2 || roles[0].Code != "admin" || roles[1].ID != 11 {
+		t.Fatalf("unexpected roles %#v", roles)
+	}
+	if state.query != "call load_user_report($1)" {
+		t.Fatalf("unexpected SQL %q", state.query)
+	}
+	if state.rowsClosed != 1 {
+		t.Fatalf("rows closed %d, want 1", state.rowsClosed)
+	}
+}
+
 func TestSQLSession_Query_whenExecutorTypeReuse_shouldPrepareSQLOnce(t *testing.T) {
 	state := openTestSQLState(t)
 	state.db.SetMaxOpenConns(1)
@@ -2425,6 +2567,7 @@ type testSQLState struct {
 	execResult         driver.Result
 	execResults        []driver.Result
 	execErrors         []error
+	outValues          []any
 	query              string
 	queries            []string
 	exec               string
@@ -2448,8 +2591,9 @@ type testSQLState struct {
 }
 
 type testRowsData struct {
-	columns []string
-	values  [][]driver.Value
+	columns    []string
+	values     [][]driver.Value
+	resultSets []testRowsData
 }
 
 var testSQLDrivers sync.Map
@@ -2541,6 +2685,10 @@ func (c *testConn) ExecContext(ctx context.Context, query string, args []driver.
 	return c.state.execContext(ctx, query, args)
 }
 
+func (c *testConn) CheckNamedValue(value *driver.NamedValue) error {
+	return nil
+}
+
 func (s *testSQLState) queryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2555,9 +2703,10 @@ func (s *testSQLState) queryContext(ctx context.Context, query string, args []dr
 		s.queryResults = s.queryResults[1:]
 	}
 	return &testRows{
-		columns: append([]string(nil), rows.columns...),
-		values:  append([][]driver.Value(nil), rows.values...),
-		state:   s,
+		columns:    append([]string(nil), rows.columns...),
+		values:     append([][]driver.Value(nil), rows.values...),
+		resultSets: append([]testRowsData(nil), rows.resultSets...),
+		state:      s,
 	}, nil
 }
 
@@ -2579,12 +2728,65 @@ func (s *testSQLState) execContext(ctx context.Context, query string, args []dri
 	if len(s.execResults) > 0 {
 		result := s.execResults[0]
 		s.execResults = s.execResults[1:]
+		assignOutValues(args, s.takeOutValues(len(args)))
 		return result, nil
 	}
+	assignOutValues(args, s.takeOutValues(len(args)))
 	if s.execResult == nil {
 		return testResult{}, nil
 	}
 	return s.execResult, nil
+}
+
+func (s *testSQLState) takeOutValues(max int) []any {
+	if len(s.outValues) == 0 || max <= 0 {
+		return nil
+	}
+	count := len(s.outValues)
+	if count > max {
+		count = max
+	}
+	out := append([]any(nil), s.outValues[:count]...)
+	s.outValues = s.outValues[count:]
+	return out
+}
+
+func assignOutValues(args []driver.NamedValue, values []any) {
+	if len(values) == 0 {
+		return
+	}
+	valueIndex := 0
+	for _, arg := range args {
+		out, ok := arg.Value.(sql.Out)
+		if !ok {
+			continue
+		}
+		if valueIndex >= len(values) {
+			return
+		}
+		assignOutDestination(out.Dest, values[valueIndex])
+		valueIndex++
+	}
+}
+
+func assignOutDestination(dest any, value any) {
+	rv := reflect.ValueOf(dest)
+	if !rv.IsValid() || rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return
+	}
+	target := rv.Elem()
+	source := reflect.ValueOf(value)
+	if !source.IsValid() {
+		target.Set(reflect.Zero(target.Type()))
+		return
+	}
+	if source.Type().AssignableTo(target.Type()) {
+		target.Set(source)
+		return
+	}
+	if source.Type().ConvertibleTo(target.Type()) {
+		target.Set(source.Convert(target.Type()))
+	}
 }
 
 type testStmt struct {
@@ -2648,10 +2850,11 @@ func (t *testTx) Rollback() error {
 }
 
 type testRows struct {
-	columns []string
-	values  [][]driver.Value
-	index   int
-	state   *testSQLState
+	columns    []string
+	values     [][]driver.Value
+	resultSets []testRowsData
+	index      int
+	state      *testSQLState
 }
 
 func (r *testRows) Columns() []string {
@@ -2674,6 +2877,23 @@ func (r *testRows) Next(dest []driver.Value) error {
 	row := r.values[r.index]
 	r.index++
 	copy(dest, row)
+	return nil
+}
+
+func (r *testRows) HasNextResultSet() bool {
+	return len(r.resultSets) > 0
+}
+
+func (r *testRows) NextResultSet() error {
+	if len(r.resultSets) == 0 {
+		return io.EOF
+	}
+	next := r.resultSets[0]
+	r.resultSets = r.resultSets[1:]
+	r.columns = append([]string(nil), next.columns...)
+	r.values = append([][]driver.Value(nil), next.values...)
+	r.resultSets = append([]testRowsData(nil), next.resultSets...)
+	r.index = 0
 	return nil
 }
 

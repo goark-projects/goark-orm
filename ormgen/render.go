@@ -448,6 +448,7 @@ func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
 	builder.WriteString("Command:orm.StatementCommand(")
 	builder.WriteString(strconv.Quote(string(statement.Command)))
 	builder.WriteString("),")
+	writeStatementTypeField(builder, statement.StatementType)
 	builder.WriteString("Source:orm.StatementSource(")
 	builder.WriteString(strconv.Quote(string(statement.Source)))
 	builder.WriteString("),")
@@ -467,12 +468,47 @@ func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
 	writeStatementCachePolicyField(builder, "UseCache", statement.UseCache)
 	writeStatementCachePolicyField(builder, "FlushCache", statement.FlushCache)
 	writeStringSliceField(builder, "Parameters", statement.Parameters)
+	if len(statement.ParameterModes) > 0 {
+		builder.WriteString("ParameterModes:")
+		writeParameterMetas(builder, statement.ParameterModes)
+		builder.WriteByte(',')
+	}
+	if len(statement.ResultSets) > 0 {
+		builder.WriteString("ResultSets:")
+		writeResultSetMetas(builder, statement.ResultSets)
+		builder.WriteByte(',')
+	}
 	if len(statement.DynamicSQL) > 0 {
 		builder.WriteString("DynamicSQL:")
 		writeDynamicSQLNodes(builder, statement.DynamicSQL)
 		builder.WriteByte(',')
 	}
 	writeStringSliceField(builder, "InterceptorIgnores", statement.InterceptorIgnores)
+	builder.WriteString("}")
+}
+
+func writeParameterMetas(builder *bytes.Buffer, parameters []orm.ParameterMeta) {
+	builder.WriteString("[]orm.ParameterMeta{")
+	for _, parameter := range parameters {
+		builder.WriteString("{")
+		writeStringField(builder, "Name", parameter.Name)
+		writeParameterModeField(builder, parameter.Mode)
+		writeStringField(builder, "JDBCType", parameter.JDBCType)
+		writeStringField(builder, "TypeHandler", parameter.TypeHandler)
+		builder.WriteString("},")
+	}
+	builder.WriteString("}")
+}
+
+func writeResultSetMetas(builder *bytes.Buffer, resultSets []orm.ResultSetMeta) {
+	builder.WriteString("[]orm.ResultSetMeta{")
+	for _, resultSet := range resultSets {
+		builder.WriteString("{")
+		writeStringField(builder, "Name", resultSet.Name)
+		writeStringField(builder, "ResultMap", resultSet.ResultMap)
+		writeStringField(builder, "ResultType", resultSet.ResultType)
+		builder.WriteString("},")
+	}
 	builder.WriteString("}")
 }
 
@@ -650,6 +686,24 @@ func writeStatementCachePolicyField(builder *bytes.Buffer, name string, value or
 	builder.WriteByte(',')
 }
 
+func writeStatementTypeField(builder *bytes.Buffer, value orm.StatementType) {
+	if value == "" {
+		return
+	}
+	builder.WriteString("StatementType:")
+	builder.WriteString(statementTypeExpression(value))
+	builder.WriteByte(',')
+}
+
+func writeParameterModeField(builder *bytes.Buffer, value orm.ParameterMode) {
+	if value == "" || value == orm.ParameterModeIn {
+		return
+	}
+	builder.WriteString("Mode:")
+	builder.WriteString(parameterModeExpression(value))
+	builder.WriteByte(',')
+}
+
 func writeIDTypeField(builder *bytes.Buffer, value orm.IDType) {
 	if value == orm.IDTypeNone {
 		return
@@ -731,6 +785,30 @@ func statementCachePolicyExpression(value orm.StatementCachePolicy) string {
 		return "orm.StatementCacheDisabled"
 	default:
 		return "orm.StatementCachePolicy(" + strconv.Quote(string(value)) + ")"
+	}
+}
+
+func statementTypeExpression(value orm.StatementType) string {
+	switch value {
+	case orm.StatementTypePrepared:
+		return "orm.StatementTypePrepared"
+	case orm.StatementTypeCallable:
+		return "orm.StatementTypeCallable"
+	default:
+		return "orm.StatementType(" + strconv.Quote(string(value)) + ")"
+	}
+}
+
+func parameterModeExpression(value orm.ParameterMode) string {
+	switch value {
+	case orm.ParameterModeIn:
+		return "orm.ParameterModeIn"
+	case orm.ParameterModeOut:
+		return "orm.ParameterModeOut"
+	case orm.ParameterModeInOut:
+		return "orm.ParameterModeInOut"
+	default:
+		return "orm.ParameterMode(" + strconv.Quote(string(value)) + ")"
 	}
 }
 
@@ -834,8 +912,44 @@ func writeMapperMethod(builder *bytes.Buffer, model *PackageModel, mapper Mapper
 		} else {
 			builder.WriteString("return result.RowsAffected, nil\n")
 		}
+	case orm.StatementCommandCall:
+		if callResultReturn(method.ResultType) {
+			builder.WriteString("return orm.Call(")
+			builder.WriteString(method.Params[0].Name)
+			builder.WriteString(", m.session, ")
+			builder.WriteString(strconv.Quote(method.Statement.FullName))
+			builder.WriteString(", ")
+			builder.WriteString(argsExpr)
+			writeCallResultSetArguments(builder, method)
+			builder.WriteString(")\n")
+			break
+		}
+		builder.WriteString("_, err := orm.Call(")
+		builder.WriteString(method.Params[0].Name)
+		builder.WriteString(", m.session, ")
+		builder.WriteString(strconv.Quote(method.Statement.FullName))
+		builder.WriteString(", ")
+		builder.WriteString(argsExpr)
+		writeCallResultSetArguments(builder, method)
+		builder.WriteString(")\nreturn err\n")
 	}
 	builder.WriteString("}\n\n")
+}
+
+func writeCallResultSetArguments(builder *bytes.Buffer, method MethodModel) {
+	for _, resultSet := range method.Statement.ResultSets {
+		name := strings.TrimSpace(resultSet.Name)
+		if name == "" {
+			continue
+		}
+		builder.WriteString(", ")
+		builder.WriteString(name)
+	}
+}
+
+func callResultReturn(resultType string) bool {
+	resultType = strings.TrimSpace(resultType)
+	return resultType == "orm.CallResult" || resultType == "CallResult"
 }
 
 func writeMethodReturns(builder *bytes.Buffer, method MethodModel) {
@@ -861,7 +975,7 @@ func writeParams(builder *bytes.Buffer, params []ParamModel) {
 
 func namedArgsExpression(model *PackageModel, method MethodModel) string {
 	pairs := make(map[string]string)
-	dataParams := methodDataParams(method)
+	dataParams := methodBindableParams(method)
 	for index, param := range dataParams {
 		pairs[param.Name] = param.Name
 		pairs["param"+strconv.Itoa(index+1)] = param.Name

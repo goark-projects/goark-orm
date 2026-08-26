@@ -46,6 +46,8 @@ const (
 	RoutingOperationQueryOne RoutingOperationKind = "query-one"
 	// RoutingOperationExec 表示写语句执行。
 	RoutingOperationExec RoutingOperationKind = "exec"
+	// RoutingOperationCall 表示存储过程调用。
+	RoutingOperationCall RoutingOperationKind = "call"
 	// RoutingOperationPage 表示分页查询。
 	RoutingOperationPage RoutingOperationKind = "page"
 )
@@ -75,7 +77,7 @@ func ReadWriteDataSourceResolver(read DataSourceKey, write DataSourceKey) DataSo
 	read = normalizeDataSourceKey(read)
 	write = normalizeDataSourceKey(write)
 	return func(ctx context.Context, operation RoutingOperation) (DataSourceKey, error) {
-		if operation.Kind == RoutingOperationExec || statementIsWrite(operation.Command) {
+		if operation.Kind == RoutingOperationExec || operation.Kind == RoutingOperationCall || statementIsWrite(operation.Command) {
 			return write, nil
 		}
 		return read, nil
@@ -139,6 +141,7 @@ type RoutingSession struct {
 
 var _ Session = (*RoutingSession)(nil)
 var _ PageQuerySession = (*RoutingSession)(nil)
+var _ CallSession = (*RoutingSession)(nil)
 
 // NewRoutingSession 创建多数据源路由 Session。
 func NewRoutingSession(sessions map[DataSourceKey]Session, resolver DataSourceResolver, options ...RoutingSessionOption) (*RoutingSession, error) {
@@ -194,6 +197,19 @@ func (s *RoutingSession) Exec(ctx context.Context, statement string, args NamedA
 		return Result{}, err
 	}
 	return delegate.Exec(ctx, statement, args)
+}
+
+// Call 路由并执行存储过程调用。
+func (s *RoutingSession) Call(ctx context.Context, statement string, args NamedArgs, resultSets ...any) (CallResult, error) {
+	delegate, key, err := s.delegate(ctx, RoutingOperation{Kind: RoutingOperationCall, Statement: statement, Args: args})
+	if err != nil {
+		return CallResult{}, err
+	}
+	callSession, ok := delegate.(CallSession)
+	if !ok {
+		return CallResult{}, configurationErrorf("data source %q session does not support stored procedure call", key)
+	}
+	return callSession.Call(ctx, statement, args, resultSets...)
 }
 
 // QueryPage 路由并执行分页查询。

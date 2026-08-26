@@ -22,6 +22,7 @@ type xmlMapperModel struct {
 	Inserts    []xmlStatementModel
 	Updates    []xmlStatementModel
 	Deletes    []xmlStatementModel
+	Calls      []xmlStatementModel
 	Fragments  map[string][]orm.DynamicSQLNode
 }
 
@@ -98,6 +99,9 @@ type xmlStatementModel struct {
 	SelectKey          orm.SelectKeyMeta
 	UseCache           orm.StatementCachePolicy
 	FlushCache         orm.StatementCachePolicy
+	StatementType      orm.StatementType
+	Parameters         []orm.ParameterMeta
+	ResultSets         []orm.ResultSetMeta
 	SQL                string
 	DynamicSQL         []orm.DynamicSQLNode
 	InterceptorIgnores []string
@@ -186,7 +190,7 @@ func parseXMLMapperElement(decoder *xml.Decoder, start xml.StartElement) (xmlMap
 					return xmlMapperModel{}, err
 				}
 				mapper.ResultMaps = append(mapper.ResultMaps, resultMap)
-			case "select", "insert", "update", "delete":
+			case "select", "insert", "update", "delete", "call":
 				statement, err := parseXMLStatement(decoder, item)
 				if err != nil {
 					return xmlMapperModel{}, err
@@ -200,6 +204,8 @@ func parseXMLMapperElement(decoder *xml.Decoder, start xml.StartElement) (xmlMap
 					mapper.Updates = append(mapper.Updates, statement)
 				case "delete":
 					mapper.Deletes = append(mapper.Deletes, statement)
+				case "call":
+					mapper.Calls = append(mapper.Calls, statement)
 				}
 			case "sql":
 				id := strings.TrimSpace(attrValue(item, "id"))
@@ -509,7 +515,7 @@ func parseXMLResultField(start xml.StartElement) xmlResultFieldModel {
 }
 
 func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStatementModel, error) {
-	nodes, selectKey, err := parseXMLStatementBody(decoder, start.Name.Local)
+	body, err := parseXMLStatementBody(decoder, start.Name.Local)
 	if err != nil {
 		return xmlStatementModel{}, err
 	}
@@ -529,14 +535,17 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 		DatabaseID:         attrValue(start, "databaseId"),
 		UseGeneratedKeys:   attrValue(start, "useGeneratedKeys") == "true",
 		KeyProperty:        attrValue(start, "keyProperty"),
-		SelectKey:          selectKey,
+		SelectKey:          body.selectKey,
 		UseCache:           useCache,
 		FlushCache:         flushCache,
-		DynamicSQL:         nodes,
+		StatementType:      parseXMLStatementType(start, start.Name.Local),
+		Parameters:         body.parameters,
+		ResultSets:         body.resultSets,
+		DynamicSQL:         body.nodes,
 		InterceptorIgnores: parseInterceptorIgnores(attrValue(start, "interceptorIgnore")),
 	}
-	if isStaticDynamicSQL(nodes) {
-		statement.SQL = normalizeXMLSQL(nodes[0].Text)
+	if isStaticDynamicSQL(body.nodes) {
+		statement.SQL = normalizeXMLSQL(body.nodes[0].Text)
 		statement.DynamicSQL = nil
 	}
 	return statement, nil
@@ -574,43 +583,116 @@ func parseAnnotationSQL(raw string) (string, []orm.DynamicSQLNode, error) {
 	}
 }
 
-func parseXMLStatementBody(decoder *xml.Decoder, end string) ([]orm.DynamicSQLNode, orm.SelectKeyMeta, error) {
-	nodes := make([]orm.DynamicSQLNode, 0)
-	var selectKey orm.SelectKeyMeta
+type xmlStatementBody struct {
+	nodes      []orm.DynamicSQLNode
+	selectKey  orm.SelectKeyMeta
+	parameters []orm.ParameterMeta
+	resultSets []orm.ResultSetMeta
+}
+
+func parseXMLStatementBody(decoder *xml.Decoder, end string) (xmlStatementBody, error) {
+	body := xmlStatementBody{nodes: make([]orm.DynamicSQLNode, 0)}
 	for {
 		token, err := decoder.Token()
 		if err != nil {
-			return nil, orm.SelectKeyMeta{}, err
+			return xmlStatementBody{}, err
 		}
 		switch item := token.(type) {
 		case xml.CharData:
 			text := string(item)
 			if strings.TrimSpace(text) != "" {
-				nodes = append(nodes, orm.DynamicSQLNode{Kind: orm.DynamicSQLNodeText, Text: text})
+				body.nodes = append(body.nodes, orm.DynamicSQLNode{Kind: orm.DynamicSQLNodeText, Text: text})
 			}
 		case xml.StartElement:
 			if item.Name.Local == "selectKey" {
-				if selectKey.Enabled {
-					return nil, orm.SelectKeyMeta{}, fmt.Errorf("goark-orm: XML <%s> declares multiple selectKey elements", end)
+				if body.selectKey.Enabled {
+					return xmlStatementBody{}, fmt.Errorf("goark-orm: XML <%s> declares multiple selectKey elements", end)
 				}
 				parsed, err := parseXMLSelectKey(decoder, item)
 				if err != nil {
-					return nil, orm.SelectKeyMeta{}, err
+					return xmlStatementBody{}, err
 				}
-				selectKey = parsed
+				body.selectKey = parsed
+				continue
+			}
+			if item.Name.Local == "parameter" {
+				parameter, err := parseXMLCallableParameter(decoder, item)
+				if err != nil {
+					return xmlStatementBody{}, err
+				}
+				body.parameters = append(body.parameters, parameter)
+				continue
+			}
+			if item.Name.Local == "resultSet" {
+				resultSet, err := parseXMLCallableResultSet(decoder, item)
+				if err != nil {
+					return xmlStatementBody{}, err
+				}
+				body.resultSets = append(body.resultSets, resultSet)
 				continue
 			}
 			node, err := parseDynamicSQLNode(decoder, item)
 			if err != nil {
-				return nil, orm.SelectKeyMeta{}, err
+				return xmlStatementBody{}, err
 			}
-			nodes = append(nodes, node)
+			body.nodes = append(body.nodes, node)
 		case xml.EndElement:
 			if item.Name.Local == end {
-				return mergeAdjacentTextNodes(nodes), selectKey, nil
+				body.nodes = mergeAdjacentTextNodes(body.nodes)
+				return body, nil
 			}
 		}
 	}
+}
+
+func parseXMLStatementType(start xml.StartElement, element string) orm.StatementType {
+	value := strings.ToUpper(strings.TrimSpace(attrValue(start, "statementType")))
+	switch value {
+	case string(orm.StatementTypePrepared):
+		return orm.StatementTypePrepared
+	case string(orm.StatementTypeCallable):
+		return orm.StatementTypeCallable
+	default:
+		if element == "call" {
+			return orm.StatementTypeCallable
+		}
+		return ""
+	}
+}
+
+func parseXMLCallableParameter(decoder *xml.Decoder, start xml.StartElement) (orm.ParameterMeta, error) {
+	if err := skipElement(decoder, start.Name.Local); err != nil {
+		return orm.ParameterMeta{}, err
+	}
+	name := firstNonEmpty(attrValue(start, "property"), attrValue(start, "name"))
+	if strings.TrimSpace(name) == "" {
+		return orm.ParameterMeta{}, fmt.Errorf("goark-orm: XML <parameter> missing property")
+	}
+	mode, err := orm.ParseParameterMode(attrValue(start, "mode"))
+	if err != nil {
+		return orm.ParameterMeta{}, err
+	}
+	return orm.ParameterMeta{
+		Name:        strings.TrimSpace(name),
+		Mode:        mode,
+		JDBCType:    firstNonEmpty(attrValue(start, "jdbcType"), attrValue(start, "type")),
+		TypeHandler: attrValue(start, "typeHandler"),
+	}, nil
+}
+
+func parseXMLCallableResultSet(decoder *xml.Decoder, start xml.StartElement) (orm.ResultSetMeta, error) {
+	if err := skipElement(decoder, start.Name.Local); err != nil {
+		return orm.ResultSetMeta{}, err
+	}
+	name := firstNonEmpty(attrValue(start, "name"), attrValue(start, "property"))
+	if strings.TrimSpace(name) == "" {
+		return orm.ResultSetMeta{}, fmt.Errorf("goark-orm: XML <resultSet> missing name")
+	}
+	return orm.ResultSetMeta{
+		Name:       strings.TrimSpace(name),
+		ResultMap:  attrValue(start, "resultMap"),
+		ResultType: attrValue(start, "resultType"),
+	}, nil
 }
 
 func parseXMLSelectKey(decoder *xml.Decoder, start xml.StartElement) (orm.SelectKeyMeta, error) {
@@ -884,6 +966,12 @@ func expandXMLIncludes(mapper *xmlMapperModel) error {
 			return err
 		}
 	}
+	for index := range mapper.Calls {
+		mapper.Calls[index].DynamicSQL, err = expandDynamicIncludes(mapper.Calls[index].DynamicSQL, mapper.Fragments, nil)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -944,11 +1032,12 @@ func containsString(values []string, value string) bool {
 }
 
 func (m xmlMapperModel) allStatements() []xmlStatementModel {
-	out := make([]xmlStatementModel, 0, len(m.Selects)+len(m.Inserts)+len(m.Updates)+len(m.Deletes))
+	out := make([]xmlStatementModel, 0, len(m.Selects)+len(m.Inserts)+len(m.Updates)+len(m.Deletes)+len(m.Calls))
 	out = append(out, m.Selects...)
 	out = append(out, m.Inserts...)
 	out = append(out, m.Updates...)
 	out = append(out, m.Deletes...)
+	out = append(out, m.Calls...)
 	return out
 }
 
@@ -1142,6 +1231,17 @@ func trimmedStrings(values []string) []string {
 	return out
 }
 
+func callableParameterNames(parameters []orm.ParameterMeta) []string {
+	out := make([]string, 0, len(parameters))
+	for _, parameter := range parameters {
+		name := strings.TrimSpace(parameter.Name)
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func xmlResultDiscriminator(item xmlDiscriminatorModel) orm.ResultDiscriminatorMeta {
 	out := orm.ResultDiscriminatorMeta{
 		Column:      strings.TrimSpace(item.Column),
@@ -1189,6 +1289,7 @@ func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) (
 				Namespace:          namespace,
 				FullName:           namespace + "." + id,
 				Command:            command,
+				StatementType:      item.StatementType,
 				Source:             orm.StatementSourceXML,
 				SQL:                normalizeXMLSQL(item.SQL),
 				DynamicSQL:         item.DynamicSQL,
@@ -1201,6 +1302,8 @@ func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) (
 				SelectKey:          item.SelectKey,
 				UseCache:           item.UseCache,
 				FlushCache:         item.FlushCache,
+				ParameterModes:     item.Parameters,
+				ResultSets:         item.ResultSets,
 				InterceptorIgnores: item.InterceptorIgnores,
 			}
 			statement.SelectKey.KeyProperty = strings.TrimSpace(statement.SelectKey.KeyProperty)
@@ -1210,6 +1313,7 @@ func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) (
 			statement.Parameters = append(statement.Parameters, dynamicStatementParameters(statement.DynamicSQL)...)
 			statement.Parameters = append(statement.Parameters, statementParameters(statement.SelectKey.SQL)...)
 			statement.Parameters = append(statement.Parameters, dynamicStatementParameters(statement.SelectKey.DynamicSQL)...)
+			statement.Parameters = append(statement.Parameters, callableParameterNames(statement.ParameterModes)...)
 			statement.Parameters = uniqueSorted(statement.Parameters)
 			statements = append(statements, statement)
 		}
@@ -1225,6 +1329,9 @@ func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) (
 		return nil, err
 	}
 	if err := appendStatements(orm.StatementCommandDelete, mapper.Deletes); err != nil {
+		return nil, err
+	}
+	if err := appendStatements(orm.StatementCommandCall, mapper.Calls); err != nil {
 		return nil, err
 	}
 	return statements, nil

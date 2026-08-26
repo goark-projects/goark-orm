@@ -12,7 +12,46 @@ const (
 	StatementCommandUpdate StatementCommand = "update"
 	// StatementCommandDelete 表示删除语句。
 	StatementCommandDelete StatementCommand = "delete"
+	// StatementCommandCall 表示存储过程或可调用语句。
+	StatementCommandCall StatementCommand = "call"
 )
+
+// StatementType 表示 Statement 的底层执行形态。
+type StatementType string
+
+const (
+	// StatementTypePrepared 表示普通预编译 SQL 语句。
+	StatementTypePrepared StatementType = "PREPARED"
+	// StatementTypeCallable 表示数据库存储过程或 callable statement。
+	StatementTypeCallable StatementType = "CALLABLE"
+)
+
+// ParameterMode 表示可调用语句参数方向。
+type ParameterMode string
+
+const (
+	// ParameterModeIn 表示普通输入参数。
+	ParameterModeIn ParameterMode = "IN"
+	// ParameterModeOut 表示仅输出参数。
+	ParameterModeOut ParameterMode = "OUT"
+	// ParameterModeInOut 表示既输入又输出的参数。
+	ParameterModeInOut ParameterMode = "INOUT"
+)
+
+// ParameterMeta 描述可调用语句中的单个参数。
+type ParameterMeta struct {
+	Name        string
+	Mode        ParameterMode
+	JDBCType    string
+	TypeHandler string
+}
+
+// ResultSetMeta 描述存储过程返回的一个结果集。
+type ResultSetMeta struct {
+	Name       string
+	ResultMap  string
+	ResultType string
+}
 
 // StatementSource 表示 SQL 语句来源。
 type StatementSource string
@@ -242,6 +281,7 @@ type StatementMeta struct {
 	Namespace          string
 	FullName           string
 	Command            StatementCommand
+	StatementType      StatementType
 	Source             StatementSource
 	SQL                string
 	Provider           string
@@ -255,6 +295,8 @@ type StatementMeta struct {
 	UseCache           StatementCachePolicy
 	FlushCache         StatementCachePolicy
 	Parameters         []string
+	ParameterModes     []ParameterMeta
+	ResultSets         []ResultSetMeta
 	DynamicSQL         []DynamicSQLNode
 	InterceptorIgnores []string
 }

@@ -162,7 +162,7 @@ func rejectWriteWithoutWhere(ctx context.Context, statement StatementMeta, sql s
 
 func statementIsWrite(command StatementCommand) bool {
 	switch command {
-	case StatementCommandInsert, StatementCommandUpdate, StatementCommandDelete:
+	case StatementCommandInsert, StatementCommandUpdate, StatementCommandDelete, StatementCommandCall:
 		return true
 	default:
 		return false
