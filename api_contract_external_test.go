@@ -84,6 +84,16 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if compiled.SQL != `select * from "sys_user" where id = $1 order by "id" DESC` {
 		t.Fatalf("unexpected compiled SQL %q", compiled.SQL)
 	}
+	capabilities, err := orm.NewDialectCapabilities(orm.DbTypePostgres)
+	if err != nil {
+		t.Fatalf("new dialect capabilities failed: %v", err)
+	}
+	if capabilities.Placeholder != orm.DialectPlaceholderDollarNumber || !capabilities.SupportsUpsert() || !capabilities.SupportsJSON() {
+		t.Fatalf("unexpected postgres capabilities %#v", capabilities)
+	}
+	if actual := orm.DialectCapabilitiesOf(orm.NewSQLServerDialect()); !actual.LimitOffsetRequiresOrderBy || actual.GeneratedKey != orm.DialectGeneratedKeyOutput {
+		t.Fatalf("unexpected sqlserver capabilities %#v", actual)
+	}
 
 	page := orm.NewPageRequest(1, 20)
 	_ = orm.WithPageRequest(ctx, page)

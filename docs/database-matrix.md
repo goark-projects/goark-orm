@@ -6,15 +6,29 @@
 
 ## 方言覆盖
 
-| 数据库 | DbType | 方言工厂 | 占位符 | 分页语义 |
-| --- | --- | --- | --- | --- |
-| 通用 JDBC 风格 | `question` | `NewQuestionDialect` | `?` | `LIMIT ? OFFSET ?` |
-| PostgreSQL | `postgres` | `NewPostgresDialect` | `$1` | `LIMIT $1 OFFSET $2` |
-| MySQL | `mysql` | `NewMySQLDialect` | `?` | `LIMIT ? OFFSET ?` |
-| MariaDB | `mariadb` | `NewMariaDBDialect` | `?` | `LIMIT ? OFFSET ?` |
-| SQLite | `sqlite` | `NewSQLiteDialect` | `?` | `LIMIT ? OFFSET ?` |
-| SQL Server | `sqlserver` | `NewSQLServerDialect` | `@p1` | `OFFSET @p2 ROWS FETCH NEXT @p1 ROWS ONLY` |
-| Oracle | `oracle` | `NewOracleDialect` | `:1` | `OFFSET :2 ROWS FETCH NEXT :1 ROWS ONLY` |
+| 数据库 | DbType | 方言工厂 | 占位符 | 标识符 | 分页语义 |
+| --- | --- | --- | --- | --- | --- |
+| 通用 JDBC 风格 | `question` | `NewQuestionDialect` | `?` | 反引号 | `LIMIT ? OFFSET ?` |
+| PostgreSQL | `postgres` | `NewPostgresDialect` | `$1` | 双引号 | `LIMIT $1 OFFSET $2` |
+| MySQL | `mysql` | `NewMySQLDialect` | `?` | 反引号 | `LIMIT ? OFFSET ?` |
+| MariaDB | `mariadb` | `NewMariaDBDialect` | `?` | 反引号 | `LIMIT ? OFFSET ?` |
+| SQLite | `sqlite` | `NewSQLiteDialect` | `?` | 双引号 | `LIMIT ? OFFSET ?` |
+| SQL Server | `sqlserver` | `NewSQLServerDialect` | `@p1` | 方括号 | `OFFSET @p2 ROWS FETCH NEXT @p1 ROWS ONLY`，无 `ORDER BY` 时补稳定兜底排序 |
+| Oracle | `oracle` | `NewOracleDialect` | `:1` | 双引号 | `OFFSET :2 ROWS FETCH NEXT :1 ROWS ONLY` |
+
+## 方言能力
+
+运行时通过 `orm.NewDialectCapabilities(dbType)` 或 `orm.DialectCapabilitiesOf(dialect)` 查询能力。该能力表描述 SQL 方言语义，不绑定具体 `database/sql` driver；驱动是否支持 OUT 参数、多结果集、JSON 二进制格式等细节仍由业务侧真实库测试确认。
+
+| 数据库 | 主键回读 | UPSERT | 行锁 | JSON | 批量 INSERT | Savepoint |
+| --- | --- | --- | --- | --- | --- | --- |
+| 通用 JDBC 风格 | 未声明 | 未声明 | 未声明 | 未声明 | 支持 | 支持 |
+| PostgreSQL | `RETURNING` | `ON CONFLICT` | `FOR UPDATE`，支持 `SKIP LOCKED` / `NOWAIT` | 原生 | 支持 | 支持 |
+| MySQL | `LastInsertId` | `ON DUPLICATE KEY UPDATE` | `FOR UPDATE` | 原生 | 支持 | 支持 |
+| MariaDB | `LastInsertId` | `ON DUPLICATE KEY UPDATE` | `FOR UPDATE` | 原生 | 支持 | 支持 |
+| SQLite | `LastInsertId` | `ON CONFLICT` | 未声明 | 扩展能力 | 支持 | 支持 |
+| SQL Server | `OUTPUT inserted` | `MERGE` | `WITH (...)` 锁提示 | 原生 | 支持 | 支持 |
+| Oracle | `RETURNING INTO` | `MERGE` | `FOR UPDATE`，支持 `NOWAIT` | 原生 | 支持 | 支持 |
 
 ## 默认验证
 
