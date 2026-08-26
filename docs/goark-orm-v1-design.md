@@ -704,7 +704,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持动态 SQL 安全 OGNL 表达式，包含算术、三元、集合、`empty`、`in/not in` 和白名单只读方法；不开放任意反射调用。
 - 已支持 `Registry.RegisterRowScanner` 显式注册生成式实体行扫描器；普通实体查询和 callable 多结果集优先走 RowScanner，复杂映射继续使用受控 fallback。
 - 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。
-- 已新增核心热路径 benchmark 和环境变量门控的真实数据库 smoke 测试；数据库方言矩阵记录在 `docs/database-matrix.md`。
+- 已新增核心热路径 benchmark、环境变量门控的真实数据库兼容性测试套件，以及简单 ResultMap 复用生成式 RowScanner 的扫描快路径；数据库方言矩阵记录在 `docs/database-matrix.md`。
 
 ## 关键决策
 

@@ -529,6 +529,12 @@ func TestSQLSession_QueryOne_whenResultMapUsesTypeHandler_shouldConvertField(t *
 	if err != nil {
 		t.Fatalf("new SQL session failed: %v", err)
 	}
+	if err := registry.RegisterRowScanner("sqlSessionUser", RowScannerFunc(func(context.Context, []string, RowScannerRow, any) error {
+		t.Fatalf("type-handler resultMap must not use generated row scanner")
+		return nil
+	})); err != nil {
+		t.Fatalf("register row scanner failed: %v", err)
+	}
 
 	var user sqlSessionUser
 	err = session.QueryOne(context.Background(), "system.user.UserMapper.FindProfile", NamedArgs{"id": int64(7)}, &user)
@@ -538,6 +544,100 @@ func TestSQLSession_QueryOne_whenResultMapUsesTypeHandler_shouldConvertField(t *
 	if user.Profile.Text != "admin" {
 		t.Fatalf("unexpected profile %#v", user.Profile)
 	}
+}
+
+func TestSQLSession_QueryOne_whenSimpleResultMapHasRowScanner_shouldUseFastPath(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"user_id", "user_name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	statement := StatementMeta{
+		ID:        "FindAlias",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindAlias",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceXML,
+		SQL:       "select id as user_id, name as user_name from sys_user where id = #{id}",
+		ResultMap: "UserAliasResult",
+	}
+	registry := NewRegistry()
+	if err := registry.RegisterEntity(EntityMeta{
+		TypeName: "sqlSessionUser",
+		Table:    "sys_user",
+		Columns: []ColumnMeta{
+			{FieldName: "ID", ColumnName: "id", PrimaryKey: true},
+			{FieldName: "Name", ColumnName: "name"},
+		},
+	}); err != nil {
+		t.Fatalf("register entity failed: %v", err)
+	}
+	if err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "UserMapper",
+		Namespace: "system.user.UserMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "UserAliasResult",
+				TypeName: "sqlSessionUser",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "user_id", ID: true},
+					{Property: "Name", Column: "user_name"},
+				},
+			},
+		},
+		Statements: []StatementMeta{statement},
+	}); err != nil {
+		t.Fatalf("register mapper failed: %v", err)
+	}
+	scanner := &recordingResultMapRowScanner{}
+	if err := registry.RegisterRowScanner("sqlSessionUser", scanner); err != nil {
+		t.Fatalf("register row scanner failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var user sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindAlias", NamedArgs{"id": int64(7)}, &user); err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+	if scanner.calls != 1 {
+		t.Fatalf("expected one row scanner call, got %d", scanner.calls)
+	}
+	if strings.Join(scanner.columns, ",") != "ID,Name" {
+		t.Fatalf("unexpected scanner columns %#v", scanner.columns)
+	}
+	if user.ID != 7 || user.Name != "Alice" {
+		t.Fatalf("unexpected user %#v", user)
+	}
+}
+
+type recordingResultMapRowScanner struct {
+	calls   int
+	columns []string
+}
+
+func (s *recordingResultMapRowScanner) ScanRow(_ context.Context, columns []string, row RowScannerRow, dest any) error {
+	s.calls++
+	s.columns = append([]string(nil), columns...)
+	user, ok := dest.(*sqlSessionUser)
+	if !ok || user == nil {
+		return fmt.Errorf("destination must be *sqlSessionUser")
+	}
+	targets := make([]any, len(columns))
+	for index, column := range columns {
+		switch column {
+		case "ID":
+			targets[index] = &user.ID
+		case "Name":
+			targets[index] = &user.Name
+		default:
+			var discard any
+			targets[index] = &discard
+		}
+	}
+	return row.Scan(targets...)
 }
 
 func TestSQLSession_QueryOne_whenResultMapUsesAssociation_shouldScanNestedStruct(t *testing.T) {

@@ -746,6 +746,9 @@ func (s *SQLSession) scanValueWithResultMap(ctx context.Context, scanner interfa
 	if target.Kind() != reflect.Struct {
 		return s.scanValue(ctx, scanner, columns, statement, target)
 	}
+	if err, ok := s.scanWithRegisteredResultMapRowScanner(ctx, scanner, columns, statement, resultMap, target); ok {
+		return err
+	}
 	values, err := scanRowValues(scanner, len(columns))
 	if err != nil {
 		return &MappingError{Statement: statement.FullName, ResultMap: resultMap.ID, Err: err}
