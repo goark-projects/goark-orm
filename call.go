@@ -124,7 +124,7 @@ func (s *SQLSession) compileCallStatement(ctx context.Context, meta StatementMet
 }
 
 func (s *SQLSession) callWithResultSets(ctx context.Context, meta StatementMeta, compiled CompiledSQL, outBindings []callOutBinding, resultSets []any) (CallResult, error) {
-	rows, err := s.querySQL(ctx, compiled)
+	rows, err := s.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return CallResult{}, executorFailure(meta, "call query", compiled, err)
 	}
@@ -143,7 +143,7 @@ func (s *SQLSession) callWithResultSets(ctx context.Context, meta StatementMeta,
 }
 
 func (s *SQLSession) callWithoutResultSets(ctx context.Context, meta StatementMeta, compiled CompiledSQL, outBindings []callOutBinding) (CallResult, error) {
-	sqlResult, err := s.execSQL(ctx, compiled)
+	sqlResult, err := s.execSQL(ctx, meta, compiled)
 	if err != nil {
 		return CallResult{}, executorFailure(meta, "call exec", compiled, err)
 	}

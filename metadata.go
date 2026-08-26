@@ -291,6 +291,7 @@ type StatementMeta struct {
 	DatabaseID         string
 	UseGeneratedKeys   bool
 	KeyProperty        string
+	Options            StatementOptions
 	SelectKey          SelectKeyMeta
 	UseCache           StatementCachePolicy
 	FlushCache         StatementCachePolicy

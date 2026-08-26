@@ -208,6 +208,48 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenStatementOptionsDeclared_shouldRenderStatementOptions(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name'"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper", xml="mapper/user_mapper.xml")
+type UserMapper interface {
+	//goark-orm:select(sql="select id, name from sys_user where id = #{id}", timeout="2s", fetchSize=128, resultSetType="FORWARD_ONLY", resultOrdered=true)
+	FindByID(ctx context.Context, id int64) (*User, error)
+	InsertUser(ctx context.Context, user *User) (int64, error)
+}
+`)
+	mustWriteFile(t, filepath.Join(dir, "mapper", "user_mapper.xml"), `<mapper namespace="system.user.UserMapper">
+  <insert id="InsertUser" useGeneratedKeys="true" keyProperty="ID" keyColumn="id" timeout="3" fetchSize="64">
+    insert into sys_user(name) values(#{Name})
+  </insert>
+</mapper>
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := string(source)
+	expected := []string{
+		`Options: orm.StatementOptions{Timeout: 2000000000, FetchSize: 128, ResultSetType: orm.ResultSetTypeForwardOnly, ResultOrdered: true}`,
+		`Options: orm.StatementOptions{Timeout: 3000000000, FetchSize: 64, KeyColumn: "id"}`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, output)
+		}
+	}
+}
+
 func TestGenerate_whenAnnotationUsesRawSQLToken_shouldKeepRawPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

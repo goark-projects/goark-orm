@@ -96,6 +96,7 @@ type StatementModel struct {
 	DatabaseID         string
 	UseGeneratedKeys   bool
 	KeyProperty        string
+	Options            orm.StatementOptions
 	SelectKey          orm.SelectKeyMeta
 	UseCache           orm.StatementCachePolicy
 	FlushCache         orm.StatementCachePolicy

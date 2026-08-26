@@ -196,7 +196,7 @@ func (s *SQLSession) QueryCursorStatement(ctx context.Context, meta StatementMet
 	if err := s.flushStatementCaches(ctx, meta); err != nil {
 		return nil, err
 	}
-	rows, err := s.querySQL(ctx, compiled)
+	rows, err := s.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return nil, executorFailure(meta, "query cursor", compiled, err)
 	}

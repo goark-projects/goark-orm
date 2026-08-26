@@ -120,7 +120,7 @@ func (s *SQLSession) queryCompiledOne(ctx context.Context, meta StatementMeta, d
 	if hit, err := s.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
 		return err
 	}
-	rows, err := s.querySQL(ctx, compiled)
+	rows, err := s.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func (s *SQLSession) queryCompiledRows(ctx context.Context, meta StatementMeta, 
 	if hit, err := s.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
 		return err
 	}
-	rows, err := s.querySQL(ctx, compiled)
+	rows, err := s.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return err
 	}

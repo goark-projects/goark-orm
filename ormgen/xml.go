@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"goark.dev/orm"
 )
@@ -96,6 +97,7 @@ type xmlStatementModel struct {
 	DatabaseID         string
 	UseGeneratedKeys   bool
 	KeyProperty        string
+	Options            orm.StatementOptions
 	SelectKey          orm.SelectKeyMeta
 	UseCache           orm.StatementCachePolicy
 	FlushCache         orm.StatementCachePolicy
@@ -527,6 +529,10 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 	if err != nil {
 		return xmlStatementModel{}, err
 	}
+	options, err := parseXMLStatementOptions(start)
+	if err != nil {
+		return xmlStatementModel{}, err
+	}
 	statement := xmlStatementModel{
 		ID:                 attrValue(start, "id"),
 		ResultMap:          attrValue(start, "resultMap"),
@@ -535,6 +541,7 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 		DatabaseID:         attrValue(start, "databaseId"),
 		UseGeneratedKeys:   attrValue(start, "useGeneratedKeys") == "true",
 		KeyProperty:        attrValue(start, "keyProperty"),
+		Options:            options,
 		SelectKey:          body.selectKey,
 		UseCache:           useCache,
 		FlushCache:         flushCache,
@@ -901,6 +908,56 @@ func parseXMLStatementCachePolicy(start xml.StartElement, name string) (orm.Stat
 		return orm.StatementCacheEnabled, nil
 	}
 	return orm.StatementCacheDisabled, nil
+}
+
+func parseXMLStatementOptions(start xml.StartElement) (orm.StatementOptions, error) {
+	timeout, err := parseXMLStatementTimeout(start)
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	fetchSize, err := parseOptionalXMLInt(start, "fetchSize")
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	if fetchSize < 0 {
+		return orm.StatementOptions{}, fmt.Errorf("goark-orm: XML <%s> attribute fetchSize must be >= 0", start.Name.Local)
+	}
+	resultSetType, err := orm.ParseResultSetType(attrValue(start, "resultSetType"))
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	resultOrdered, _, err := parseOptionalXMLBool(start, "resultOrdered")
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	return orm.StatementOptions{
+		Timeout:       timeout,
+		FetchSize:     fetchSize,
+		ResultSetType: resultSetType,
+		ResultOrdered: resultOrdered,
+		KeyColumn:     attrValue(start, "keyColumn"),
+	}, nil
+}
+
+func parseXMLStatementTimeout(start xml.StartElement) (time.Duration, error) {
+	value := firstNonEmpty(attrValue(start, "timeoutDuration"), attrValue(start, "timeout"))
+	if value == "" {
+		return 0, nil
+	}
+	if duration, err := time.ParseDuration(value); err == nil {
+		if duration < 0 {
+			return 0, fmt.Errorf("goark-orm: XML <%s> attribute timeout must be >= 0", start.Name.Local)
+		}
+		return duration, nil
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("goark-orm: XML <%s> attribute timeout requires duration or integer seconds", start.Name.Local)
+	}
+	if seconds < 0 {
+		return 0, fmt.Errorf("goark-orm: XML <%s> attribute timeout must be >= 0", start.Name.Local)
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1299,6 +1356,7 @@ func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) (
 				DatabaseID:         strings.TrimSpace(item.DatabaseID),
 				UseGeneratedKeys:   item.UseGeneratedKeys,
 				KeyProperty:        strings.TrimSpace(item.KeyProperty),
+				Options:            item.Options,
 				SelectKey:          item.SelectKey,
 				UseCache:           item.UseCache,
 				FlushCache:         item.FlushCache,

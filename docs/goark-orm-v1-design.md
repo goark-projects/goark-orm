@@ -240,6 +240,7 @@ V1 只保留五个 SQL 注解：
 9. insert、update、delete 返回受影响行数或生成主键时必须符合生成器支持的签名。
 10. call 默认使用 `StatementTypeCallable`，可声明 parameters 和 resultSets。
 11. call 的 OUT / INOUT 参数必须对应指针参数，多结果集必须对应 slice 指针参数。
+12. statement 可声明 `timeout`、`fetchSize`、`resultSetType`、`resultOrdered` 和 `keyColumn`，生成期写入 `StatementOptions`，运行期优先于全局默认配置。
 ```
 
 示例：
@@ -593,7 +594,7 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 `SQLSession` 默认启用 Session 级一级缓存。缓存 key 由最终编译 SQL 和参数组成，写操作、`Commit`、`Rollback` 和 `Close` 会清空缓存。可通过 `WithLocalCache(false)` 关闭，也可以通过 `Configuration.LocalCacheScope` 设置为 `STATEMENT`，使缓存不跨语句复用。
 
-运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `GlobalConfig`。
+运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `GlobalConfig`。statement 级 `StatementOptions` 会覆盖默认超时和 fetch size，并通过可选 `SQLStatementOptionsApplier` 传递给驱动适配层。
 
 `GlobalConfig` 对齐 MyBatis-Plus 的全局扩展点，当前承载 `DbConfig`、`IdentifierGenerator` 和 `MetaObjectHandler`。`DbConfig` 已支持全局 `IDType`、`TablePrefix`、`Schema`、`LogicDeleteField`、`LogicDeleteValue`、`LogicNotDeleteValue`、`InsertStrategy`、`UpdateStrategy` 和 `WhereStrategy`。BaseMapper 会读取这些配置：主键字段未显式声明 `id-type` 且不是自增时，使用全局 `IDType`；渲染物理表名时应用 tablePrefix/schema；逻辑删除默认值从 DbConfig 读取；通用 INSERT/UPDATE 按字段级或全局字段策略过滤列；实体条件查询按字段级或全局 whereStrategy 过滤 WHERE 字段，并读取字段 condition 渲染条件模板。显式实体 tag 优先于全局兜底配置。
 

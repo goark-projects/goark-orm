@@ -24,13 +24,14 @@ func (s *SQLSession) executeSelectKey(ctx context.Context, parent StatementMeta,
 		SQL:           selectKey.SQL,
 		ResultType:    selectKey.ResultType,
 		ParameterType: parent.ParameterType,
+		Options:       parent.Options,
 		DynamicSQL:    selectKey.DynamicSQL,
 	}
 	compiled, err := s.compileSelectKey(ctx, meta, args)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.querySQL(ctx, compiled)
+	rows, err := s.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return nil, executorFailure(meta, "query selectKey", compiled, err)
 	}

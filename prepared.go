@@ -17,11 +17,17 @@ type SQLFetchSizeApplier interface {
 	ApplyFetchSize(ctx context.Context, query string, fetchSize int) error
 }
 
-func (s *SQLSession) querySQL(ctx context.Context, compiled CompiledSQL) (Rows, error) {
-	if err := s.applyFetchSize(ctx, compiled.SQL); err != nil {
+// SQLStatementOptionsApplier 是支持完整语句级执行选项的可选执行器能力。
+type SQLStatementOptionsApplier interface {
+	ApplyStatementOptions(ctx context.Context, query string, options StatementOptions) error
+}
+
+func (s *SQLSession) querySQL(ctx context.Context, meta StatementMeta, compiled CompiledSQL) (Rows, error) {
+	options := s.statementOptions(meta)
+	if err := s.applyStatementOptions(ctx, compiled.SQL, options, true); err != nil {
 		return nil, err
 	}
-	queryCtx, cancel := s.statementContext(ctx)
+	queryCtx, cancel := s.statementContext(ctx, meta)
 	if !s.usePreparedStatements() {
 		rows, err := s.executor.QueryContext(queryCtx, compiled.SQL, compiled.Args...)
 		if err != nil {
@@ -43,8 +49,12 @@ func (s *SQLSession) querySQL(ctx context.Context, compiled CompiledSQL) (Rows, 
 	return &cancelRows{Rows: rows, cancel: cancel}, nil
 }
 
-func (s *SQLSession) execSQL(ctx context.Context, compiled CompiledSQL) (sql.Result, error) {
-	execCtx, cancel := s.statementContext(ctx)
+func (s *SQLSession) execSQL(ctx context.Context, meta StatementMeta, compiled CompiledSQL) (sql.Result, error) {
+	options := s.statementOptions(meta)
+	if err := s.applyStatementOptions(ctx, compiled.SQL, options, false); err != nil {
+		return nil, err
+	}
+	execCtx, cancel := s.statementContext(ctx, meta)
 	defer cancel()
 	if !s.usePreparedStatements() {
 		return s.executor.ExecContext(execCtx, compiled.SQL, compiled.Args...)
@@ -60,25 +70,39 @@ func (s *SQLSession) usePreparedStatements() bool {
 	return s != nil && s.configuration.DefaultExecutorType == ExecutorTypeReuse
 }
 
-func (s *SQLSession) statementContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if s == nil || s.configuration.DefaultStatementTimeout <= 0 {
+func (s *SQLSession) statementContext(ctx context.Context, meta StatementMeta) (context.Context, context.CancelFunc) {
+	timeout := s.statementOptions(meta).Timeout
+	if s == nil || timeout <= 0 {
 		return ctx, func() {}
 	}
 	if _, ok := ctx.Deadline(); ok {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(ctx, s.configuration.DefaultStatementTimeout)
+	return context.WithTimeout(ctx, timeout)
 }
 
-func (s *SQLSession) applyFetchSize(ctx context.Context, query string) error {
-	if s == nil || s.configuration.DefaultFetchSize <= 0 {
+func (s *SQLSession) statementOptions(meta StatementMeta) StatementOptions {
+	if s == nil {
+		return meta.Options
+	}
+	return meta.Options.withDefaults(s.configuration.DefaultStatementTimeout, s.configuration.DefaultFetchSize)
+}
+
+func (s *SQLSession) applyStatementOptions(ctx context.Context, query string, options StatementOptions, queryOnly bool) error {
+	if s == nil || options.isZero() {
+		return nil
+	}
+	if applier, ok := s.executor.(SQLStatementOptionsApplier); ok {
+		return applier.ApplyStatementOptions(ctx, query, options)
+	}
+	if !queryOnly || options.FetchSize <= 0 {
 		return nil
 	}
 	applier, ok := s.executor.(SQLFetchSizeApplier)
 	if !ok {
 		return nil
 	}
-	return applier.ApplyFetchSize(ctx, query, s.configuration.DefaultFetchSize)
+	return applier.ApplyFetchSize(ctx, query, options.FetchSize)
 }
 
 type cancelRows struct {

@@ -234,6 +234,84 @@ func TestSQLSession_whenDefaultFetchSizeConfigured_shouldCallOptionalExecutorHoo
 	}
 }
 
+func TestSQLSession_whenStatementTimeoutConfigured_shouldOverrideDefaultTimeout(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id"},
+		values:  [][]driver.Value{{int64(7)}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id from sys_user where id = #{id}",
+		Options: StatementOptions{
+			Timeout: 2 * time.Second,
+		},
+	})
+	config := DefaultConfiguration()
+	config.DefaultStatementTimeout = time.Hour
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	started := time.Now()
+	var id int64
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindID", NamedArgs{"id": int64(7)}, &id); err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if !state.queryHadDeadline {
+		t.Fatalf("expected statement deadline")
+	}
+	if state.queryDeadline.Sub(started) > time.Minute {
+		t.Fatalf("expected statement timeout to override default, got deadline delta %s", state.queryDeadline.Sub(started))
+	}
+}
+
+func TestSQLSession_whenStatementFetchSizeConfigured_shouldOverrideDefaultFetchSize(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id"},
+		values:  [][]driver.Value{{int64(7)}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id from sys_user where id = #{id}",
+		Options: StatementOptions{
+			FetchSize:     256,
+			ResultSetType: ResultSetTypeForwardOnly,
+			ResultOrdered: true,
+		},
+	})
+	executor := &recordingStatementOptionsExecutor{db: state.db}
+	config := DefaultConfiguration()
+	config.DefaultFetchSize = 128
+	session, err := NewSQLSession(registry, executor, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var id int64
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindID", NamedArgs{"id": int64(7)}, &id); err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if len(executor.options) != 1 {
+		t.Fatalf("expected one statement options call, got %d", len(executor.options))
+	}
+	if executor.options[0].FetchSize != 256 || executor.options[0].ResultSetType != ResultSetTypeForwardOnly || !executor.options[0].ResultOrdered {
+		t.Fatalf("unexpected statement options %#v", executor.options[0])
+	}
+}
+
 func TestSQLSession_Query_whenSliceDestination_shouldScanRows(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{
@@ -2665,6 +2743,30 @@ func (e *recordingFetchSizeExecutor) ApplyFetchSize(ctx context.Context, query s
 	return nil
 }
 
+type recordingStatementOptionsExecutor struct {
+	db      *sql.DB
+	mu      sync.Mutex
+	options []StatementOptions
+	queries []string
+}
+
+func (e *recordingStatementOptionsExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return e.db.QueryContext(ctx, query, args...)
+}
+
+func (e *recordingStatementOptionsExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return e.db.ExecContext(ctx, query, args...)
+}
+
+func (e *recordingStatementOptionsExecutor) ApplyStatementOptions(ctx context.Context, query string, options StatementOptions) error {
+	_ = ctx
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.options = append(e.options, options)
+	e.queries = append(e.queries, query)
+	return nil
+}
+
 type testSQLState struct {
 	db                 *sql.DB
 	queryRows          testRowsData
@@ -2690,7 +2792,9 @@ type testSQLState struct {
 	prepareQueries     []string
 	stmtClosed         int
 	queryHadDeadline   bool
+	queryDeadline      time.Time
 	execHadDeadline    bool
+	execDeadline       time.Time
 	prepareHadDeadline bool
 	mu                 sync.Mutex
 }
@@ -2801,7 +2905,7 @@ func (s *testSQLState) queryContext(ctx context.Context, query string, args []dr
 	s.queries = append(s.queries, query)
 	s.queryArgs = append([]driver.NamedValue(nil), args...)
 	s.queryArgsList = append(s.queryArgsList, append([]driver.NamedValue(nil), args...))
-	_, s.queryHadDeadline = ctx.Deadline()
+	s.queryDeadline, s.queryHadDeadline = ctx.Deadline()
 	rows := s.queryRows
 	if len(s.queryResults) > 0 {
 		rows = s.queryResults[0]
@@ -2822,7 +2926,7 @@ func (s *testSQLState) execContext(ctx context.Context, query string, args []dri
 	s.execs = append(s.execs, query)
 	s.execArgs = append([]driver.NamedValue(nil), args...)
 	s.execArgsList = append(s.execArgsList, append([]driver.NamedValue(nil), args...))
-	_, s.execHadDeadline = ctx.Deadline()
+	s.execDeadline, s.execHadDeadline = ctx.Deadline()
 	if len(s.execErrors) > 0 {
 		err := s.execErrors[0]
 		s.execErrors = s.execErrors[1:]

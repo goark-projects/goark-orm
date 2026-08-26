@@ -15,6 +15,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package。
 - `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector` 和 `ReverseEngineer` 扩展 SPI，可由外部数据库适配层做 schema 反向工程或自定义模板；core 不直接依赖数据库驱动。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
+- MyBatis 风格 statement 级 `timeout`、`fetchSize`、`resultSetType`、`resultOrdered` 和 `keyColumn` 执行选项；语句级声明优先于全局默认值，并通过可选执行器接口传递给驱动适配层。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
 - MyBatis `${}` 原样替换的 Go 化安全版本：默认拒绝普通字符串，只允许 `RawSQLToken`，内置 `RawIdentifier` 和 `RawOrderBy` 白名单 token。
 - XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`；`test` 表达式支持安全 OGNL：括号、`and/or`、`not/!`、比较别名、四则运算、取模、三元表达式、`in/not in`、列表字面量、`empty`、确定性参数路径和白名单只读方法。
@@ -146,6 +147,19 @@ ReportUsers(ctx context.Context, status string, total *int64, users *[]User, rol
   <resultSet name="users" resultType="User"/>
   <resultSet name="roles" resultType="Role"/>
 </call>
+```
+
+语句级执行选项可在注解或 XML 中直接声明。`timeout` 兼容 MyBatis 的秒数，也支持 Go duration 字符串：
+
+```go
+//goark-orm:select(sql="select id, name from sys_user where id = #{id}", timeout="2s", fetchSize=128, resultSetType="FORWARD_ONLY")
+FindByID(ctx context.Context, id int64) (*User, error)
+```
+
+```xml
+<select id="FindByID" resultType="User" timeout="2" fetchSize="128" resultSetType="FORWARD_ONLY">
+  select id, name from sys_user where id = #{id}
+</select>
 ```
 
 局部更新可以使用 `UpdateWrapper`：

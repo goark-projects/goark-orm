@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -655,6 +657,10 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 	if err != nil {
 		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses resultSets failed: %w", methodName, selected.Name, err)
 	}
+	options, err := parseAnnotationStatementOptions(selected.Args)
+	if err != nil {
+		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses options failed: %w", methodName, selected.Name, err)
+	}
 	useGeneratedKeys := false
 	if value := strings.TrimSpace(selected.Args["useGeneratedKeys"]); value != "" {
 		switch value {
@@ -677,6 +683,7 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 		Provider:           provider,
 		UseGeneratedKeys:   useGeneratedKeys,
 		KeyProperty:        strings.TrimSpace(selected.Args["keyProperty"]),
+		Options:            options,
 		Parameters:         statementParameters(sql),
 		ParameterModes:     parameters,
 		ResultSets:         resultSets,
@@ -701,6 +708,80 @@ func annotationStatementType(value string, command orm.StatementCommand) orm.Sta
 		}
 		return ""
 	}
+}
+
+func parseAnnotationStatementOptions(args map[string]string) (orm.StatementOptions, error) {
+	timeout, err := parseAnnotationStatementTimeout(args)
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	fetchSize, err := parseAnnotationInt(args, "fetchSize")
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	if fetchSize < 0 {
+		return orm.StatementOptions{}, fmt.Errorf("fetchSize must be >= 0")
+	}
+	resultSetType, err := orm.ParseResultSetType(args["resultSetType"])
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	resultOrdered, err := parseAnnotationBool(args, "resultOrdered")
+	if err != nil {
+		return orm.StatementOptions{}, err
+	}
+	return orm.StatementOptions{
+		Timeout:       timeout,
+		FetchSize:     fetchSize,
+		ResultSetType: resultSetType,
+		ResultOrdered: resultOrdered,
+		KeyColumn:     strings.TrimSpace(args["keyColumn"]),
+	}, nil
+}
+
+func parseAnnotationStatementTimeout(args map[string]string) (time.Duration, error) {
+	value := strings.TrimSpace(firstNonEmpty(args["timeoutDuration"], args["timeout"]))
+	if value == "" {
+		return 0, nil
+	}
+	if duration, err := time.ParseDuration(value); err == nil {
+		if duration < 0 {
+			return 0, fmt.Errorf("timeout must be >= 0")
+		}
+		return duration, nil
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("timeout requires duration or integer seconds")
+	}
+	if seconds < 0 {
+		return 0, fmt.Errorf("timeout must be >= 0")
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func parseAnnotationInt(args map[string]string, name string) (int, error) {
+	value := strings.TrimSpace(args[name])
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s requires integer value", name)
+	}
+	return parsed, nil
+}
+
+func parseAnnotationBool(args map[string]string, name string) (bool, error) {
+	value := strings.TrimSpace(args[name])
+	if value == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s requires boolean value", name)
+	}
+	return parsed, nil
 }
 
 func parseAnnotationCallableParameters(args map[string]string) ([]orm.ParameterMeta, error) {

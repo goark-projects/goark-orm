@@ -516,6 +516,11 @@ func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
 	writeStringField(builder, "DatabaseID", statement.DatabaseID)
 	writeBoolField(builder, "UseGeneratedKeys", statement.UseGeneratedKeys)
 	writeStringField(builder, "KeyProperty", statement.KeyProperty)
+	if !statementOptionsZero(statement.Options) {
+		builder.WriteString("Options:")
+		writeStatementOptions(builder, statement.Options)
+		builder.WriteByte(',')
+	}
 	if statement.SelectKey.Enabled {
 		builder.WriteString("SelectKey:")
 		writeSelectKeyMeta(builder, statement.SelectKey)
@@ -541,6 +546,32 @@ func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
 	}
 	writeStringSliceField(builder, "InterceptorIgnores", statement.InterceptorIgnores)
 	builder.WriteString("}")
+}
+
+func writeStatementOptions(builder *bytes.Buffer, options orm.StatementOptions) {
+	builder.WriteString("orm.StatementOptions{")
+	if options.Timeout > 0 {
+		builder.WriteString("Timeout:")
+		builder.WriteString(strconv.FormatInt(int64(options.Timeout), 10))
+		builder.WriteByte(',')
+	}
+	writeIntField(builder, "FetchSize", options.FetchSize)
+	if options.ResultSetType != "" {
+		builder.WriteString("ResultSetType:")
+		builder.WriteString(resultSetTypeExpression(options.ResultSetType))
+		builder.WriteByte(',')
+	}
+	writeBoolField(builder, "ResultOrdered", options.ResultOrdered)
+	writeStringField(builder, "KeyColumn", options.KeyColumn)
+	builder.WriteString("}")
+}
+
+func statementOptionsZero(options orm.StatementOptions) bool {
+	return options.Timeout <= 0 &&
+		options.FetchSize <= 0 &&
+		options.ResultSetType == "" &&
+		!options.ResultOrdered &&
+		strings.TrimSpace(options.KeyColumn) == ""
 }
 
 func writeParameterMetas(builder *bytes.Buffer, parameters []orm.ParameterMeta) {
@@ -852,6 +883,19 @@ func statementTypeExpression(value orm.StatementType) string {
 		return "orm.StatementTypeCallable"
 	default:
 		return "orm.StatementType(" + strconv.Quote(string(value)) + ")"
+	}
+}
+
+func resultSetTypeExpression(value orm.ResultSetType) string {
+	switch value {
+	case orm.ResultSetTypeForwardOnly:
+		return "orm.ResultSetTypeForwardOnly"
+	case orm.ResultSetTypeScrollInsensitive:
+		return "orm.ResultSetTypeScrollInsensitive"
+	case orm.ResultSetTypeScrollSensitive:
+		return "orm.ResultSetTypeScrollSensitive"
+	default:
+		return "orm.ResultSetType(" + strconv.Quote(string(value)) + ")"
 	}
 }
 
