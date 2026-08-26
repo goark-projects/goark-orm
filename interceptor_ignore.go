@@ -19,6 +19,12 @@ const (
 	InterceptorNamePagination = "pagination"
 	// InterceptorNameEntitySemantic 表示实体语义拦截器。
 	InterceptorNameEntitySemantic = "entity-semantic"
+	// InterceptorNameSQLGuard 表示通用 SQL 治理规则拦截器。
+	InterceptorNameSQLGuard = "sql-guard"
+	// InterceptorNameIllegalSQL 表示非法 SQL 治理拦截器。
+	InterceptorNameIllegalSQL = "illegal-sql"
+	// InterceptorNameReadOnly 表示只读治理拦截器。
+	InterceptorNameReadOnly = "read-only"
 )
 
 // StatementInterceptorIgnored 判断语句是否声明跳过指定拦截器。
@@ -50,6 +56,12 @@ func canonicalInterceptorName(value string) string {
 		return InterceptorNameDynamicTable
 	case "entitysemantic", "entity-semantic":
 		return InterceptorNameEntitySemantic
+	case "sqlguard", "sql-guard":
+		return InterceptorNameSQLGuard
+	case "illegalsql", "illegal-sql":
+		return InterceptorNameIllegalSQL
+	case "readonly", "read-only":
+		return InterceptorNameReadOnly
 	default:
 		return value
 	}

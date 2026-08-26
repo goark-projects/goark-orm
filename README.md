@@ -30,7 +30,8 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `UpdateWrapper`、`TypedField` 和生成期 `UserTypedFields` 字段常量，支持局部更新、类型化字段引用、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - Registry / Session 级 `TypeHandler` SPI，内建 `json`、`time`、`decimal` 处理器。
 - `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
-- Mapper 注解和 XML 语句支持 `interceptorIgnore`，可按语句跳过 `block-attack`、`tenant`、`data-permission`、`dynamic-table`、`pagination`、`entity-semantic` 或 `all`。
+- 非观测 SQL 治理拦截器：`SQLGuardRule` / `NewSQLGuardInterceptor` 可组合业务规则，`NewIllegalSQLInterceptor` 默认拒绝多语句、顶层 `SELECT *` 和无 WHERE 写语句，`NewReadOnlyInterceptor` 可保护只读会话。
+- Mapper 注解和 XML 语句支持 `interceptorIgnore`，可按语句跳过 `block-attack`、`tenant`、`data-permission`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-guard`、`illegal-sql`、`read-only` 或 `all`。
 - 独立 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。
 - Go 原生错误层级：`ErrConfiguration`、`ErrRegistry`、`ErrStatementNotFound`、`ErrBinding`、`ErrMapping`、`ErrExecutor`、`ErrTooManyResults` 均可通过 `errors.Is` 归类，通过 `errors.As` 读取结构化上下文。
 - `BatchSession` 批处理执行器、`Flush` / `Clear`、事务内批处理和查询前自动 flush。
@@ -189,6 +190,7 @@ session, err := orm.NewSQLSession(
 		orm.NewTenantInterceptor("tenant_id", tenantID),
 		orm.NewDataPermissionInterceptor(permissionProvider),
 		orm.NewPaginationInterceptor(),
+		orm.NewIllegalSQLInterceptor(),
 		orm.NewBlockAttackInterceptor(),
 	),
 )
@@ -197,6 +199,21 @@ if err != nil {
 }
 
 ctx = orm.WithPageRequest(ctx, orm.NewPageRequest(1, 20))
+```
+
+只读链路可以单独启用写保护：
+
+```go
+readSession, err := orm.NewSQLSession(
+	registry,
+	db,
+	orm.NewPostgresDialect(),
+	orm.WithInterceptors(orm.NewReadOnlyInterceptor()),
+)
+if err != nil {
+	return err
+}
+_ = readSession
 ```
 
 `SQLSession` 可通过独立配置对象统一设置运行期行为：

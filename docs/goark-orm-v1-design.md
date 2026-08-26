@@ -598,11 +598,14 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 4. DataPermissionInterceptor：由业务 Provider 返回数据权限 SQLCondition。
 5. DynamicTableInterceptor：按映射改写 from/join/update/into 后的表名。
 6. PaginationInterceptor：从 context 读取 PageRequest 并追加方言分页。
+7. SQLGuardInterceptor：执行可组合的 SQLGuardRule 业务治理规则。
+8. IllegalSQLInterceptor：默认拒绝多语句、顶层 SELECT * 和无 WHERE 的 update/delete。
+9. ReadOnlyInterceptor：拒绝 insert/update/delete，用于只读会话或只读链路。
 ```
 
 分页拦截器使用 `WithPageRequest(ctx, page)` 传递分页请求。租户拦截器覆盖 select/update/delete 的条件注入和 insert 的租户字段注入；无显式列清单或非 VALUES 形态的 insert 会 fail-fast，避免租户字段静默漏写。
 
-`StatementMeta.InterceptorIgnores` 承载语句级拦截器忽略列表。注解和 XML 均使用 `interceptorIgnore` 声明，名称支持 `block-attack`、`data-permission`、`tenant`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-observer` 和 `all`，并兼容 camelCase 与下划线别名。该能力用于少量明确受控语句，不替代全局安全默认值。
+`StatementMeta.InterceptorIgnores` 承载语句级拦截器忽略列表。注解和 XML 均使用 `interceptorIgnore` 声明，名称支持 `block-attack`、`data-permission`、`tenant`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-observer`、`sql-guard`、`illegal-sql`、`read-only` 和 `all`，并兼容 camelCase 与下划线别名。该能力用于少量明确受控语句，不替代全局安全默认值。
 
 ## 分期计划
 
@@ -651,7 +654,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 `ExecutorType.REUSE` 预编译语句复用，按最终 SQL 在 Session 内缓存 prepared statement，并在 Session/事务生命周期结束时关闭。
 - 已支持 BaseMapper 逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - 已支持 `MetaObjectHandler` 自动填充及 `fill` 字段策略。
-- 已支持 SQLSession 拦截器 SPI、全表更新/删除保护、SQL 观察、租户条件、数据权限条件、动态表名和分页拦截器。
+- 已支持 SQLSession 拦截器 SPI、全表更新/删除保护、SQL 观察、租户条件、数据权限条件、动态表名、分页拦截器和非观测 SQL 治理拦截器。
 - 已支持 `UpdateWrapper` 局部更新、常用条件操作符、`TypedField` 字段引用、生成期 `UserTypedFields`、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - 已支持 `IDType` 主键策略、默认 ASSIGN_ID/ASSIGN_UUID 生成器、XML `<bind>` 和 `databaseId` 语句选择。
 - 已支持 `QueryWrapper` / `UpdateWrapper` 嵌套条件、EXISTS/NOT EXISTS、Apply、Last、Between/NotBetween、NotLike、LikeLeft/LikeRight、NotIn，以及 QueryWrapper 的 GroupBy/Having/Select/AllEq/条件化 OrderBy。
