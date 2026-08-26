@@ -94,6 +94,73 @@ func TestService_ChainQuery_whenConditionsProvided_shouldQueryList(t *testing.T)
 	}
 }
 
+func TestService_whenMapAndObjectConvenienceMethodsCalled_shouldDelegateToBaseMapper(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{
+			columns: []string{"id", "name", "status"},
+			values:  [][]driver.Value{{int64(7), "Alice", "ACTIVE"}},
+		},
+		{
+			columns: []string{"id", "name", "status"},
+			values:  [][]driver.Value{{int64(7), "Alice", "ACTIVE"}},
+		},
+		{
+			columns: []string{"id"},
+			values:  [][]driver.Value{{int64(7)}},
+		},
+		{columns: []string{"count"}, values: [][]driver.Value{{int64(1)}}},
+		{
+			columns: []string{"id", "name"},
+			values:  [][]driver.Value{{int64(7), "Alice"}},
+		},
+	}
+	state.execResult = testResult{rowsAffected: 1}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperUser, int64](session, baseMapperUserEntity())
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+	service, err := NewService[baseMapperUser, int64](mapper)
+	if err != nil {
+		t.Fatalf("new service failed: %v", err)
+	}
+
+	records, err := service.ListByMap(context.Background(), map[string]any{"status": "ACTIVE"})
+	if err != nil {
+		t.Fatalf("list by map failed: %v", err)
+	}
+	rowMap, err := service.GetMap(context.Background(), NewQueryWrapper[baseMapperUser]().Eq(baseMapperUserID, int64(7)))
+	if err != nil {
+		t.Fatalf("get map failed: %v", err)
+	}
+	obj, err := service.GetObj(context.Background(), NewQueryWrapper[baseMapperUser]().Eq(baseMapperUserID, int64(7)))
+	if err != nil {
+		t.Fatalf("get obj failed: %v", err)
+	}
+	page, err := service.PageMaps(context.Background(), NewPageRequest(1, 10), NewQueryWrapper[baseMapperUser]().Eq(baseMapperUserStatus, "ACTIVE"))
+	if err != nil {
+		t.Fatalf("page maps failed: %v", err)
+	}
+	rows, err := service.RemoveByMap(context.Background(), map[string]any{"status": "LOCKED"})
+	if err != nil {
+		t.Fatalf("remove by map failed: %v", err)
+	}
+
+	if len(records) != 1 || records[0].Name != "Alice" {
+		t.Fatalf("unexpected records %#v", records)
+	}
+	if rowMap["id"] != int64(7) || obj != int64(7) || page.Total != 1 || len(page.Records) != 1 || rows != 1 {
+		t.Fatalf("unexpected convenience results map=%#v obj=%#v page=%#v rows=%d", rowMap, obj, page, rows)
+	}
+	if state.exec != `DELETE FROM "sys_user" WHERE "status" = $1` {
+		t.Fatalf("unexpected remove by map SQL %q", state.exec)
+	}
+}
+
 func TestService_ChainUpdate_whenSetAndConditionProvided_shouldUpdateRows(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1}

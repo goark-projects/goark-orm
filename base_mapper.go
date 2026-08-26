@@ -234,6 +234,19 @@ func (m *BaseMapper[T, ID]) SelectBatchIDs(ctx context.Context, ids []ID) ([]T, 
 	return m.SelectList(ctx, wrapper)
 }
 
+// SelectOne 按条件查询单条记录。
+func (m *BaseMapper[T, ID]) SelectOne(ctx context.Context, wrapper *QueryWrapper[T]) (*T, error) {
+	sqlText, args, _, err := m.selectSQL(wrapper, true, 0)
+	if err != nil {
+		return nil, err
+	}
+	var out T
+	if err := m.session.QueryOneStatement(ctx, m.statement("SelectOne", StatementCommandSelect, sqlText), args, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SelectList 按条件查询记录列表。
 func (m *BaseMapper[T, ID]) SelectList(ctx context.Context, wrapper *QueryWrapper[T]) ([]T, error) {
 	sqlText, args, _, err := m.selectSQL(wrapper, true, 0)
@@ -309,6 +322,43 @@ func (m *BaseMapper[T, ID]) SelectPage(ctx context.Context, page PageRequest, wr
 	var records []T
 	if err := m.session.QueryStatement(ctx, m.statement("SelectPage", StatementCommandSelect, listSQL), listArgs, &records); err != nil {
 		return Page[T]{}, err
+	}
+	result.Records = records
+	return result, nil
+}
+
+// SelectMapsPage 按条件执行 map 结果分页查询。
+func (m *BaseMapper[T, ID]) SelectMapsPage(ctx context.Context, page PageRequest, wrapper *QueryWrapper[T]) (Page[map[string]any], error) {
+	page = page.normalized()
+	countSQLBase, countArgs, _, err := m.selectSQL(wrapper, false, 0)
+	if err != nil {
+		return Page[map[string]any]{}, err
+	}
+	result := Page[map[string]any]{
+		Current: page.Current,
+		Size:    page.Size,
+	}
+	if page.SearchCount {
+		countSQL := "SELECT COUNT(*) FROM (" + countSQLBase + ") goark_orm_count"
+		if err := m.session.QueryOneStatement(ctx, m.statement("Count", StatementCommandSelect, countSQL), countArgs, &result.Total); err != nil {
+			return Page[map[string]any]{}, err
+		}
+		result.Pages = pageCount(result.Total, page.Size)
+	}
+	listSQL, listArgs, next, err := m.selectSQL(wrapper, true, 0)
+	if err != nil {
+		return Page[map[string]any]{}, err
+	}
+	if page.Size >= 0 {
+		limitName := wrapperArgName(next)
+		offsetName := wrapperArgName(next + 1)
+		listArgs[limitName] = page.Size
+		listArgs[offsetName] = page.offset()
+		listSQL = limitOffsetSQL(m.dialect, listSQL, "#{"+limitName+"}", "#{"+offsetName+"}")
+	}
+	var records []map[string]any
+	if err := m.session.QueryStatement(ctx, m.statement("SelectMapsPage", StatementCommandSelect, listSQL), listArgs, &records); err != nil {
+		return Page[map[string]any]{}, err
 	}
 	result.Records = records
 	return result, nil

@@ -22,12 +22,12 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`；`test` 表达式支持安全 OGNL：括号、`and/or`、`not/!`、比较别名、四则运算、取模、三元表达式、`in/not in`、列表字面量、`empty`、确定性参数路径和白名单只读方法。
 - 存储过程支持 `StatementCommandCall`、`StatementTypeCallable`、IN/OUT/INOUT 参数、`sql.Out` 绑定、按声明顺序扫描多个结果集，以及生成 Mapper 侧 `orm.Call` 调用代码。
 - MyBatis-Plus 风格 `BaseMapper` 通用 CRUD、`QueryWrapper` 条件构造器和 `Page` 分页模型。
-- MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作。
+- MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作，包括 `ListByMap`、`RemoveByMap`、`GetMap`、`GetObj`、`PageMaps`、`First`、`Maps` 和 `Objs` 等便捷方法。
 - MyBatis-Plus 风格 `SQLInjector`、`Db` 快捷门面和 `EnumValuer` 枚举入库值接口。
 - MyBatis-Plus 风格 `IDType` 主键策略：`AUTO`、`INPUT`、`ASSIGN_ID`、`ASSIGN_UUID`。
 - `DbConfig` 支持全局主键策略、tablePrefix、schema、logicDeleteField、logicDeleteValue、logicNotDeleteValue、insertStrategy、updateStrategy 和 whereStrategy。
 - 实体字段支持 `key-column`、`numeric-scale`、`condition`、`select=false`、`insert-strategy`、`update-strategy` 和 `where-strategy` 元数据；`BaseMapper` 会按字段/全局 insert/update 策略过滤通用 INSERT/UPDATE 列。
-- `BaseMapper` 支持 `SelectCount`、`SelectMaps`、`SelectObjs`、`DeleteBatchIDs` 和 `SaveOrUpdate`。
+- `BaseMapper` 支持 `SelectOne`、`SelectCount`、`SelectMaps`、`SelectObjs`、`SelectByMap`、`SelectMapsPage`、`DeleteByMap`、`DeleteBatchIDs` 和 `SaveOrUpdate`。
 - `BaseMapper` / `Service` 支持实体条件查询：`SelectListByEntity`、`SelectCountByEntity`、`DeleteByEntity`、`ListByEntity`、`CountByEntity` 和 `RemoveByEntity`，字段 `condition` / `where-strategy` 会参与 WHERE 构造。
 - `BaseMapper` 已支持逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - MyBatis-Plus 风格 `MetaObjectHandler` 自动填充，支持 `fill='insert'`、`fill='update'`、`fill='insert_update'`，可用于 BaseMapper 和普通 Mapper 写语句。

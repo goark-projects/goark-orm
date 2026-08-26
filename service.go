@@ -126,6 +126,15 @@ func (s *Service[T, ID]) RemoveByEntity(ctx context.Context, entity *T) (int64, 
 	return mapper.DeleteByEntity(ctx, entity)
 }
 
+// RemoveByMap 按列名 map 等值删除实体。
+func (s *Service[T, ID]) RemoveByMap(ctx context.Context, columnMap map[string]any) (int64, error) {
+	mapper, err := s.requireMapper()
+	if err != nil {
+		return 0, err
+	}
+	return mapper.DeleteByMap(ctx, columnMap)
+}
+
 // UpdateByID 按主键更新实体。
 func (s *Service[T, ID]) UpdateByID(ctx context.Context, entity *T) (bool, error) {
 	mapper, err := s.requireMapper()
@@ -195,6 +204,72 @@ func (s *Service[T, ID]) GetOne(ctx context.Context, wrapper *QueryWrapper[T]) (
 	return &records[0], nil
 }
 
+// GetOneOrFirst 按条件查询单条实体，多行时返回第一行。
+func (s *Service[T, ID]) GetOneOrFirst(ctx context.Context, wrapper *QueryWrapper[T]) (*T, error) {
+	records, err := s.List(ctx, wrapper)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return &records[0], nil
+}
+
+// GetMap 按条件查询单条 map 结果。
+func (s *Service[T, ID]) GetMap(ctx context.Context, wrapper *QueryWrapper[T]) (map[string]any, error) {
+	records, err := s.ListMaps(ctx, wrapper)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	if len(records) > 1 {
+		return nil, fmt.Errorf("goark-orm: service GetMap returned more than one row")
+	}
+	return records[0], nil
+}
+
+// GetMapOrFirst 按条件查询 map 结果，多行时返回第一行。
+func (s *Service[T, ID]) GetMapOrFirst(ctx context.Context, wrapper *QueryWrapper[T]) (map[string]any, error) {
+	records, err := s.ListMaps(ctx, wrapper)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return records[0], nil
+}
+
+// GetObj 按条件查询首列单个值。
+func (s *Service[T, ID]) GetObj(ctx context.Context, wrapper *QueryWrapper[T]) (any, error) {
+	records, err := s.ListObjs(ctx, wrapper)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	if len(records) > 1 {
+		return nil, fmt.Errorf("goark-orm: service GetObj returned more than one row")
+	}
+	return records[0], nil
+}
+
+// GetObjOrFirst 按条件查询首列值，多行时返回第一行。
+func (s *Service[T, ID]) GetObjOrFirst(ctx context.Context, wrapper *QueryWrapper[T]) (any, error) {
+	records, err := s.ListObjs(ctx, wrapper)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return records[0], nil
+}
+
 // List 按条件查询实体列表。wrapper 为 nil 时查询全部记录。
 func (s *Service[T, ID]) List(ctx context.Context, wrapper *QueryWrapper[T]) ([]T, error) {
 	mapper, err := s.requireMapper()
@@ -211,6 +286,15 @@ func (s *Service[T, ID]) ListByEntity(ctx context.Context, entity *T) ([]T, erro
 		return nil, err
 	}
 	return mapper.SelectListByEntity(ctx, entity)
+}
+
+// ListByMap 按列名 map 等值查询实体列表。
+func (s *Service[T, ID]) ListByMap(ctx context.Context, columnMap map[string]any) ([]T, error) {
+	mapper, err := s.requireMapper()
+	if err != nil {
+		return nil, err
+	}
+	return mapper.SelectByMap(ctx, columnMap)
 }
 
 // ListByIDs 按主键集合查询实体列表。
@@ -265,6 +349,15 @@ func (s *Service[T, ID]) Page(ctx context.Context, page PageRequest, wrapper *Qu
 		return Page[T]{}, err
 	}
 	return mapper.SelectPage(ctx, page, wrapper)
+}
+
+// PageMaps 按条件分页查询 map 结果。
+func (s *Service[T, ID]) PageMaps(ctx context.Context, page PageRequest, wrapper *QueryWrapper[T]) (Page[map[string]any], error) {
+	mapper, err := s.requireMapper()
+	if err != nil {
+		return Page[map[string]any]{}, err
+	}
+	return mapper.SelectMapsPage(ctx, page, wrapper)
 }
 
 // ChainQuery 创建链式查询。
@@ -346,6 +439,46 @@ func (c *QueryChain[T, ID]) One(ctx context.Context) (*T, error) {
 		return nil, fmt.Errorf("goark-orm: query chain service is nil")
 	}
 	return c.service.GetOne(ctx, c.wrapper)
+}
+
+// First 执行链式单条查询，多行时返回第一行。
+func (c *QueryChain[T, ID]) First(ctx context.Context) (*T, error) {
+	if c == nil || c.service == nil {
+		return nil, fmt.Errorf("goark-orm: query chain service is nil")
+	}
+	return c.service.GetOneOrFirst(ctx, c.wrapper)
+}
+
+// Maps 执行链式 map 列表查询。
+func (c *QueryChain[T, ID]) Maps(ctx context.Context) ([]map[string]any, error) {
+	if c == nil || c.service == nil {
+		return nil, fmt.Errorf("goark-orm: query chain service is nil")
+	}
+	return c.service.ListMaps(ctx, c.wrapper)
+}
+
+// Map 执行链式单条 map 查询。
+func (c *QueryChain[T, ID]) Map(ctx context.Context) (map[string]any, error) {
+	if c == nil || c.service == nil {
+		return nil, fmt.Errorf("goark-orm: query chain service is nil")
+	}
+	return c.service.GetMap(ctx, c.wrapper)
+}
+
+// Objs 执行链式首列列表查询。
+func (c *QueryChain[T, ID]) Objs(ctx context.Context) ([]any, error) {
+	if c == nil || c.service == nil {
+		return nil, fmt.Errorf("goark-orm: query chain service is nil")
+	}
+	return c.service.ListObjs(ctx, c.wrapper)
+}
+
+// Obj 执行链式首列单值查询。
+func (c *QueryChain[T, ID]) Obj(ctx context.Context) (any, error) {
+	if c == nil || c.service == nil {
+		return nil, fmt.Errorf("goark-orm: query chain service is nil")
+	}
+	return c.service.GetObj(ctx, c.wrapper)
 }
 
 // Count 执行链式计数查询。
