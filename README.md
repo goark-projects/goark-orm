@@ -12,7 +12,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - XML 与注解在同一个 Mapper 接口中混用。
 - 生成 `RegisterGoarkORMMetadata`、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
-- 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码。
+- 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和基础结果扫描。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
 - MyBatis `${}` 原样替换的 Go 化安全版本：默认拒绝普通字符串，只允许 `RawSQLToken`，内置 `RawIdentifier` 和 `RawOrderBy` 白名单 token。
@@ -98,6 +98,28 @@ if err != nil {
 	return err
 }
 _ = page
+```
+
+多包生成建议提交 JSON 配置文件：
+
+```json
+{
+  "databaseId": "postgres",
+  "typeHandlers": ["json", "decimal"],
+  "packages": [
+    {
+      "dir": "internal/user",
+      "output": "internal/user/zz_goark_orm_user_gen.go"
+    },
+    {
+      "dir": "internal/order"
+    }
+  ]
+}
+```
+
+```bash
+goark-orm generate orm --config goark-orm.json
 ```
 
 局部更新可以使用 `UpdateWrapper`：

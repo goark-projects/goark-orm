@@ -95,10 +95,12 @@ func (c Command) runGenerate(args []string) int {
 
 func (c Command) runGenerateORM(args []string) int {
 	var output string
+	var configPath string
 	var typeHandlers stringList
 	spec := ormgen.GenerateSpec{Dir: "."}
 	flags := flag.NewFlagSet("goark-orm generate orm", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	flags.StringVar(&configPath, "config", "", "JSON 配置文件路径")
 	flags.StringVar(&spec.Dir, "dir", ".", "待扫描 Go package 目录")
 	flags.StringVar(&spec.PackageName, "package", "", "待扫描 package 名称，默认自动推导")
 	flags.StringVar(&output, "output", "", "输出文件路径，留空时输出到 stdout；扫描 ./... 时不允许指定")
@@ -114,6 +116,13 @@ func (c Command) runGenerateORM(args []string) int {
 		return 2
 	}
 	spec.TypeHandlers = append(spec.TypeHandlers, typeHandlers...)
+	if configPath != "" {
+		if flags.NArg() != 0 {
+			_, _ = fmt.Fprint(c.Err, "--config 不能与 pattern 参数同时使用\n")
+			return 2
+		}
+		return c.runGenerateORMConfig(configPath)
+	}
 	switch flags.NArg() {
 	case 0:
 		return c.runGenerateORMSingle(spec, output)
@@ -133,6 +142,41 @@ func (c Command) runGenerateORM(args []string) int {
 		c.printGenerateORMHelp(c.Err)
 		return 2
 	}
+}
+
+func (c Command) runGenerateORMConfig(path string) int {
+	config, err := ormgen.LoadGenerateConfig(path)
+	if err != nil {
+		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
+		return 2
+	}
+	items, err := config.Resolve(filepath.Dir(path))
+	if err != nil {
+		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
+		return 2
+	}
+	for _, item := range items {
+		model, err := ormgen.ScanPackage(item.Spec)
+		if err != nil {
+			_, _ = fmt.Fprintf(c.Err, "%v\n", err)
+			return 2
+		}
+		source, err := ormgen.Render(model)
+		if err != nil {
+			_, _ = fmt.Fprintf(c.Err, "%v\n", err)
+			return 2
+		}
+		output := item.Output
+		if output == "" {
+			output = filepath.Join(model.Dir, ormgen.DefaultOutputName(model.PackageName))
+		}
+		if err := writeFile(output, source); err != nil {
+			_, _ = fmt.Fprintf(c.Err, "写入生成文件失败: %v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(c.Err, "generated %s\n", output)
+	}
+	return 0
 }
 
 func (c Command) runGenerateORMSingle(spec ormgen.GenerateSpec, output string) int {
@@ -229,6 +273,7 @@ func (c Command) printGenerateORMHelp(w io.Writer) {
   goark-orm generate orm [pattern] [flags]
 
 Flags:
+  --config path              JSON 配置文件路径。配置模式下会按配置批量生成文件。
   --dir path                 Go package directory to scan. Defaults to current directory.
   --package string           Package name to scan when directory contains multiple packages.
   --output path              Output file path for single package generation. Defaults to stdout.
@@ -236,6 +281,7 @@ Flags:
 
 Examples:
   goark-orm generate orm --dir .
+  goark-orm generate orm --config goark-orm.json
   goark-orm generate orm --dir internal/user --output internal/user/zz_goark_orm_user_gen.go
   goark-orm generate orm ./...
 

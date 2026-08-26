@@ -75,6 +75,71 @@ func TestCommand_whenGenerateORMToFile_shouldWriteFileAndReportToStderr(t *testi
 	}
 }
 
+func TestCommand_whenGenerateORMConfigProvided_shouldGenerateConfiguredPackages(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "user")
+	writeORMFixtureAt(t, dir)
+	configPath := filepath.Join(root, "goark-orm.json")
+	output := filepath.Join(root, "generated", "user_gen.go")
+	if err := os.WriteFile(configPath, []byte(`{
+  "typeHandlers": ["json"],
+  "packages": [
+    {
+      "dir": "internal/user",
+      "output": "generated/user_gen.go"
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := Main([]string{
+		"generate", "orm",
+		"--config", configPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout should be empty, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "generated "+output) {
+		t.Fatalf("expected generated path on stderr, got %q", stderr.String())
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read generated ORM file failed: %v", err)
+	}
+	if !strings.Contains(string(data), "func NewUserMapper(session orm.Session) UserMapper") {
+		t.Fatalf("generated ORM file missing mapper implementation:\n%s", data)
+	}
+}
+
+func TestCommand_whenGenerateORMConfigWithPattern_shouldReject(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "goark-orm.json")
+	if err := os.WriteFile(configPath, []byte(`{"dir":"."}`), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := Main([]string{
+		"generate", "orm",
+		"--config", configPath,
+		"./...",
+	}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "--config") {
+		t.Fatalf("expected config error, got %q", stderr.String())
+	}
+}
+
 func TestCommand_whenHelpRequested_shouldReturnSuccess(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -112,6 +177,15 @@ func TestCommand_whenVersionRequested_shouldPrintVersion(t *testing.T) {
 func writeORMFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	writeORMFixtureAt(t, dir)
+	return dir
+}
+
+func writeORMFixtureAt(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir ORM fixture failed: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "mapper.go"), []byte(`package sample
 
 import "context"
@@ -130,5 +204,4 @@ type UserMapper interface {
 `), 0o644); err != nil {
 		t.Fatalf("write ORM source failed: %v", err)
 	}
-	return dir
 }

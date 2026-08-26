@@ -506,6 +506,19 @@ zz_goark_orm_<package>_gen.go
 
 生成代码必须可读、确定性排序、可提交，并能通过 `go test ./...` 编译。
 
+生成器支持可提交的 JSON 配置文件，CLI 通过 `goark-orm generate orm --config goark-orm.json` 执行。配置字段包括：
+
+```text
+1. dir：单包扫描目录，或作为 packages 条目的默认目录。
+2. package：目录存在多个 Go package 时显式指定包名。
+3. output：单包输出路径；多 packages 时必须放到每个条目内，避免多个包写同一文件。
+4. databaseId：XML databaseId 选择目标。
+5. typeHandlers：生成期额外已注册 TypeHandler 名称。
+6. packages：多包生成目标列表，每个条目支持 dir/package/output/databaseId/typeHandlers。
+```
+
+配置文件中的相对路径按配置文件所在目录解析。配置模式只负责源码扫描和文件输出，不连接数据库，也不做 schema 反向工程。
+
 ## 生成期校验
 
 生成器必须在编译前发现并拒绝以下问题：
@@ -666,6 +679,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 MyBatis-Plus 风格 Service 层、QueryChain、UpdateChain，并由生成器为单主键实体输出 `New<Entity>Service` 工厂。
 - 已支持 MyBatis-Plus 风格 `SQLInjector` 显式通用方法注入、无全局会话的 `Db` 快捷门面，以及 `EnumValuer` 枚举入库值接口。
 - 已支持 Mapper 本包内接口嵌入展平，公共查询/写入接口可以复用到具体 Mapper。
+- 已支持 `goark-orm generate orm --config` JSON 配置文件、多包批量输出、配置级 databaseId 和 typeHandlers 默认值。
 - 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。
 - 已新增核心热路径 benchmark 和环境变量门控的真实数据库 smoke 测试；数据库方言矩阵记录在 `docs/database-matrix.md`。
 
