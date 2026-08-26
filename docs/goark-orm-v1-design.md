@@ -619,6 +619,8 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 9. ReadOnlyInterceptor：拒绝 insert/update/delete，用于只读会话或只读链路。
 ```
 
+除 SQL 模板级拦截器外，V1 也提供 Go-native middleware 扩展点：`StatementExecutorMiddleware`、`StatementHandlerMiddleware`、`ParameterHandlerMiddleware` 和 `ResultSetHandlerMiddleware`。业务可以用 decorator 模式包装执行、语句编译、参数绑定和结果扫描四层契约；该机制替代 Java 风格运行时代理，不引入 classpath 扫描。
+
 分页拦截器使用 `WithPageRequest(ctx, page)` 传递分页请求。租户拦截器覆盖 select/update/delete 的条件注入和 insert 的租户字段注入；无显式列清单或非 VALUES 形态的 insert 会 fail-fast，避免租户字段静默漏写。
 
 `StatementMeta.InterceptorIgnores` 承载语句级拦截器忽略列表。注解和 XML 均使用 `interceptorIgnore` 声明，名称支持 `block-attack`、`data-permission`、`tenant`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-observer`、`sql-guard`、`illegal-sql`、`read-only` 和 `all`，并兼容 camelCase 与下划线别名。该能力用于少量明确受控语句，不替代全局安全默认值。
