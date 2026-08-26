@@ -348,7 +348,7 @@ func (m *BaseMapper[T, ID]) Insert(ctx context.Context, entity *T) (Result, erro
 	if err := applyMetaObjectHandler(ctx, m.metaObjectHandler, StatementCommandInsert, m.entity, value, nil); err != nil {
 		return Result{}, err
 	}
-	table, columns, fields, err := m.insertColumns()
+	table, columns, fields, err := m.insertColumns(value)
 	if err != nil {
 		return Result{}, err
 	}
@@ -446,7 +446,7 @@ func (m *BaseMapper[T, ID]) UpdateByID(ctx context.Context, entity *T) (int64, e
 			return 0, err
 		}
 	}
-	sets, fields, err := m.updateSetColumns(true)
+	sets, fields, err := m.updateSetColumns(value, true)
 	if err != nil {
 		return 0, err
 	}
@@ -511,7 +511,7 @@ func (m *BaseMapper[T, ID]) Update(ctx context.Context, entity *T, wrapper *Quer
 	if err := applyMetaObjectHandler(ctx, m.metaObjectHandler, StatementCommandUpdate, m.entity, value, nil); err != nil {
 		return 0, err
 	}
-	sets, fields, err := m.updateSetColumns(false)
+	sets, fields, err := m.updateSetColumns(value, false)
 	if err != nil {
 		return 0, err
 	}
@@ -641,7 +641,7 @@ func (m *BaseMapper[T, ID]) Delete(ctx context.Context, wrapper *QueryWrapper[T]
 }
 
 func (m *BaseMapper[T, ID]) selectSQL(wrapper *QueryWrapper[T], includeOrder bool, start int) (string, NamedArgs, int, error) {
-	projection, err := m.selectProjection(m.entity.Columns)
+	projection, err := m.selectProjection(m.defaultSelectableColumns())
 	if err != nil {
 		return "", nil, start, err
 	}
@@ -702,7 +702,7 @@ func (m *BaseMapper[T, ID]) selectBaseSQL() (string, error) {
 		return "", err
 	}
 	columns := make([]string, 0, len(m.entity.Columns))
-	for _, column := range m.entity.Columns {
+	for _, column := range m.defaultSelectableColumns() {
 		quoted, err := quoteIdentifierPath(m.dialect, column.ColumnName)
 		if err != nil {
 			return "", err
@@ -749,7 +749,18 @@ func wrapperSelects[T any](wrapper *QueryWrapper[T]) []Field[T] {
 	return append([]Field[T](nil), wrapper.selects...)
 }
 
-func (m *BaseMapper[T, ID]) insertColumns() (string, []string, []ColumnMeta, error) {
+func (m *BaseMapper[T, ID]) defaultSelectableColumns() []ColumnMeta {
+	columns := make([]ColumnMeta, 0, len(m.entity.Columns))
+	for _, column := range m.entity.Columns {
+		if column.SelectDisabled {
+			continue
+		}
+		columns = append(columns, column)
+	}
+	return columns
+}
+
+func (m *BaseMapper[T, ID]) insertColumns(entity reflect.Value) (string, []string, []ColumnMeta, error) {
 	table, err := m.quotedTable()
 	if err != nil {
 		return "", nil, nil, err
@@ -758,6 +769,14 @@ func (m *BaseMapper[T, ID]) insertColumns() (string, []string, []ColumnMeta, err
 	fields := make([]ColumnMeta, 0, len(m.entity.Columns))
 	for _, column := range m.entity.Columns {
 		if column.PrimaryKey && m.effectiveColumnIDType(column) == IDTypeAuto {
+			continue
+		}
+		value, err := fieldValue(entity, column)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		strategy := effectiveFieldStrategy(column.InsertStrategy, m.dbConfig.InsertStrategy)
+		if !fieldIncludedByStrategy(value, strategy) {
 			continue
 		}
 		quoted, err := quoteIdentifierPath(m.dialect, column.ColumnName)
@@ -773,11 +792,19 @@ func (m *BaseMapper[T, ID]) insertColumns() (string, []string, []ColumnMeta, err
 	return table, columns, fields, nil
 }
 
-func (m *BaseMapper[T, ID]) updateSetColumns(incrementVersion bool) ([]string, []ColumnMeta, error) {
+func (m *BaseMapper[T, ID]) updateSetColumns(entity reflect.Value, incrementVersion bool) ([]string, []ColumnMeta, error) {
 	sets := make([]string, 0, len(m.entity.Columns))
 	fields := make([]ColumnMeta, 0, len(m.entity.Columns))
 	for _, column := range m.entity.Columns {
 		if column.PrimaryKey || column.Version || column.SoftDelete || column.CreatedAt {
+			continue
+		}
+		value, err := fieldValue(entity, column)
+		if err != nil {
+			return nil, nil, err
+		}
+		strategy := effectiveFieldStrategy(column.UpdateStrategy, m.dbConfig.UpdateStrategy)
+		if !fieldIncludedByStrategy(value, strategy) {
 			continue
 		}
 		quoted, err := quoteIdentifierPath(m.dialect, column.ColumnName)

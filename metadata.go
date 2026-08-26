@@ -64,22 +64,29 @@ const (
 
 // ColumnMeta 描述实体字段与数据库列的静态映射。
 type ColumnMeta struct {
-	FieldName     string
-	FieldType     string
-	ColumnName    string
-	PrimaryKey    bool
-	AutoIncrement bool
-	IDType        IDType
-	Nullable      *bool
-	Size          *int
-	DBType        string
-	DefaultValue  string
-	TypeHandler   string
-	Version       bool
-	SoftDelete    bool
-	CreatedAt     bool
-	UpdatedAt     bool
-	Fill          FieldFill
+	FieldName      string
+	FieldType      string
+	ColumnName     string
+	KeyColumn      string
+	PrimaryKey     bool
+	AutoIncrement  bool
+	IDType         IDType
+	Nullable       *bool
+	Size           *int
+	NumericScale   *int
+	DBType         string
+	DefaultValue   string
+	TypeHandler    string
+	Condition      string
+	SelectDisabled bool
+	InsertStrategy FieldStrategy
+	UpdateStrategy FieldStrategy
+	WhereStrategy  FieldStrategy
+	Version        bool
+	SoftDelete     bool
+	CreatedAt      bool
+	UpdatedAt      bool
+	Fill           FieldFill
 }
 
 // EntityMeta 描述一个实体类型的 ORM 映射。
@@ -231,24 +238,25 @@ type SelectKeyMeta struct {
 
 // StatementMeta 描述已经编译好的 Mapper 语句元数据。
 type StatementMeta struct {
-	ID               string
-	Namespace        string
-	FullName         string
-	Command          StatementCommand
-	Source           StatementSource
-	SQL              string
-	Provider         string
-	ResultMap        string
-	ResultType       string
-	ParameterType    string
-	DatabaseID       string
-	UseGeneratedKeys bool
-	KeyProperty      string
-	SelectKey        SelectKeyMeta
-	UseCache         StatementCachePolicy
-	FlushCache       StatementCachePolicy
-	Parameters       []string
-	DynamicSQL       []DynamicSQLNode
+	ID                 string
+	Namespace          string
+	FullName           string
+	Command            StatementCommand
+	Source             StatementSource
+	SQL                string
+	Provider           string
+	ResultMap          string
+	ResultType         string
+	ParameterType      string
+	DatabaseID         string
+	UseGeneratedKeys   bool
+	KeyProperty        string
+	SelectKey          SelectKeyMeta
+	UseCache           StatementCachePolicy
+	FlushCache         StatementCachePolicy
+	Parameters         []string
+	DynamicSQL         []DynamicSQLNode
+	InterceptorIgnores []string
 }
 
 // CacheMeta 描述 Mapper namespace 级二级缓存配置。

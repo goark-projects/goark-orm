@@ -88,18 +88,19 @@ type xmlDiscriminatorCaseModel struct {
 }
 
 type xmlStatementModel struct {
-	ID               string
-	ResultMap        string
-	ResultType       string
-	ParameterType    string
-	DatabaseID       string
-	UseGeneratedKeys bool
-	KeyProperty      string
-	SelectKey        orm.SelectKeyMeta
-	UseCache         orm.StatementCachePolicy
-	FlushCache       orm.StatementCachePolicy
-	SQL              string
-	DynamicSQL       []orm.DynamicSQLNode
+	ID                 string
+	ResultMap          string
+	ResultType         string
+	ParameterType      string
+	DatabaseID         string
+	UseGeneratedKeys   bool
+	KeyProperty        string
+	SelectKey          orm.SelectKeyMeta
+	UseCache           orm.StatementCachePolicy
+	FlushCache         orm.StatementCachePolicy
+	SQL                string
+	DynamicSQL         []orm.DynamicSQLNode
+	InterceptorIgnores []string
 }
 
 func parseXMLMapper(path string) (xmlMapperModel, error) {
@@ -521,17 +522,18 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 		return xmlStatementModel{}, err
 	}
 	statement := xmlStatementModel{
-		ID:               attrValue(start, "id"),
-		ResultMap:        attrValue(start, "resultMap"),
-		ResultType:       attrValue(start, "resultType"),
-		ParameterType:    attrValue(start, "parameterType"),
-		DatabaseID:       attrValue(start, "databaseId"),
-		UseGeneratedKeys: attrValue(start, "useGeneratedKeys") == "true",
-		KeyProperty:      attrValue(start, "keyProperty"),
-		SelectKey:        selectKey,
-		UseCache:         useCache,
-		FlushCache:       flushCache,
-		DynamicSQL:       nodes,
+		ID:                 attrValue(start, "id"),
+		ResultMap:          attrValue(start, "resultMap"),
+		ResultType:         attrValue(start, "resultType"),
+		ParameterType:      attrValue(start, "parameterType"),
+		DatabaseID:         attrValue(start, "databaseId"),
+		UseGeneratedKeys:   attrValue(start, "useGeneratedKeys") == "true",
+		KeyProperty:        attrValue(start, "keyProperty"),
+		SelectKey:          selectKey,
+		UseCache:           useCache,
+		FlushCache:         flushCache,
+		DynamicSQL:         nodes,
+		InterceptorIgnores: parseInterceptorIgnores(attrValue(start, "interceptorIgnore")),
 	}
 	if isStaticDynamicSQL(nodes) {
 		statement.SQL = normalizeXMLSQL(nodes[0].Text)
@@ -1183,22 +1185,23 @@ func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) (
 				return fmt.Errorf("goark-orm: XML statement %s declares both resultMap and resultType", id)
 			}
 			statement := StatementModel{
-				ID:               id,
-				Namespace:        namespace,
-				FullName:         namespace + "." + id,
-				Command:          command,
-				Source:           orm.StatementSourceXML,
-				SQL:              normalizeXMLSQL(item.SQL),
-				DynamicSQL:       item.DynamicSQL,
-				ResultMap:        strings.TrimSpace(item.ResultMap),
-				ResultType:       strings.TrimSpace(item.ResultType),
-				ParameterType:    strings.TrimSpace(item.ParameterType),
-				DatabaseID:       strings.TrimSpace(item.DatabaseID),
-				UseGeneratedKeys: item.UseGeneratedKeys,
-				KeyProperty:      strings.TrimSpace(item.KeyProperty),
-				SelectKey:        item.SelectKey,
-				UseCache:         item.UseCache,
-				FlushCache:       item.FlushCache,
+				ID:                 id,
+				Namespace:          namespace,
+				FullName:           namespace + "." + id,
+				Command:            command,
+				Source:             orm.StatementSourceXML,
+				SQL:                normalizeXMLSQL(item.SQL),
+				DynamicSQL:         item.DynamicSQL,
+				ResultMap:          strings.TrimSpace(item.ResultMap),
+				ResultType:         strings.TrimSpace(item.ResultType),
+				ParameterType:      strings.TrimSpace(item.ParameterType),
+				DatabaseID:         strings.TrimSpace(item.DatabaseID),
+				UseGeneratedKeys:   item.UseGeneratedKeys,
+				KeyProperty:        strings.TrimSpace(item.KeyProperty),
+				SelectKey:          item.SelectKey,
+				UseCache:           item.UseCache,
+				FlushCache:         item.FlushCache,
+				InterceptorIgnores: item.InterceptorIgnores,
 			}
 			statement.SelectKey.KeyProperty = strings.TrimSpace(statement.SelectKey.KeyProperty)
 			statement.SelectKey.ResultType = strings.TrimSpace(statement.SelectKey.ResultType)

@@ -21,7 +21,8 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作。
 - MyBatis-Plus 风格 `SQLInjector`、`Db` 快捷门面和 `EnumValuer` 枚举入库值接口。
 - MyBatis-Plus 风格 `IDType` 主键策略：`AUTO`、`INPUT`、`ASSIGN_ID`、`ASSIGN_UUID`。
-- `DbConfig` 支持全局主键策略、tablePrefix、schema、logicDeleteField、logicDeleteValue 和 logicNotDeleteValue。
+- `DbConfig` 支持全局主键策略、tablePrefix、schema、logicDeleteField、logicDeleteValue、logicNotDeleteValue、insertStrategy、updateStrategy 和 whereStrategy。
+- 实体字段支持 `key-column`、`numeric-scale`、`condition`、`select=false`、`insert-strategy`、`update-strategy` 和 `where-strategy` 元数据；`BaseMapper` 会按字段/全局 insert/update 策略过滤通用 INSERT/UPDATE 列。
 - `BaseMapper` 支持 `SelectCount`、`SelectMaps`、`SelectObjs`、`DeleteBatchIDs` 和 `SaveOrUpdate`。
 - `BaseMapper` 已支持逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - MyBatis-Plus 风格 `MetaObjectHandler` 自动填充，支持 `fill='insert'`、`fill='update'`、`fill='insert_update'`，可用于 BaseMapper 和普通 Mapper 写语句。
@@ -29,6 +30,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `UpdateWrapper`、`TypedField` 和生成期 `UserTypedFields` 字段常量，支持局部更新、类型化字段引用、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - Registry / Session 级 `TypeHandler` SPI，内建 `json`、`time`、`decimal` 处理器。
 - `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
+- Mapper 注解和 XML 语句支持 `interceptorIgnore`，可按语句跳过 `block-attack`、`tenant`、`data-permission`、`dynamic-table`、`pagination`、`entity-semantic` 或 `all`。
 - 独立 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。
 - Go 原生错误层级：`ErrConfiguration`、`ErrRegistry`、`ErrStatementNotFound`、`ErrBinding`、`ErrMapping`、`ErrExecutor`、`ErrTooManyResults` 均可通过 `errors.Is` 归类，通过 `errors.As` 读取结构化上下文。
 - `BatchSession` 批处理执行器、`Flush` / `Clear`、事务内批处理和查询前自动 flush。
@@ -212,6 +214,8 @@ config.GlobalConfig.DbConfig.TablePrefix = "sys_"
 config.GlobalConfig.DbConfig.Schema = "tenant_01"
 config.GlobalConfig.DbConfig.LogicDeleteValue = int64(1)
 config.GlobalConfig.DbConfig.LogicNotDeleteValue = int64(0)
+config.GlobalConfig.DbConfig.InsertStrategy = orm.FieldStrategyNotEmpty
+config.GlobalConfig.DbConfig.UpdateStrategy = orm.FieldStrategyNotEmpty
 config.GlobalConfig.MetaObjectHandler = auditFillHandler{}
 
 session, err := orm.NewSQLSession(registry, db, nil, orm.WithConfiguration(config))
@@ -425,7 +429,10 @@ Version   int64     `goark-orm:"column='version';version=true"`
 Deleted   bool      `goark-orm:"column='deleted';soft-delete=true"`
 CreatedAt time.Time `goark-orm:"column='created_at';created-at=true"`
 UpdatedAt time.Time `goark-orm:"column='updated_at';updated-at=true"`
+Remark    string    `goark-orm:"column='remark';select=false;insert-strategy='not-empty';update-strategy='not-empty'"`
 ```
+
+字段策略取值支持 `always`、`not-null`、`not-empty` 和 `never`。字段级策略优先于 `DbConfig` 全局策略；未声明时保持 V1 旧行为，通用 INSERT/UPDATE 默认包含零值字段。
 
 Goark 主 CLI 不包含 ORM 子命令，也不依赖 `goark.dev/orm`。ORM 代码生成统一使用本仓库自带的独立 `goark-orm` 命令。
 

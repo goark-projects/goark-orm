@@ -27,23 +27,30 @@ type EntityModel struct {
 
 // ColumnModel 描述实体字段映射。
 type ColumnModel struct {
-	FieldName     string
-	FieldType     string
-	ColumnName    string
-	PrimaryKey    bool
-	AutoIncrement bool
-	IDType        orm.IDType
-	Nullable      *bool
-	Size          *int
-	DBType        string
-	DefaultValue  string
-	TypeHandler   string
-	Version       bool
-	SoftDelete    bool
-	CreatedAt     bool
-	UpdatedAt     bool
-	Fill          orm.FieldFill
-	Transient     bool
+	FieldName      string
+	FieldType      string
+	ColumnName     string
+	KeyColumn      string
+	PrimaryKey     bool
+	AutoIncrement  bool
+	IDType         orm.IDType
+	Nullable       *bool
+	Size           *int
+	NumericScale   *int
+	DBType         string
+	DefaultValue   string
+	TypeHandler    string
+	Condition      string
+	SelectDisabled bool
+	InsertStrategy orm.FieldStrategy
+	UpdateStrategy orm.FieldStrategy
+	WhereStrategy  orm.FieldStrategy
+	Version        bool
+	SoftDelete     bool
+	CreatedAt      bool
+	UpdatedAt      bool
+	Fill           orm.FieldFill
+	Transient      bool
 }
 
 // MapperModel 描述 Mapper 接口和语句。
@@ -75,24 +82,25 @@ type ParamModel struct {
 
 // StatementModel 描述生成器阶段的语句元数据。
 type StatementModel struct {
-	ID               string
-	Namespace        string
-	FullName         string
-	Command          orm.StatementCommand
-	Source           orm.StatementSource
-	SQL              string
-	Provider         string
-	ResultMap        string
-	ResultType       string
-	ParameterType    string
-	DatabaseID       string
-	UseGeneratedKeys bool
-	KeyProperty      string
-	SelectKey        orm.SelectKeyMeta
-	UseCache         orm.StatementCachePolicy
-	FlushCache       orm.StatementCachePolicy
-	Parameters       []string
-	DynamicSQL       []orm.DynamicSQLNode
+	ID                 string
+	Namespace          string
+	FullName           string
+	Command            orm.StatementCommand
+	Source             orm.StatementSource
+	SQL                string
+	Provider           string
+	ResultMap          string
+	ResultType         string
+	ParameterType      string
+	DatabaseID         string
+	UseGeneratedKeys   bool
+	KeyProperty        string
+	SelectKey          orm.SelectKeyMeta
+	UseCache           orm.StatementCachePolicy
+	FlushCache         orm.StatementCachePolicy
+	Parameters         []string
+	DynamicSQL         []orm.DynamicSQLNode
+	InterceptorIgnores []string
 }
 
 // GeneratedPackage 表示一个已生成源码的包。

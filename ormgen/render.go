@@ -234,6 +234,7 @@ func writeColumnMeta(builder *bytes.Buffer, column ColumnModel) {
 	writeStringField(builder, "FieldName", column.FieldName)
 	writeStringField(builder, "FieldType", column.FieldType)
 	writeStringField(builder, "ColumnName", column.ColumnName)
+	writeStringField(builder, "KeyColumn", column.KeyColumn)
 	writeBoolField(builder, "PrimaryKey", column.PrimaryKey)
 	writeBoolField(builder, "AutoIncrement", column.AutoIncrement)
 	writeIDTypeField(builder, column.IDType)
@@ -247,9 +248,19 @@ func writeColumnMeta(builder *bytes.Buffer, column ColumnModel) {
 		builder.WriteString(strconv.Itoa(*column.Size))
 		builder.WriteString("),")
 	}
+	if column.NumericScale != nil {
+		builder.WriteString("NumericScale: goarkORMIntPtr(")
+		builder.WriteString(strconv.Itoa(*column.NumericScale))
+		builder.WriteString("),")
+	}
 	writeStringField(builder, "DBType", column.DBType)
 	writeStringField(builder, "DefaultValue", column.DefaultValue)
 	writeStringField(builder, "TypeHandler", column.TypeHandler)
+	writeStringField(builder, "Condition", column.Condition)
+	writeBoolField(builder, "SelectDisabled", column.SelectDisabled)
+	writeFieldStrategyField(builder, "InsertStrategy", column.InsertStrategy)
+	writeFieldStrategyField(builder, "UpdateStrategy", column.UpdateStrategy)
+	writeFieldStrategyField(builder, "WhereStrategy", column.WhereStrategy)
 	writeBoolField(builder, "Version", column.Version)
 	writeBoolField(builder, "SoftDelete", column.SoftDelete)
 	writeBoolField(builder, "CreatedAt", column.CreatedAt)
@@ -461,6 +472,7 @@ func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
 		writeDynamicSQLNodes(builder, statement.DynamicSQL)
 		builder.WriteByte(',')
 	}
+	writeStringSliceField(builder, "InterceptorIgnores", statement.InterceptorIgnores)
 	builder.WriteString("}")
 }
 
@@ -654,6 +666,31 @@ func writeFieldFillField(builder *bytes.Buffer, value orm.FieldFill) {
 	builder.WriteString("Fill:")
 	builder.WriteString(fieldFillExpression(value))
 	builder.WriteByte(',')
+}
+
+func writeFieldStrategyField(builder *bytes.Buffer, name string, value orm.FieldStrategy) {
+	if value == orm.FieldStrategyDefault {
+		return
+	}
+	builder.WriteString(name)
+	builder.WriteByte(':')
+	builder.WriteString(fieldStrategyExpression(value))
+	builder.WriteByte(',')
+}
+
+func fieldStrategyExpression(value orm.FieldStrategy) string {
+	switch value {
+	case orm.FieldStrategyAlways:
+		return "orm.FieldStrategyAlways"
+	case orm.FieldStrategyNotNull:
+		return "orm.FieldStrategyNotNull"
+	case orm.FieldStrategyNotEmpty:
+		return "orm.FieldStrategyNotEmpty"
+	case orm.FieldStrategyNever:
+		return "orm.FieldStrategyNever"
+	default:
+		return "orm.FieldStrategy(" + strconv.Quote(string(value)) + ")"
+	}
 }
 
 func fieldFillExpression(value orm.FieldFill) string {
@@ -900,7 +937,7 @@ func writeHelperFunctions(builder *bytes.Buffer, model *PackageModel) {
 func modelNeedsPointerHelpers(model *PackageModel) bool {
 	for _, entity := range model.Entities {
 		for _, column := range entity.Columns {
-			if column.Nullable != nil || column.Size != nil {
+			if column.Nullable != nil || column.Size != nil || column.NumericScale != nil {
 				return true
 			}
 		}

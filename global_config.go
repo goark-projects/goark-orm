@@ -19,6 +19,9 @@ type DbConfig struct {
 	LogicDeleteField    string
 	LogicDeleteValue    any
 	LogicNotDeleteValue any
+	InsertStrategy      FieldStrategy
+	UpdateStrategy      FieldStrategy
+	WhereStrategy       FieldStrategy
 }
 
 // DefaultGlobalConfig 返回独立 ORM 的全局默认配置。
@@ -50,6 +53,9 @@ func normalizeDbConfig(config DbConfig) (DbConfig, error) {
 	if err := validateDbConfigIDType(config.IDType); err != nil {
 		return DbConfig{}, err
 	}
+	if err := validateDbConfigFieldStrategies(config); err != nil {
+		return DbConfig{}, err
+	}
 	if config.Schema != "" && !validIdentifierPart(config.Schema) {
 		return DbConfig{}, configurationErrorf("dbConfig schema %q is invalid", config.Schema)
 	}
@@ -67,6 +73,19 @@ func normalizeDbConfig(config DbConfig) (DbConfig, error) {
 		config.LogicNotDeleteValue = defaults.LogicNotDeleteValue
 	}
 	return config, nil
+}
+
+func validateDbConfigFieldStrategies(config DbConfig) error {
+	for name, strategy := range map[string]FieldStrategy{
+		"insertStrategy": config.InsertStrategy,
+		"updateStrategy": config.UpdateStrategy,
+		"whereStrategy":  config.WhereStrategy,
+	} {
+		if _, err := ParseFieldStrategy(string(strategy)); err != nil {
+			return configurationErrorf("dbConfig %s %q is invalid", name, strategy)
+		}
+	}
+	return nil
 }
 
 func validateDbConfigIDType(value IDType) error {

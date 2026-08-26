@@ -246,20 +246,47 @@ func buildColumn(entityName string, fieldName string, fieldType string, tag fiel
 		}
 		column.Fill = fill
 	}
+	for key, target := range map[string]*orm.FieldStrategy{
+		"insert-strategy": &column.InsertStrategy,
+		"update-strategy": &column.UpdateStrategy,
+		"where-strategy":  &column.WhereStrategy,
+	} {
+		if value, ok, err := tagString(tag, key); err != nil {
+			return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+		} else if ok {
+			strategy, err := orm.ParseFieldStrategy(value)
+			if err != nil {
+				return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+			}
+			*target = strategy
+		}
+	}
 	if value, ok, err := tagBool(tag, "nullable"); err != nil {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
 	} else if ok {
 		column.Nullable = &value
+	}
+	if value, ok, err := tagBool(tag, "select"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else if ok {
+		column.SelectDisabled = !value
 	}
 	if value, ok, err := tagInt(tag, "size"); err != nil {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
 	} else if ok {
 		column.Size = &value
 	}
+	if value, ok, err := tagInt(tag, "numeric-scale"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else if ok {
+		column.NumericScale = &value
+	}
 	stringAttrs := map[string]*string{
 		"type":         &column.DBType,
 		"default":      &column.DefaultValue,
 		"type-handler": &column.TypeHandler,
+		"key-column":   &column.KeyColumn,
+		"condition":    &column.Condition,
 	}
 	for key, target := range stringAttrs {
 		if value, ok, err := tagString(tag, key); err != nil {
@@ -632,17 +659,18 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 		}
 	}
 	statement := StatementModel{
-		ID:               methodName,
-		Namespace:        namespace,
-		FullName:         namespace + "." + methodName,
-		Command:          command,
-		Source:           orm.StatementSourceAnnotation,
-		SQL:              sql,
-		Provider:         provider,
-		UseGeneratedKeys: useGeneratedKeys,
-		KeyProperty:      strings.TrimSpace(selected.Args["keyProperty"]),
-		Parameters:       statementParameters(sql),
-		DynamicSQL:       dynamicSQL,
+		ID:                 methodName,
+		Namespace:          namespace,
+		FullName:           namespace + "." + methodName,
+		Command:            command,
+		Source:             orm.StatementSourceAnnotation,
+		SQL:                sql,
+		Provider:           provider,
+		UseGeneratedKeys:   useGeneratedKeys,
+		KeyProperty:        strings.TrimSpace(selected.Args["keyProperty"]),
+		Parameters:         statementParameters(sql),
+		DynamicSQL:         dynamicSQL,
+		InterceptorIgnores: parseInterceptorIgnores(selected.Args["interceptorIgnore"]),
 	}
 	statement.Parameters = append(statement.Parameters, dynamicStatementParameters(statement.DynamicSQL)...)
 	statement.Parameters = uniqueSorted(statement.Parameters)
@@ -1049,6 +1077,17 @@ func statementParameters(sql string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func parseInterceptorIgnores(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' '
+	})
+	return uniqueSorted(parts)
 }
 
 func parameterRootName(raw string) (string, bool) {

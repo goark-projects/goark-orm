@@ -299,6 +299,7 @@ func copyMapperMeta(meta MapperMeta) MapperMeta {
 		meta.Statements[index].Parameters = append([]string(nil), meta.Statements[index].Parameters...)
 		meta.Statements[index].DynamicSQL = copyDynamicSQLNodes(meta.Statements[index].DynamicSQL)
 		meta.Statements[index].SelectKey.DynamicSQL = copyDynamicSQLNodes(meta.Statements[index].SelectKey.DynamicSQL)
+		meta.Statements[index].InterceptorIgnores = append([]string(nil), meta.Statements[index].InterceptorIgnores...)
 	}
 	return meta
 }

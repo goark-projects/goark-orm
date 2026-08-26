@@ -109,6 +109,9 @@ func (i *sqlObserverInterceptor) Intercept(ctx context.Context, invocation *Stat
 	if statement == nil {
 		return fmt.Errorf("goark-orm: statement runtime is nil")
 	}
+	if StatementInterceptorIgnored(statement.Meta, InterceptorNameSQLObserver) {
+		return nil
+	}
 	return i.observe(ctx, SQLObservation{
 		Statement: statement.Meta,
 		SQL:       statement.SQL,
@@ -131,6 +134,9 @@ func (blockAttackInterceptor) Intercept(ctx context.Context, invocation *Stateme
 	statement := invocation.Statement()
 	if statement == nil {
 		return fmt.Errorf("goark-orm: statement runtime is nil")
+	}
+	if StatementInterceptorIgnored(statement.Meta, InterceptorNameBlockAttack) {
+		return nil
 	}
 	switch statement.Meta.Command {
 	case StatementCommandUpdate:
@@ -168,7 +174,7 @@ func (i *dataPermissionInterceptor) Intercept(ctx context.Context, invocation *S
 	if statement == nil {
 		return fmt.Errorf("goark-orm: statement runtime is nil")
 	}
-	if i != nil && i.provider != nil && statementSupportsCondition(statement.Meta.Command) {
+	if i != nil && i.provider != nil && !StatementInterceptorIgnored(statement.Meta, InterceptorNameDataPermission) && statementSupportsCondition(statement.Meta.Command) {
 		condition, err := i.provider(ctx, statement.Meta)
 		if err != nil {
 			return err
@@ -199,7 +205,7 @@ func (i *tenantInterceptor) Intercept(ctx context.Context, invocation *Statement
 	if statement == nil {
 		return fmt.Errorf("goark-orm: statement runtime is nil")
 	}
-	if i != nil {
+	if i != nil && !StatementInterceptorIgnored(statement.Meta, InterceptorNameTenant) {
 		switch {
 		case statement.Meta.Command == StatementCommandInsert:
 			if err := i.interceptInsert(statement); err != nil {
@@ -267,7 +273,7 @@ func (i *dynamicTableInterceptor) Intercept(ctx context.Context, invocation *Sta
 	if statement == nil {
 		return fmt.Errorf("goark-orm: statement runtime is nil")
 	}
-	if i != nil && len(i.tables) > 0 {
+	if i != nil && len(i.tables) > 0 && !StatementInterceptorIgnored(statement.Meta, InterceptorNameDynamicTable) {
 		rewritten, err := rewriteDynamicTables(statement.SQL, statement.Dialect, i.tables)
 		if err != nil {
 			return err
@@ -324,7 +330,7 @@ func (paginationInterceptor) Intercept(ctx context.Context, invocation *Statemen
 	if statement == nil {
 		return fmt.Errorf("goark-orm: statement runtime is nil")
 	}
-	if paginationDisabled(ctx) {
+	if paginationDisabled(ctx) || StatementInterceptorIgnored(statement.Meta, InterceptorNamePagination) {
 		return invocation.Proceed(ctx)
 	}
 	page, ok := PageRequestFromContext(ctx)

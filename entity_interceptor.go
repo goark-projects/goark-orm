@@ -48,6 +48,9 @@ func (i *entitySemanticInterceptor) Intercept(ctx context.Context, invocation *S
 	if i == nil || i.registry == nil || statement.Meta.Source == StatementSourceBase {
 		return invocation.Proceed(ctx)
 	}
+	if StatementInterceptorIgnored(statement.Meta, InterceptorNameEntitySemantic) {
+		return invocation.Proceed(ctx)
+	}
 	entity, ok := i.statementEntity(statement.Meta)
 	if !ok {
 		return invocation.Proceed(ctx)

@@ -132,6 +132,8 @@ type User struct {
 8. soft-delete=true 在同一个实体内最多只能出现一次。
 9. created-at=true 和 updated-at=true 允许各出现一次。
 10. fill 支持 insert、update、insert_update，运行期由 MetaObjectHandler 执行严格填充。
+11. insert-strategy、update-strategy 和 where-strategy 支持 always、not-null、not-empty、never，字段级策略优先于 DbConfig 全局策略。
+12. select=false 表示该字段不进入 BaseMapper 默认查询投影，显式 QueryWrapper.Select 仍以调用方声明为准。
 ```
 
 常用字段属性：
@@ -142,11 +144,18 @@ type User struct {
 | `primary-key` | bool | 主键字段 |
 | `auto-increment` | bool | 数据库自增主键 |
 | `id-type` | string | 主键策略：AUTO、INPUT、ASSIGN_ID、ASSIGN_UUID |
+| `key-column` | string | 生成键或数据库返回键列名元数据 |
 | `type` | string | 数据库列类型描述 |
 | `size` | int | 字符串长度或精度辅助信息 |
+| `numeric-scale` | int | 小数位辅助信息 |
 | `nullable` | bool | 是否允许空值 |
 | `default` | string | 默认值描述 |
 | `type-handler` | string | 类型处理器名称 |
+| `condition` | string | 字段参与条件构造时的格式元数据 |
+| `select` | bool | 是否进入默认查询投影，false 表示默认不查询 |
+| `insert-strategy` | string | 通用 INSERT 字段策略 |
+| `update-strategy` | string | 通用 UPDATE 字段策略 |
+| `where-strategy` | string | 条件构造字段策略元数据 |
 | `version` | bool | 乐观锁版本字段 |
 | `soft-delete` | bool | 逻辑删除字段 |
 | `created-at` | bool | 创建时间字段 |
@@ -223,8 +232,9 @@ V1 只保留四个 SQL 注解：
 4. sql 可以使用 `<script>` 包裹 MyBatis 风格动态 SQL 节点。
 5. provider 是运行期 SQL Provider 名称，必须由业务显式注册到 `orm.Registry`。
 6. insert 可以声明 useGeneratedKeys 和 keyProperty。
-7. select 返回实体、实体指针、实体切片、分页结果或标量。
-8. insert、update、delete 返回受影响行数或生成主键时必须符合生成器支持的签名。
+7. statement 可声明 interceptorIgnore，多个拦截器名称使用逗号、分号或空格分隔。
+8. select 返回实体、实体指针、实体切片、分页结果或标量。
+9. insert、update、delete 返回受影响行数或生成主键时必须符合生成器支持的签名。
 ```
 
 示例：
@@ -287,6 +297,7 @@ XML 规则：
 8. `<cache>` 和 `<cache-ref>` 只允许二选一，缓存配置进入生成后的静态 MapperMeta。
 9. statement 可声明 `useCache` 和 `flushCache`，未声明时使用 MyBatis 默认策略。
 10. statement 可声明 `databaseId`，生成期优先选择匹配 `GenerateSpec.DatabaseID` 的同名语句。
+11. statement 可声明 `interceptorIgnore`，规则与方法级注解一致。
 ```
 
 V1 支持节点：
@@ -553,7 +564,7 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `GlobalConfig`。
 
-`GlobalConfig` 对齐 MyBatis-Plus 的全局扩展点，当前承载 `DbConfig`、`IdentifierGenerator` 和 `MetaObjectHandler`。`DbConfig` 已支持全局 `IDType`、`TablePrefix`、`Schema`、`LogicDeleteField`、`LogicDeleteValue` 和 `LogicNotDeleteValue`。BaseMapper 会读取这些配置：主键字段未显式声明 `id-type` 且不是自增时，使用全局 `IDType`；渲染物理表名时应用 tablePrefix/schema；逻辑删除默认值从 DbConfig 读取。显式实体 tag 优先于全局兜底配置。
+`GlobalConfig` 对齐 MyBatis-Plus 的全局扩展点，当前承载 `DbConfig`、`IdentifierGenerator` 和 `MetaObjectHandler`。`DbConfig` 已支持全局 `IDType`、`TablePrefix`、`Schema`、`LogicDeleteField`、`LogicDeleteValue`、`LogicNotDeleteValue`、`InsertStrategy`、`UpdateStrategy` 和 `WhereStrategy`。BaseMapper 会读取这些配置：主键字段未显式声明 `id-type` 且不是自增时，使用全局 `IDType`；渲染物理表名时应用 tablePrefix/schema；逻辑删除默认值从 DbConfig 读取；通用 INSERT/UPDATE 按字段级或全局字段策略过滤列。显式实体 tag 优先于全局兜底配置。
 
 `MetaObjectHandler` 对齐 MyBatis-Plus 字段填充模型，但采用 Go 显式接口。BaseMapper 会在构造写入参数前填充实体；普通 Mapper 写语句会在拦截器改写后、方言占位符编译前填充运行时命名参数。`StrictInsertFill` 和 `StrictUpdateFill` 会读取 `ColumnMeta.Fill`，并兼容旧的 `created-at` / `updated-at` 语义。
 
@@ -590,6 +601,8 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 ```
 
 分页拦截器使用 `WithPageRequest(ctx, page)` 传递分页请求。租户拦截器覆盖 select/update/delete 的条件注入和 insert 的租户字段注入；无显式列清单或非 VALUES 形态的 insert 会 fail-fast，避免租户字段静默漏写。
+
+`StatementMeta.InterceptorIgnores` 承载语句级拦截器忽略列表。注解和 XML 均使用 `interceptorIgnore` 声明，名称支持 `block-attack`、`data-permission`、`tenant`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-observer` 和 `all`，并兼容 camelCase 与下划线别名。该能力用于少量明确受控语句，不替代全局安全默认值。
 
 ## 分期计划
 
@@ -634,6 +647,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 `ResultHandler`、`QueryCursor`、`QueryEach` 和 `RowCursor` 逐行流式查询；游标查询绕过缓存写入，并拒绝 collection resultMap 多行聚合场景。
 - 已支持独立 `Configuration` API，用于统一配置方言、缓存策略、下划线转驼峰和默认执行器类型。
 - 已支持 MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`。
+- 已支持 MyBatis-Plus 风格字段策略、默认查询投影开关和语句级 `interceptorIgnore`。
 - 已支持 `ExecutorType.REUSE` 预编译语句复用，按最终 SQL 在 Session 内缓存 prepared statement，并在 Session/事务生命周期结束时关闭。
 - 已支持 BaseMapper 逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - 已支持 `MetaObjectHandler` 自动填充及 `fill` 字段策略。

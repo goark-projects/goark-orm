@@ -829,6 +829,108 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenEntityDeclaresAdvancedFieldMetadata_shouldRenderColumnMetadata(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true;key-column='user_id_key'"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name';select=false;insert-strategy='not-empty';update-strategy='never';where-strategy='not-null';condition='%s like #{%s}'"`+"`"+`
+	Amount string `+"`"+`goark-orm:"column='amount';type='decimal';size=18;numeric-scale=2"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper")
+type UserMapper interface {
+	//goark-orm:select(sql="select id, name, amount from sys_user where id = #{id}")
+	FindByID(ctx context.Context, id int64) (*User, error)
+}
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := strings.Join(strings.Fields(string(source)), " ")
+	expected := []string{
+		`KeyColumn: "user_id_key"`,
+		`SelectDisabled: true`,
+		`InsertStrategy: orm.FieldStrategyNotEmpty`,
+		`UpdateStrategy: orm.FieldStrategyNever`,
+		`WhereStrategy: orm.FieldStrategyNotNull`,
+		`Condition: "%s like #{%s}"`,
+		`NumericScale: goarkORMIntPtr(2)`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, source)
+		}
+	}
+}
+
+func TestGenerate_whenAnnotationDeclaresInterceptorIgnore_shouldRenderStatementMetadata(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper")
+type UserMapper interface {
+	//goark-orm:select(sql="select id from sys_user", interceptorIgnore="tenant,blockAttack")
+	List(ctx context.Context) ([]User, error)
+}
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := strings.Join(strings.Fields(string(source)), " ")
+	if !strings.Contains(output, `InterceptorIgnores: []string{"blockAttack", "tenant"}`) {
+		t.Fatalf("generated source missing interceptor ignores:\n%s", source)
+	}
+}
+
+func TestGenerate_whenXMLDeclaresInterceptorIgnore_shouldRenderStatementMetadata(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper", xml="mapper/user_mapper.xml")
+type UserMapper interface {
+	List(ctx context.Context) ([]User, error)
+}
+`)
+	mustWriteFile(t, filepath.Join(dir, "mapper", "user_mapper.xml"), `<mapper namespace="system.user.UserMapper">
+  <select id="List" interceptorIgnore="pagination tenant">
+    select id from sys_user
+  </select>
+</mapper>
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := strings.Join(strings.Fields(string(source)), " ")
+	if !strings.Contains(output, `InterceptorIgnores: []string{"pagination", "tenant"}`) {
+		t.Fatalf("generated source missing XML interceptor ignores:\n%s", source)
+	}
+}
+
 func TestGenerate_whenXMLResultMapUsesAssociationAndCollection_shouldRenderNestedMetadata(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
