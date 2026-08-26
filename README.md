@@ -34,7 +34,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - MyBatis-Plus 风格 `MetaObjectHandler` 自动填充，支持 `fill='insert'`、`fill='update'`、`fill='insert_update'`，可用于 BaseMapper 和普通 Mapper 写语句。
 - `QueryWrapper` / `UpdateWrapper` 支持嵌套条件、`EXISTS` / `NOT EXISTS`、`Apply`、`Last`、`Between`、`NotBetween`、`NotLike`、`LikeLeft`、`LikeRight`、`NotIn`，查询 Wrapper 额外支持 `GroupBy` / `Having` / `Select` / `AllEq` / 条件化 `OrderBy`。
 - `UpdateWrapper`、`TypedField` 和生成期 `UserTypedFields` 字段常量，支持局部更新、类型化字段引用、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
-- Registry / Session 级 `TypeHandler` SPI，内建基于 ByteDance Sonic 的 `json` 处理器，以及 `time`、`decimal` 处理器。
+- Registry / Session 级 `TypeHandler` SPI，支持 `RegisterTypeHandlers` / `WithTypeHandlers` 批量装配和 `NewTypeHandler` 函数适配器；内建基于 ByteDance Sonic 的 `json` 处理器，以及 `time`、`decimal`、`string`、`bool`、`bytes` 处理器。
 - `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
 - `SQLSession` 支持 `StatementExecutor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler` 四层 middleware，业务可用 decorator 方式扩展执行、编译、参数绑定和结果映射链路。
 - `Registry.RegisterRowScanner` 支持显式注册生成式实体行扫描器，普通实体查询、存储过程多结果集和无 TypeHandler/嵌套结构的简单 ResultMap 会先走 RowScanner，复杂 ResultMap、TypeHandler 字段和未注册实体保持反射 fallback。

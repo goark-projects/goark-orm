@@ -38,6 +38,9 @@ func defaultTypeHandlers() map[string]TypeHandler {
 		"json":    NewJSONTypeHandler(),
 		"time":    NewTimeTypeHandler(),
 		"decimal": NewDecimalTypeHandler(),
+		"string":  NewStringTypeHandler(),
+		"bool":    NewBoolTypeHandler(),
+		"bytes":   NewBytesTypeHandler(),
 	}
 }
 
