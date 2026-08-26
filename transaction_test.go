@@ -101,6 +101,50 @@ func TestTxSession_Close_whenNotCompleted_shouldRollback(t *testing.T) {
 	}
 }
 
+func TestSQLSessionFactory_OpenConfiguredSession_whenExecutorTypeBatch_shouldReturnBatchSession(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "UpdateName",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.UpdateName",
+		Command:   StatementCommandUpdate,
+		Source:    StatementSourceAnnotation,
+		SQL:       "update sys_user set name = #{name} where id = #{id}",
+	})
+	config := DefaultConfiguration()
+	config.DefaultExecutorType = ExecutorTypeBatch
+	factory, err := NewSQLSessionFactory(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session factory failed: %v", err)
+	}
+
+	session, err := factory.OpenConfiguredSession()
+	if err != nil {
+		t.Fatalf("open configured session failed: %v", err)
+	}
+	batch, ok := session.(*BatchSession)
+	if !ok {
+		t.Fatalf("expected BatchSession, got %T", session)
+	}
+	if _, err := batch.Exec(context.Background(), "system.user.UserMapper.UpdateName", NamedArgs{"id": int64(7), "name": "Alice"}); err != nil {
+		t.Fatalf("queue batch exec failed: %v", err)
+	}
+	if state.exec != "" {
+		t.Fatalf("expected batch exec to queue without immediate SQL, got %q", state.exec)
+	}
+	results, err := batch.Flush(context.Background())
+	if err != nil {
+		t.Fatalf("flush batch failed: %v", err)
+	}
+	if len(results) != 1 || results[0].Result.RowsAffected != 1 {
+		t.Fatalf("unexpected batch results %#v", results)
+	}
+	if state.exec != "update sys_user set name = $1 where id = $2" {
+		t.Fatalf("unexpected exec SQL %q", state.exec)
+	}
+}
+
 func TestTxSession_Commit_whenWriteOccurs_shouldClearSecondLevelCacheAfterCommit(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryResults = []testRowsData{

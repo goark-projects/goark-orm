@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type sqlSessionUser struct {
@@ -99,6 +100,85 @@ func TestSQLSession_QueryOne_whenStructPointerDestination_shouldScanEntityColumn
 	}
 	if !reflect.DeepEqual(state.queryArgs, []driver.NamedValue{{Ordinal: 1, Value: int64(7)}}) {
 		t.Fatalf("unexpected query args %#v", state.queryArgs)
+	}
+}
+
+func TestSQLSession_whenDefaultStatementTimeoutConfigured_shouldApplyDeadline(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id"},
+		values:  [][]driver.Value{{int64(7)}},
+	}
+	registry := newSQLSessionRegistry(t,
+		StatementMeta{
+			ID:        "FindID",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.FindID",
+			Command:   StatementCommandSelect,
+			Source:    StatementSourceAnnotation,
+			SQL:       "select id from sys_user where id = #{id}",
+		},
+		StatementMeta{
+			ID:        "UpdateName",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.UpdateName",
+			Command:   StatementCommandUpdate,
+			Source:    StatementSourceAnnotation,
+			SQL:       "update sys_user set name = #{name} where id = #{id}",
+		},
+	)
+	config := DefaultConfiguration()
+	config.DefaultStatementTimeout = time.Second
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var id int64
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindID", NamedArgs{"id": int64(7)}, &id); err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+	if _, err := session.Exec(context.Background(), "system.user.UserMapper.UpdateName", NamedArgs{"id": int64(7), "name": "Alice"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	if !state.queryHadDeadline || !state.execHadDeadline {
+		t.Fatalf("expected query and exec deadlines, query=%v exec=%v", state.queryHadDeadline, state.execHadDeadline)
+	}
+}
+
+func TestSQLSession_whenDefaultFetchSizeConfigured_shouldCallOptionalExecutorHook(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id"},
+		values:  [][]driver.Value{{int64(7)}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		SQL:       "select id from sys_user where id = #{id}",
+	})
+	executor := &recordingFetchSizeExecutor{db: state.db}
+	config := DefaultConfiguration()
+	config.DefaultFetchSize = 128
+	session, err := NewSQLSession(registry, executor, NewPostgresDialect(), WithConfiguration(config))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var id int64
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindID", NamedArgs{"id": int64(7)}, &id); err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if len(executor.fetchSizes) != 1 || executor.fetchSizes[0] != 128 {
+		t.Fatalf("unexpected fetch sizes %#v", executor.fetchSizes)
+	}
+	if len(executor.fetchQueries) != 1 || executor.fetchQueries[0] != "select id from sys_user where id = $1" {
+		t.Fatalf("unexpected fetch queries %#v", executor.fetchQueries)
 	}
 }
 
@@ -2315,30 +2395,56 @@ func (profileTypeHandler) FromDB(ctx context.Context, value any, target any) err
 	return nil
 }
 
+type recordingFetchSizeExecutor struct {
+	db           *sql.DB
+	mu           sync.Mutex
+	fetchSizes   []int
+	fetchQueries []string
+}
+
+func (e *recordingFetchSizeExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return e.db.QueryContext(ctx, query, args...)
+}
+
+func (e *recordingFetchSizeExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return e.db.ExecContext(ctx, query, args...)
+}
+
+func (e *recordingFetchSizeExecutor) ApplyFetchSize(ctx context.Context, query string, fetchSize int) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.fetchSizes = append(e.fetchSizes, fetchSize)
+	e.fetchQueries = append(e.fetchQueries, query)
+	return nil
+}
+
 type testSQLState struct {
-	db             *sql.DB
-	queryRows      testRowsData
-	queryResults   []testRowsData
-	execResult     driver.Result
-	execResults    []driver.Result
-	execErrors     []error
-	query          string
-	queries        []string
-	exec           string
-	execs          []string
-	queryArgs      []driver.NamedValue
-	queryArgsList  [][]driver.NamedValue
-	execArgs       []driver.NamedValue
-	execArgsList   [][]driver.NamedValue
-	beginCount     int
-	commitCount    int
-	rollbackCount  int
-	txOptions      []driver.TxOptions
-	rowsClosed     int
-	prepareCount   int
-	prepareQueries []string
-	stmtClosed     int
-	mu             sync.Mutex
+	db                 *sql.DB
+	queryRows          testRowsData
+	queryResults       []testRowsData
+	execResult         driver.Result
+	execResults        []driver.Result
+	execErrors         []error
+	query              string
+	queries            []string
+	exec               string
+	execs              []string
+	queryArgs          []driver.NamedValue
+	queryArgsList      [][]driver.NamedValue
+	execArgs           []driver.NamedValue
+	execArgsList       [][]driver.NamedValue
+	beginCount         int
+	commitCount        int
+	rollbackCount      int
+	txOptions          []driver.TxOptions
+	rowsClosed         int
+	prepareCount       int
+	prepareQueries     []string
+	stmtClosed         int
+	queryHadDeadline   bool
+	execHadDeadline    bool
+	prepareHadDeadline bool
+	mu                 sync.Mutex
 }
 
 type testRowsData struct {
@@ -2407,6 +2513,7 @@ func (c *testConn) PrepareContext(ctx context.Context, query string) (driver.Stm
 	defer c.state.mu.Unlock()
 	c.state.prepareCount++
 	c.state.prepareQueries = append(c.state.prepareQueries, query)
+	_, c.state.prepareHadDeadline = ctx.Deadline()
 	return &testStmt{state: c.state, query: query}, nil
 }
 
@@ -2427,20 +2534,21 @@ func (c *testConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.T
 }
 
 func (c *testConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	return c.state.queryContext(query, args)
+	return c.state.queryContext(ctx, query, args)
 }
 
 func (c *testConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	return c.state.execContext(query, args)
+	return c.state.execContext(ctx, query, args)
 }
 
-func (s *testSQLState) queryContext(query string, args []driver.NamedValue) (driver.Rows, error) {
+func (s *testSQLState) queryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.query = query
 	s.queries = append(s.queries, query)
 	s.queryArgs = append([]driver.NamedValue(nil), args...)
 	s.queryArgsList = append(s.queryArgsList, append([]driver.NamedValue(nil), args...))
+	_, s.queryHadDeadline = ctx.Deadline()
 	rows := s.queryRows
 	if len(s.queryResults) > 0 {
 		rows = s.queryResults[0]
@@ -2453,13 +2561,14 @@ func (s *testSQLState) queryContext(query string, args []driver.NamedValue) (dri
 	}, nil
 }
 
-func (s *testSQLState) execContext(query string, args []driver.NamedValue) (driver.Result, error) {
+func (s *testSQLState) execContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.exec = query
 	s.execs = append(s.execs, query)
 	s.execArgs = append([]driver.NamedValue(nil), args...)
 	s.execArgsList = append(s.execArgsList, append([]driver.NamedValue(nil), args...))
+	_, s.execHadDeadline = ctx.Deadline()
 	if len(s.execErrors) > 0 {
 		err := s.execErrors[0]
 		s.execErrors = s.execErrors[1:]
@@ -2505,11 +2614,11 @@ func (s *testStmt) Query(args []driver.Value) (driver.Rows, error) {
 }
 
 func (s *testStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	return s.state.execContext(s.query, args)
+	return s.state.execContext(ctx, s.query, args)
 }
 
 func (s *testStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	return s.state.queryContext(s.query, args)
+	return s.state.queryContext(ctx, s.query, args)
 }
 
 func driverValuesToNamedValues(values []driver.Value) []driver.NamedValue {

@@ -127,6 +127,25 @@ func (f *SQLSessionFactory) OpenSession() (*SQLSession, error) {
 	return NewSQLSession(f.registry, f.executor, f.dialect, f.sessionOptions...)
 }
 
+// OpenConfiguredSession 按运行期 Configuration 打开 Session。
+//
+// 当 DefaultExecutorType 为 BATCH 时返回 BatchSession；其他执行器类型返回普通 SQLSession。
+// 该方法保留 OpenSession 的既有返回类型，避免破坏 V1 公共契约。
+func (f *SQLSessionFactory) OpenConfiguredSession() (Session, error) {
+	session, err := f.OpenSession()
+	if err != nil {
+		return nil, err
+	}
+	if session.configuration.DefaultExecutorType != ExecutorTypeBatch {
+		return session, nil
+	}
+	batch, err := NewBatchSession(session)
+	if err != nil {
+		return nil, errors.Join(err, session.Close())
+	}
+	return batch, nil
+}
+
 // OpenBatchSession 打开自动提交批处理 Session。
 func (f *SQLSessionFactory) OpenBatchSession() (*BatchSession, error) {
 	session, err := f.OpenSession()
