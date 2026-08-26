@@ -18,6 +18,7 @@ Goark 核心框架已经明确采用编译期生成注册代码，不做 Java �
 - 统一实体元数据、Statement 元数据、参数绑定、结果映射、事务、Configuration、GlobalConfig/DbConfig、一级缓存、Mapper namespace 二级缓存和执行器内核。
 - 使用独立 `goark-orm generate orm` 生成 Mapper 实现、分页签名、流式签名和静态元数据。
 - 支持 Go Mapper 接口在本包内通过接口嵌入复用公共方法。
+- 支持独立多数据源路由 Session，把生成 Mapper 调用转发到不同逻辑数据源。
 - Goark 主 CLI 不包含 ORM 子命令，也不依赖 `goark.dev/orm`。
 - 保持运行时热路径低反射或无反射。
 
@@ -560,6 +561,8 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 `BatchSession` 对齐 MyBatis `ExecutorType.BATCH` 的核心行为：写语句先进入队列，`Flush(ctx)` 按顺序执行并返回每条语句的 `BatchResult`；查询前会自动 flush，事务批处理可通过 `factory.BeginBatchTx(ctx, opts)` 或在 `InTx` 回调中使用 `orm.NewBatchSession(session)`。
 
+`RoutingSession` 是独立多数据源适配层，生成 Mapper 仍只依赖 `Session`。路由优先读取 `WithDataSource(ctx, key)` 的显式上下文声明，其次调用 `DataSourceResolver`，最后回退到默认数据源。内置 resolver 包括固定数据源、读写分离和 Statement 全名映射；`WithRoutingRegistry` 可把 `StatementCommand` 暴露给自定义 resolver。`RoutingSessionFactory` 负责按数据源打开委托 Session，并在打开失败时关闭已经打开的委托 Session。该层不提供跨库事务语义，需要原子性时应在业务侧选择单一数据源事务或外部事务协调器。
+
 `SQLSession` 默认启用 Session 级一级缓存。缓存 key 由最终编译 SQL 和参数组成，写操作、`Commit`、`Rollback` 和 `Close` 会清空缓存。可通过 `WithLocalCache(false)` 关闭，也可以通过 `Configuration.LocalCacheScope` 设置为 `STATEMENT`，使缓存不跨语句复用。
 
 运行期配置由 `orm.Configuration` 承载，默认通过 `orm.DefaultConfiguration()` 创建，再使用 `orm.WithConfiguration(config)` 应用到 `SQLSession`。当前可配置项包括方言、databaseId、一级缓存开关、一级缓存作用域、二级缓存总开关、下划线转驼峰自动映射、默认执行器类型、默认超时、fetch size 元数据和 `GlobalConfig`。
@@ -655,6 +658,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 BaseMapper 逻辑删除、`UpdateByID` 乐观锁、`created-at` / `updated-at` 自动时间字段。
 - 已支持 `MetaObjectHandler` 自动填充及 `fill` 字段策略。
 - 已支持 SQLSession 拦截器 SPI、全表更新/删除保护、SQL 观察、租户条件、数据权限条件、动态表名、分页拦截器和非观测 SQL 治理拦截器。
+- 已支持独立多数据源路由 Session、路由工厂、context 数据源强制路由、读写分离 resolver 和 Statement 映射 resolver。
 - 已支持 `UpdateWrapper` 局部更新、常用条件操作符、`TypedField` 字段引用、生成期 `UserTypedFields`、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - 已支持 `IDType` 主键策略、默认 ASSIGN_ID/ASSIGN_UUID 生成器、XML `<bind>` 和 `databaseId` 语句选择。
 - 已支持 `QueryWrapper` / `UpdateWrapper` 嵌套条件、EXISTS/NOT EXISTS、Apply、Last、Between/NotBetween、NotLike、LikeLeft/LikeRight、NotIn，以及 QueryWrapper 的 GroupBy/Having/Select/AllEq/条件化 OrderBy。

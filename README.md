@@ -33,6 +33,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - 非观测 SQL 治理拦截器：`SQLGuardRule` / `NewSQLGuardInterceptor` 可组合业务规则，`NewIllegalSQLInterceptor` 默认拒绝多语句、顶层 `SELECT *` 和无 WHERE 写语句，`NewReadOnlyInterceptor` 可保护只读会话。
 - Mapper 注解和 XML 语句支持 `interceptorIgnore`，可按语句跳过 `block-attack`、`tenant`、`data-permission`、`dynamic-table`、`pagination`、`entity-semantic`、`sql-guard`、`illegal-sql`、`read-only` 或 `all`。
 - 独立 `SQLSessionFactory`、`Transaction`、`TransactionFactory`、`TxSession` 和 `InTx` 回调事务模型。
+- 多数据源路由层：`RoutingSession`、`RoutingSessionFactory`、`WithDataSource`、`ReadWriteDataSourceResolver` 和 `StatementDataSourceResolver` 可把生成 Mapper 调用转发到不同逻辑数据源。
 - Go 原生错误层级：`ErrConfiguration`、`ErrRegistry`、`ErrStatementNotFound`、`ErrBinding`、`ErrMapping`、`ErrExecutor`、`ErrTooManyResults` 均可通过 `errors.Is` 归类，通过 `errors.As` 读取结构化上下文。
 - `BatchSession` 批处理执行器、`Flush` / `Clear`、事务内批处理和查询前自动 flush。
 - Session/Statement 级一级缓存配置，写操作、提交、回滚和关闭时自动失效。
@@ -371,6 +372,26 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 if err != nil {
 	return err
 }
+```
+
+多数据源路由保持在独立适配层，不制造跨库事务假象。读写分离可以组合已有 Session：
+
+```go
+routing, err := orm.NewRoutingSession(
+	map[orm.DataSourceKey]orm.Session{
+		"primary": primarySession,
+		"replica": replicaSession,
+	},
+	orm.ReadWriteDataSourceResolver("replica", "primary"),
+	orm.WithRoutingDefaultDataSource("primary"),
+)
+if err != nil {
+	return err
+}
+
+ctx = orm.WithDataSource(ctx, "primary")
+userMapper := NewUserMapper(routing)
+_ = userMapper
 ```
 
 批处理可以独立使用，也可以放入事务回调：
