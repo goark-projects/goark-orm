@@ -35,6 +35,8 @@ type SQLSession struct {
 	mapUnderscoreToCamelCase bool
 	preparedMu               sync.Mutex
 	preparedStatements       map[string]*sql.Stmt
+	columnBindingPlans       sync.Map
+	statementParameterPlans  sync.Map
 
 	transactionalCache           bool
 	secondLevelCacheMu           sync.Mutex
@@ -375,7 +377,7 @@ func (s *SQLSession) bindArgs(ctx context.Context, statement StatementMeta, args
 	for key, value := range args {
 		bound[key] = value
 	}
-	usedParameters := statementParameterSet(statement)
+	usedParameters := s.statementParameterSet(statement)
 	for _, column := range entity.Columns {
 		for _, name := range columnParameterNames(column) {
 			if !statementUsesParameter(usedParameters, name) {
@@ -437,7 +439,7 @@ func (s *SQLSession) bindArgs(ctx context.Context, statement StatementMeta, args
 	return bound, nil
 }
 
-func statementParameterSet(statement StatementMeta) map[string]struct{} {
+func buildStatementParameterSet(statement StatementMeta) map[string]struct{} {
 	parameters := make(map[string]struct{})
 	for _, name := range statement.Parameters {
 		name = strings.TrimSpace(name)
@@ -868,6 +870,13 @@ func (s *SQLSession) columnBindingsForResultMap(statement StatementMeta, typ ref
 }
 
 func (s *SQLSession) columnBindingsWithResultMap(statement StatementMeta, typ reflect.Type, resultMap ResultMapMeta, hasResultMap bool) map[string]columnBinding {
+	if s != nil {
+		return s.cachedColumnBindingsWithResultMap(statement, typ, resultMap, hasResultMap)
+	}
+	return buildColumnBindingsWithResultMap(nil, statement, typ, resultMap, hasResultMap)
+}
+
+func buildColumnBindingsWithResultMap(s *SQLSession, statement StatementMeta, typ reflect.Type, resultMap ResultMapMeta, hasResultMap bool) map[string]columnBinding {
 	autoMapping := true
 	if hasResultMap && resultMap.AutoMapping != nil {
 		autoMapping = *resultMap.AutoMapping
