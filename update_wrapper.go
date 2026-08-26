@@ -102,6 +102,14 @@ func SetTypedValue[T any, V any](w *UpdateWrapper[T], field TypedField[T, V], va
 	return w.Set(field.Field(), value)
 }
 
+// SetTypedValueIf 在 condition 为 true 时添加类型安全的字段赋值。
+func SetTypedValueIf[T any, V any](condition bool, w *UpdateWrapper[T], field TypedField[T, V], value V) *UpdateWrapper[T] {
+	if !condition {
+		return w
+	}
+	return SetTypedValue(w, field, value)
+}
+
 // SetSQL 添加安全的原生 SET 片段，SQL 仅允许 #{name} 参数占位符。
 func (w *UpdateWrapper[T]) SetSQL(sqlText string, args NamedArgs) *UpdateWrapper[T] {
 	if w == nil {
@@ -139,6 +147,38 @@ func (w *UpdateWrapper[T]) SetDecrByTyped(field TypedFieldRef[T], value any) *Up
 	return w.SetDecrBy(field.Field(), value)
 }
 
+// SetIncrByTypedValue 用泛型函数保留字段值类型约束并添加字段自增 SET 片段。
+func SetIncrByTypedValue[T any, V any](w *UpdateWrapper[T], field TypedField[T, V], value V) *UpdateWrapper[T] {
+	if w == nil {
+		w = NewUpdateWrapper[T]()
+	}
+	return w.SetIncrBy(field.Field(), value)
+}
+
+// SetIncrByTypedValueIf 在 condition 为 true 时添加类型安全的字段自增 SET 片段。
+func SetIncrByTypedValueIf[T any, V any](condition bool, w *UpdateWrapper[T], field TypedField[T, V], value V) *UpdateWrapper[T] {
+	if !condition {
+		return w
+	}
+	return SetIncrByTypedValue(w, field, value)
+}
+
+// SetDecrByTypedValue 用泛型函数保留字段值类型约束并添加字段自减 SET 片段。
+func SetDecrByTypedValue[T any, V any](w *UpdateWrapper[T], field TypedField[T, V], value V) *UpdateWrapper[T] {
+	if w == nil {
+		w = NewUpdateWrapper[T]()
+	}
+	return w.SetDecrBy(field.Field(), value)
+}
+
+// SetDecrByTypedValueIf 在 condition 为 true 时添加类型安全的字段自减 SET 片段。
+func SetDecrByTypedValueIf[T any, V any](condition bool, w *UpdateWrapper[T], field TypedField[T, V], value V) *UpdateWrapper[T] {
+	if !condition {
+		return w
+	}
+	return SetDecrByTypedValue(w, field, value)
+}
+
 // Eq 添加等值条件。
 func (w *UpdateWrapper[T]) Eq(field Field[T], value any) *UpdateWrapper[T] {
 	return w.add(field, conditionEq, value)
@@ -154,14 +194,6 @@ func (w *UpdateWrapper[T]) EqIf(condition bool, field Field[T], value any) *Upda
 
 // EqTyped 添加类型化字段引用的等值条件。
 func (w *UpdateWrapper[T]) EqTyped(field TypedFieldRef[T], value any) *UpdateWrapper[T] {
-	return w.Eq(field.Field(), value)
-}
-
-// EqTypedValue 用泛型函数保留字段值类型约束。
-func EqTypedValue[T any, V any](w *UpdateWrapper[T], field TypedField[T, V], value V) *UpdateWrapper[T] {
-	if w == nil {
-		w = NewUpdateWrapper[T]()
-	}
 	return w.Eq(field.Field(), value)
 }
 

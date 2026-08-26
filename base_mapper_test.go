@@ -153,6 +153,41 @@ func TestQueryWrapper_whenPlusOperatorsProvided_shouldRenderSQL(t *testing.T) {
 	}
 }
 
+func TestQueryWrapper_whenTypedValueHelpersUsed_shouldRenderSQL(t *testing.T) {
+	id := NewTypedField[baseMapperUser, int64]("id")
+	name := NewTypedField[baseMapperUser, string]("name")
+	status := NewTypedField[baseMapperUser, string]("status")
+
+	wrapper := NewQueryWrapper[baseMapperUser]()
+	wrapper = EqTypedValue(wrapper, status, "ACTIVE")
+	wrapper = EqTypedValueIf(false, wrapper, status, "IGNORED")
+	wrapper = LikeRightTypedValue(wrapper, name, "Ali")
+	wrapper = InTypedValues(wrapper, id, int64(7), int64(8))
+	wrapper = BetweenTypedValues(wrapper, id, int64(1), int64(9))
+	wrapper = NotBetweenTypedValuesIf(false, wrapper, id, int64(100), int64(200))
+
+	rendered, err := wrapper.build(NewPostgresDialect(), 0)
+	if err != nil {
+		t.Fatalf("build wrapper failed: %v", err)
+	}
+
+	expectedWhere := `"status" = #{__goark_orm_w_0} AND "name" LIKE #{__goark_orm_w_1} AND "id" IN (#{__goark_orm_w_2}, #{__goark_orm_w_3}) AND "id" BETWEEN #{__goark_orm_w_4} AND #{__goark_orm_w_5}`
+	if rendered.WhereSQL != expectedWhere {
+		t.Fatalf("unexpected where SQL %q", rendered.WhereSQL)
+	}
+	expectedArgs := NamedArgs{
+		"__goark_orm_w_0": "ACTIVE",
+		"__goark_orm_w_1": "Ali%",
+		"__goark_orm_w_2": int64(7),
+		"__goark_orm_w_3": int64(8),
+		"__goark_orm_w_4": int64(1),
+		"__goark_orm_w_5": int64(9),
+	}
+	if !reflect.DeepEqual(rendered.Args, expectedArgs) {
+		t.Fatalf("unexpected args %#v", rendered.Args)
+	}
+}
+
 func TestBaseMapper_SelectPage_whenWrapperProvided_shouldCountAndQueryRecords(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryResults = []testRowsData{

@@ -52,6 +52,45 @@ func TestUpdateWrapper_whenTypedFieldsUsed_shouldKeepValueTypesAtCompileTime(t *
 	}
 }
 
+func TestUpdateWrapper_whenTypedValueHelpersUsed_shouldRenderSQL(t *testing.T) {
+	id := NewTypedField[baseMapperUser, int64]("id")
+	name := NewTypedField[baseMapperUser, string]("name")
+	status := NewTypedField[baseMapperUser, string]("status")
+
+	wrapper := SetTypedValue(NewUpdateWrapper[baseMapperUser](), name, "Alice")
+	wrapper = SetTypedValueIf(false, wrapper, name, "Ignored")
+	wrapper = SetIncrByTypedValue(wrapper, id, int64(1))
+	wrapper = SetDecrByTypedValueIf(false, wrapper, id, int64(2))
+	wrapper = NeTypedValue(wrapper, status, "DELETED")
+	wrapper = NotInTypedValues(wrapper, id, int64(100), int64(200))
+	wrapper = LeTypedValueIf(true, wrapper, id, int64(999))
+
+	rendered, err := wrapper.build(NewPostgresDialect(), 0)
+	if err != nil {
+		t.Fatalf("build update wrapper failed: %v", err)
+	}
+
+	expectedSet := `"name" = #{__goark_orm_u_0}, "id" = "id" + #{__goark_orm_u_1}`
+	if rendered.SetSQL != expectedSet {
+		t.Fatalf("unexpected set SQL %q", rendered.SetSQL)
+	}
+	expectedWhere := `"status" <> #{__goark_orm_w_2} AND "id" NOT IN (#{__goark_orm_w_3}, #{__goark_orm_w_4}) AND "id" <= #{__goark_orm_w_5}`
+	if rendered.WhereSQL != expectedWhere {
+		t.Fatalf("unexpected where SQL %q", rendered.WhereSQL)
+	}
+	expectedArgs := NamedArgs{
+		"__goark_orm_u_0": "Alice",
+		"__goark_orm_u_1": int64(1),
+		"__goark_orm_w_2": "DELETED",
+		"__goark_orm_w_3": int64(100),
+		"__goark_orm_w_4": int64(200),
+		"__goark_orm_w_5": int64(999),
+	}
+	if !reflect.DeepEqual(rendered.Args, expectedArgs) {
+		t.Fatalf("unexpected args %#v", rendered.Args)
+	}
+}
+
 func TestUpdateWrapper_whenRichConditionsProvided_shouldRenderOperators(t *testing.T) {
 	wrapper := NewUpdateWrapper[baseMapperUser]().
 		SetIf(false, baseMapperUserName, "ignored").
