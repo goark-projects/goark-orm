@@ -7,8 +7,8 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 本仓库已落地第一版 ORM 元数据与生成器基础能力，`orm.APIVersion` 当前为 `v1`。V1 公共契约采用兼容优先策略：已导出的运行时接口、元数据结构、生成器输入模型和 CLI 主命令保持向后兼容；新增能力优先通过可选字段、可选参数、独立适配层或新接口扩展。详细边界见 `docs/api-compatibility.md`。已支持：
 
 - 实体 `//goark-orm:entity` 与严格 `goark-orm` struct tag 解析。
-- Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点和显式 SQL Provider。
-- XML Mapper 静态语句、动态 SQL 基础节点、`bind`、`selectKey`、`databaseId`、`resultMap`、`constructor/idArg/arg`、`association`、`collection`、`extends`、`autoMapping`、`discriminator`、`columnPrefix`、`notNullColumn` 元数据和 namespace/类型一致性校验。
+- Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete`、`call` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点和显式 SQL Provider。
+- XML Mapper 静态语句、动态 SQL 基础节点、`call`、`parameter`、`resultSet`、`bind`、`selectKey`、`databaseId`、`resultMap`、`constructor/idArg/arg`、`association`、`collection`、`extends`、`autoMapping`、`discriminator`、`columnPrefix`、`notNullColumn` 元数据和 namespace/类型一致性校验。
 - XML 与注解在同一个 Mapper 接口中混用。
 - 生成 `RegisterGoarkORMMetadata`、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
@@ -17,7 +17,8 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和基础结果扫描。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
 - MyBatis `${}` 原样替换的 Go 化安全版本：默认拒绝普通字符串，只允许 `RawSQLToken`，内置 `RawIdentifier` 和 `RawOrderBy` 白名单 token。
-- XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`；`test` 表达式支持括号、`and/or`、`not/!`、`==/!=/>/>=/</<=`、数值/字符串比较和集合 `size/length`。
+- XML 动态 SQL 支持 `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`；`test` 表达式支持安全 OGNL：括号、`and/or`、`not/!`、比较别名、四则运算、取模、三元表达式、`in/not in`、列表字面量、`empty`、确定性参数路径和白名单只读方法。
+- 存储过程支持 `StatementCommandCall`、`StatementTypeCallable`、IN/OUT/INOUT 参数、`sql.Out` 绑定、按声明顺序扫描多个结果集，以及生成 Mapper 侧 `orm.Call` 调用代码。
 - MyBatis-Plus 风格 `BaseMapper` 通用 CRUD、`QueryWrapper` 条件构造器和 `Page` 分页模型。
 - MyBatis-Plus 风格 `Service`、`QueryChain` 和 `UpdateChain`，覆盖常用 `IService` / chain wrapper 操作。
 - MyBatis-Plus 风格 `SQLInjector`、`Db` 快捷门面和 `EnumValuer` 枚举入库值接口。
@@ -126,6 +127,25 @@ goark-orm generate orm --config goark-orm.json
 ```
 
 需要接入数据库反向工程时，应在业务侧或独立 adapter 实现 `ormgen.SchemaIntrospector`，再把 schema 中间模型交给 `ormgen.ReverseEngineer` / `ormgen.Render`；`goark-orm` core 不连接数据库、不提交 schema 脚本。
+
+存储过程使用显式 `call` 语句，不通过运行时扫描发现 Mapper。OUT / INOUT 参数必须绑定到指针参数，多结果集必须声明名称并绑定到对应的 slice 指针：
+
+```go
+//goark-orm:call(sql="call report_users(#{status}, #{total})", parameters="status:IN,total:OUT:BIGINT", resultSets="users:User,roles:Role")
+ReportUsers(ctx context.Context, status string, total *int64, users *[]User, roles *[]Role) error
+```
+
+等价 XML 写法：
+
+```xml
+<call id="ReportUsers" statementType="CALLABLE">
+  call report_users(#{status}, #{total})
+  <parameter property="status" mode="IN"/>
+  <parameter property="total" mode="OUT" jdbcType="BIGINT"/>
+  <resultSet name="users" resultType="User"/>
+  <resultSet name="roles" resultType="Role"/>
+</call>
+```
 
 局部更新可以使用 `UpdateWrapper`：
 

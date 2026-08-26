@@ -35,3 +35,14 @@ GOWORK=off go test -run TestIntegrationDatabaseSmoke_whenConfigured ./...
 ```
 
 core 仓库不提交临时 SQL、不生成迁移草稿、不硬编码私有 DSN。真实库用例应只做可回滚的 smoke 或在外部测试库中执行。
+
+## 存储过程能力
+
+`goark-orm` core 已通过 fake driver 覆盖 `sql.Out`、INOUT 回写和多结果集扫描链路。真实数据库的存储过程语法、OUT 参数绑定和多结果集支持由具体驱动决定，使用方需要在自己的 CI 或本地环境按上面的环境变量启用真实库 smoke。
+
+| 能力 | core 行为 | 真实库注意事项 |
+| --- | --- | --- |
+| IN 参数 | 统一走 `#{}` 安全绑定和 TypeHandler | 遵守对应方言的占位符编译结果 |
+| OUT 参数 | 绑定为 `sql.Out{Dest: ptr}` | 驱动必须支持 `database/sql` OUT 参数 |
+| INOUT 参数 | 绑定为 `sql.Out{Dest: ptr, In: true}` | 驱动必须支持输入输出同参 |
+| 多结果集 | 按 `StatementMeta.ResultSets` 顺序调用 `NextResultSet` | 驱动必须实现多结果集前进语义 |

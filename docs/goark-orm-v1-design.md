@@ -14,6 +14,7 @@ Goark 核心框架已经明确采用编译期生成注册代码，不做 Java �
 
 - 支持 MyBatis 风格 XML Mapper。
 - 支持 MyBatis 注解风格 Annotation Mapper。
+- 支持存储过程和 callable statement，覆盖 IN、OUT、INOUT 参数及多结果集。
 - XML Mapper 和 Annotation Mapper 可以在同一个接口中混用。
 - 统一实体元数据、Statement 元数据、参数绑定、结果映射、事务、Configuration、GlobalConfig/DbConfig、一级缓存、Mapper namespace 二级缓存和执行器内核。
 - 使用独立 `goark-orm generate orm` 生成 Mapper 实现、分页签名、流式签名和静态元数据。
@@ -213,13 +214,14 @@ timesheet.entry.EntryMapper
 
 ## 方法级 SQL 注解
 
-V1 只保留四个 SQL 注解：
+V1 只保留五个 SQL 注解：
 
 ```text
 //goark-orm:select
 //goark-orm:insert
 //goark-orm:update
 //goark-orm:delete
+//goark-orm:call
 ```
 
 不提供通用 `query` 注解。SQL 命令类型由注解名决定。
@@ -228,7 +230,7 @@ V1 只保留四个 SQL 注解：
 
 ```text
 1. 一个方法最多只能有一个 SQL 注解。
-2. select、insert、update、delete 互斥。
+2. select、insert、update、delete、call 互斥。
 3. sql 和 provider 二选一必填，不能同时声明。
 4. sql 可以使用 `<script>` 包裹 MyBatis 风格动态 SQL 节点。
 5. provider 是运行期 SQL Provider 名称，必须由业务显式注册到 `orm.Registry`。
@@ -236,6 +238,8 @@ V1 只保留四个 SQL 注解：
 7. statement 可声明 interceptorIgnore，多个拦截器名称使用逗号、分号或空格分隔。
 8. select 返回实体、实体指针、实体切片、分页结果或标量。
 9. insert、update、delete 返回受影响行数或生成主键时必须符合生成器支持的签名。
+10. call 默认使用 `StatementTypeCallable`，可声明 parameters 和 resultSets。
+11. call 的 OUT / INOUT 参数必须对应指针参数，多结果集必须对应 slice 指针参数。
 ```
 
 示例：
@@ -252,6 +256,9 @@ Update(ctx context.Context, user *User) (int64, error)
 
 //goark-orm:delete(sql="delete from sys_user where id = #{id}")
 Delete(ctx context.Context, id int64) (int64, error)
+
+//goark-orm:call(sql="call report_users(#{status}, #{total})", parameters="status:IN,total:OUT:BIGINT", resultSets="users:User,roles:Role")
+ReportUsers(ctx context.Context, status string, total *int64, users *[]User, roles *[]Role) error
 ```
 
 Annotation Mapper 支持 `<script>` 动态 SQL，但复杂、可复用 SQL 仍建议放入 XML，便于 review 和复用。
@@ -290,7 +297,7 @@ XML 规则：
 ```text
 1. mapper.namespace 必填。
 2. XML namespace 必须与 Go Mapper namespace 完全一致。
-3. select、insert、update、delete 的 id 必须匹配接口方法名。
+3. select、insert、update、delete、call 的 id 必须匹配接口方法名。
 4. resultMap 引用必须存在。
 5. #{param} 走安全参数绑定。
 6. `${}` 仅允许绑定 `RawSQLToken`，用于表名、列名、排序字段等白名单场景。
@@ -299,6 +306,7 @@ XML 规则：
 9. statement 可声明 `useCache` 和 `flushCache`，未声明时使用 MyBatis 默认策略。
 10. statement 可声明 `databaseId`，生成期优先选择匹配 `GenerateSpec.DatabaseID` 的同名语句。
 11. statement 可声明 `interceptorIgnore`，规则与方法级注解一致。
+12. call 可声明 `statementType="CALLABLE"`、`parameter` 和 `resultSet`，OUT / INOUT 与多结果集在生成期校验方法签名。
 ```
 
 V1 支持节点：
@@ -318,6 +326,9 @@ V1 支持节点：
 | `insert` | 插入语句 |
 | `update` | 更新语句 |
 | `delete` | 删除语句 |
+| `call` | 存储过程或 callable statement |
+| `parameter` | callable 参数方向和类型处理元数据 |
+| `resultSet` | callable 多结果集映射元数据 |
 | `sql` | SQL 片段 |
 | `include` | 片段引用 |
 | `bind` | 动态变量绑定 |
@@ -328,16 +339,19 @@ V1 支持节点：
 | `foreach` | 集合展开 |
 | `choose` / `when` / `otherwise` | 分支 SQL |
 
-动态 SQL 当前使用标准库 `encoding/xml.Decoder` 解析，保留文本节点和元素顺序。V1 表达式实现安全受控子集：
+动态 SQL 当前使用标准库 `encoding/xml.Decoder` 解析，保留文本节点和元素顺序。V1 表达式实现安全 OGNL，覆盖动态 SQL 需要的确定性表达式：
 
 ```text
 1. 支持 `and` / `or` 组合。
 2. 支持括号分组和 `not` / `!` 取反。
-3. 支持 `==` / `!=` / `>` / `>=` / `<` / `<=`。
+3. 支持 `==` / `!=` / `>` / `>=` / `<` / `<=` 及 `eq` / `ne` / `gt` / `ge` / `gte` / `lt` / `le` / `lte`。
 4. 支持 `nil` / `null`、布尔值、数值、字符串字面量和已命名参数。
 5. 支持 `user.name`、`items[0]`、`map.key` 这类确定性参数路径。
-6. 支持集合或字符串的 `size` / `length` / `size()` / `length()` 和 Go 化 `len(value)` 只读长度表达式。
-7. 不执行脚本，不支持任意函数调用；`${}` 仅允许显式 `RawSQLToken`。
+6. 支持 `+` / `-` / `*` / `/` / `%`、一元正负号和三元表达式。
+7. 支持 `in` / `not in`、列表字面量和 `empty`。
+8. 支持集合或字符串的 `size` / `length` / `size()` / `length()` 和 Go 化 `len(value)` / `size(value)`。
+9. 支持白名单只读方法：`isEmpty`、`contains`、`containsKey`、`containsValue`、`startsWith`、`endsWith`、`toLowerCase`、`toUpperCase`、`trim`、`equals`、`equalsIgnoreCase`。
+10. 不执行脚本，不支持任意反射方法调用；`${}` 仅允许显式 `RawSQLToken`。
 ```
 
 动态 SQL 示例：
@@ -684,6 +698,8 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 Mapper 本包内接口嵌入展平，公共查询/写入接口可以复用到具体 Mapper。
 - 已支持 `goark-orm generate orm --config` JSON 配置文件、多包批量输出、配置级 databaseId 和 typeHandlers 默认值。
 - 已支持 `ormgen.TemplateRenderer` 自定义模板 SPI，以及 `SchemaIntrospector` / `ReverseEngineer` 反向工程扩展 SPI；core 不引入数据库驱动。
+- 已支持存储过程和 callable statement：XML `<call>`、`//goark-orm:call`、IN/OUT/INOUT 参数、多结果集和生成 Mapper `orm.Call` 调用。
+- 已支持动态 SQL 安全 OGNL 表达式，包含算术、三元、集合、`empty`、`in/not in` 和白名单只读方法；不开放任意反射调用。
 - 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。
 - 已新增核心热路径 benchmark 和环境变量门控的真实数据库 smoke 测试；数据库方言矩阵记录在 `docs/database-matrix.md`。
 
@@ -692,7 +708,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 | 决策 | 结论 | 原因 |
 | --- | --- | --- |
 | 公开模型 | Mapper 单体系，并提供 BaseMapper 通用 CRUD | XML 和注解覆盖 MyBatis 风格，BaseMapper 覆盖 MyBatis-Plus 常用 CRUD，不引入重复 Repository 概念 |
-| SQL 注解 | 只保留 select/insert/update/delete | 比通用 query 更明确，减少误用 |
+| SQL 注解 | 只保留 select/insert/update/delete/call | 比通用 query 更明确，减少误用，call 单独承载存储过程语义 |
 | namespace | 必填且全局唯一 | 自动推断容易重复，namespace 是稳定公共契约 |
 | 实体字段 | 使用 `goark-orm` struct tag | 字段级元数据更符合 Go 生态 |
 | tag 格式 | 分号分隔且必须 key=value | 解析确定、可扩展、便于错误定位 |
