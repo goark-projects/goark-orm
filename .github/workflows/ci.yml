@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          mapfile -t files < <(git ls-files '*.go')
+          if [ "${#files[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          unformatted="$(gofmt -l "${files[@]}")"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        run: go test -count=1 ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check diff whitespace
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base="$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)"
+            git diff --check "$base" HEAD
+          else
+            git diff-tree --check --no-commit-id --root -r HEAD
+          fi
+
+      - name: Benchmark smoke
+        run: go test -run '^$' -bench 'Benchmark(CompileSQL_Postgres|RenderDynamicSQL|QueryWrapperBuild|SQLSessionQueryOneGeneratedRowScanner|AppendSQLCondition_GroupedQuery|CountSQLBase_NestedOrderBy|JSONTypeHandler_(ToDB|FromDB))$' -benchtime=100x -benchmem .

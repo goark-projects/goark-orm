@@ -30,6 +30,13 @@
 - 新增错误上下文字段，但 `errors.Is` 和 `errors.As` 分类语义不能破坏。
 - 新增生成代码内容，但已存在入口和语义保持兼容。
 
+## 兼容门禁
+
+- `api_contract_external_test.go` 从外部包视角编译运行时公共 API，覆盖缓存 SPI、Wrapper 类型安全 helper、SQL token、拦截器、中间件、BaseMapper、Service、事务和配置解析入口。
+- `ormgen/api_contract_external_test.go` 从外部包视角编译生成器公共 API，覆盖模型、反向工程、schema drift、模板渲染和 schema SQL 方言入口。
+- `ormtest/api_contract_external_test.go` 从外部包视角编译真实数据库兼容套件 API，覆盖环境变量加载、SQL 列表解析、标准兼容矩阵和可复用 DatabaseCase 构造器。
+- GitHub Actions `ci` 工作流执行 Go 格式检查、`go test -count=1 ./...`、`go vet ./...`、`git diff --check` 和固定 `-benchtime=100x` 的核心 benchmark smoke，保证 benchmark 持续可编译和可运行。
+
 ## 非兼容变化处理
 
 确实需要破坏 V1 契约时，必须进入新的主版本或新增并行 API，不能直接修改 V1 行为。
