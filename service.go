@@ -42,19 +42,16 @@ func (s *Service[T, ID]) Save(ctx context.Context, entity *T) (bool, error) {
 
 // SaveBatch 按顺序批量插入实体。
 func (s *Service[T, ID]) SaveBatch(ctx context.Context, entities []T) (int64, error) {
+	return s.SaveBatchSize(ctx, entities, DefaultBatchSize)
+}
+
+// SaveBatchSize 按指定批量大小插入实体。
+func (s *Service[T, ID]) SaveBatchSize(ctx context.Context, entities []T, batchSize int) (int64, error) {
 	mapper, err := s.requireMapper()
 	if err != nil {
 		return 0, err
 	}
-	var rows int64
-	for index := range entities {
-		result, err := mapper.Insert(ctx, &entities[index])
-		if err != nil {
-			return rows, err
-		}
-		rows += result.RowsAffected
-	}
-	return rows, nil
+	return mapper.InsertBatchSize(ctx, entities, batchSize)
 }
 
 // SaveOrUpdate 根据主键零值选择插入或更新。
@@ -72,19 +69,16 @@ func (s *Service[T, ID]) SaveOrUpdate(ctx context.Context, entity *T) (bool, err
 
 // SaveOrUpdateBatch 按顺序批量保存或更新实体。
 func (s *Service[T, ID]) SaveOrUpdateBatch(ctx context.Context, entities []T) (int64, error) {
+	return s.SaveOrUpdateBatchSize(ctx, entities, DefaultBatchSize)
+}
+
+// SaveOrUpdateBatchSize 按指定批量大小保存或更新实体。
+func (s *Service[T, ID]) SaveOrUpdateBatchSize(ctx context.Context, entities []T, batchSize int) (int64, error) {
 	mapper, err := s.requireMapper()
 	if err != nil {
 		return 0, err
 	}
-	var rows int64
-	for index := range entities {
-		result, err := mapper.SaveOrUpdate(ctx, &entities[index])
-		if err != nil {
-			return rows, err
-		}
-		rows += result.RowsAffected
-	}
-	return rows, nil
+	return mapper.SaveOrUpdateBatchSize(ctx, entities, batchSize)
 }
 
 // RemoveByID 按主键删除实体。
@@ -134,6 +128,20 @@ func (s *Service[T, ID]) UpdateByID(ctx context.Context, entity *T) (bool, error
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+// UpdateBatchByID 按默认批量大小根据主键更新实体。
+func (s *Service[T, ID]) UpdateBatchByID(ctx context.Context, entities []T) (int64, error) {
+	return s.UpdateBatchByIDSize(ctx, entities, DefaultBatchSize)
+}
+
+// UpdateBatchByIDSize 按指定批量大小根据主键更新实体。
+func (s *Service[T, ID]) UpdateBatchByIDSize(ctx context.Context, entities []T, batchSize int) (int64, error) {
+	mapper, err := s.requireMapper()
+	if err != nil {
+		return 0, err
+	}
+	return mapper.UpdateBatchByIDSize(ctx, entities, batchSize)
 }
 
 // Update 按实体和条件更新记录。
