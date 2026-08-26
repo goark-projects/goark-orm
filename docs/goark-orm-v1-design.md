@@ -602,7 +602,7 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 
 运行期错误提供 MyBatis 风格分层语义和 Go 原生判别方式。`ErrORM` 是根分类；配置、元数据、Statement 查找、参数绑定、结果映射、数据库执行和 QueryOne 多行结果分别对应 `ErrConfiguration`、`ErrRegistry`、`ErrStatementNotFound`、`ErrBinding`、`ErrMapping`、`ErrExecutor`、`ErrTooManyResults`。调用方使用 `errors.Is` 按阶段归类，使用 `errors.As` 提取 `ConfigurationError`、`BindingError`、`MappingError`、`ExecutorError` 等结构化上下文，避免依赖错误字符串。
 
-Mapper namespace 级二级缓存由 `Cache` SPI 承载，默认实现是并发安全的有界内存 LRU 缓存。XML `<cache>` 会为当前 namespace 创建默认二级缓存，`<cache-ref namespace="...">` 会复用目标 namespace 缓存。`select` 默认 `useCache=true`，insert/update/delete 默认 `flushCache=true`，select 默认 `flushCache=false`；显式 `useCache=false` 或 `flushCache=false` 会覆盖默认策略。
+Mapper namespace 级二级缓存由 `Cache` SPI 承载，默认实现是并发安全的有界内存 LRU 缓存。XML `<cache>` 会为当前 namespace 创建默认二级缓存，`<cache-ref namespace="...">` 会复用目标 namespace 缓存。默认内存缓存通过 `CacheStatsProvider` 暴露命中、未命中、写入、删除、清空、LRU 淘汰和 TTL 过期计数；`blocking=true` 会使用 `BlockingCache` 合并同 key 并发 miss，查询错误、扫描错误和事务延迟发布都会释放 miss 加载权，避免等待者悬挂。`select` 默认 `useCache=true`，insert/update/delete 默认 `flushCache=true`，select 默认 `flushCache=false`；显式 `useCache=false` 或 `flushCache=false` 会覆盖默认策略。
 
 二级缓存遵循 MyBatis 风格事务发布语义：自动提交 Session 查询后立即写入缓存，写语句成功后立即清理 namespace 缓存；事务 Session 内的查询缓存写入和写语句缓存清理先进入挂起队列，只有事务 `Commit` 成功后才对共享二级缓存生效，`Rollback` 和未完成 `Close` 会丢弃挂起变更。
 
@@ -676,7 +676,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 BaseMapper 分页、生成 Mapper 分页签名、生成 Mapper Cursor/ResultHandler 流式签名、按主键批量查询和生成主键元数据透传。
 - 已支持 BatchSession 批处理执行器、自动提交批处理和事务批处理。
 - 已支持 Session 级一级缓存及写操作/生命周期失效。
-- 已支持 Mapper namespace 级二级缓存 SPI、默认内存 LRU 缓存、XML `<cache>` / `<cache-ref>`、statement `useCache` / `flushCache` 和事务提交发布语义。
+- 已支持 Mapper namespace 级二级缓存 SPI、默认内存 LRU 缓存、XML `<cache>` / `<cache-ref>`、`blocking=true` 并发 miss 合并、`CacheStatsProvider` 统计快照、statement `useCache` / `flushCache` 和事务提交发布语义。
 - 已支持 ResultMap 的 association 和 collection 嵌套映射，collection 会按根对象 id 聚合多行结果。
 - 已支持 ResultMap association/collection 的 `select` 嵌套查询 eager 回填、`Lazy[T]` / `LazySlice[T]` 显式 lazy 延迟加载、复合列参数绑定和单次父查询内相同参数结果复用；非 Lazy 字段保持 eager 行为，避免引入透明代理。
 - 已支持 XML resultMap `constructor/idArg/arg`、`columnPrefix`、`notNullColumn`、`extends` 生成期继承合并、`autoMapping` 三态元数据和 `discriminator/case` 运行期分派。

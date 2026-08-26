@@ -17,6 +17,30 @@ type Cache interface {
 	Clear(ctx context.Context) error
 }
 
+// CacheMissReleaser 描述可显式释放缓存 miss 加载权的可选能力。
+type CacheMissReleaser interface {
+	ReleaseMiss(ctx context.Context, key string) error
+}
+
+// CacheStats 描述缓存运行期统计快照。
+type CacheStats struct {
+	ID          string
+	MaxEntries  int
+	Len         int
+	Hits        uint64
+	Misses      uint64
+	Puts        uint64
+	Removes     uint64
+	Clears      uint64
+	Evictions   uint64
+	Expirations uint64
+}
+
+// CacheStatsProvider 描述可导出缓存统计快照的可选能力。
+type CacheStatsProvider interface {
+	Stats() CacheStats
+}
+
 // MemoryCacheOption 配置默认内存二级缓存。
 type MemoryCacheOption func(*MemoryCache)
 
@@ -26,14 +50,24 @@ type memoryCacheEntry struct {
 	createdAt time.Time
 }
 
+type memoryCacheRemovalReason int
+
+const (
+	memoryCacheRemovalExplicit memoryCacheRemovalReason = iota
+	memoryCacheRemovalEviction
+	memoryCacheRemovalExpiration
+)
+
 // MemoryCache 是并发安全的有界 LRU 二级缓存。
 type MemoryCache struct {
 	id         string
 	maxEntries int
 	ttl        time.Duration
+	now        func() time.Time
 	mu         sync.Mutex
 	items      map[string]*list.Element
 	order      *list.List
+	stats      CacheStats
 }
 
 // NewMemoryCache 创建默认内存二级缓存。
@@ -42,6 +76,7 @@ func NewMemoryCache(id string, options ...MemoryCacheOption) *MemoryCache {
 	cache := &MemoryCache{
 		id:         id,
 		maxEntries: 1024,
+		now:        time.Now,
 		items:      make(map[string]*list.Element),
 		order:      list.New(),
 	}
@@ -52,6 +87,9 @@ func NewMemoryCache(id string, options ...MemoryCacheOption) *MemoryCache {
 	}
 	if cache.maxEntries < 0 {
 		cache.maxEntries = 0
+	}
+	if cache.now == nil {
+		cache.now = time.Now
 	}
 	return cache
 }
@@ -72,6 +110,28 @@ func WithMemoryCacheTTL(ttl time.Duration) MemoryCacheOption {
 	}
 }
 
+func withMemoryCacheClock(clock func() time.Time) MemoryCacheOption {
+	return func(cache *MemoryCache) {
+		if clock != nil {
+			cache.now = clock
+		}
+	}
+}
+
+// Stats 返回默认内存缓存的运行期统计快照。
+func (c *MemoryCache) Stats() CacheStats {
+	if c == nil {
+		return CacheStats{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	stats := c.stats
+	stats.ID = c.id
+	stats.MaxEntries = c.maxEntries
+	stats.Len = len(c.items)
+	return stats
+}
+
 // Get 读取缓存条目。
 func (c *MemoryCache) Get(ctx context.Context, key string) (any, bool, error) {
 	if err := requireCacheContext(ctx); err != nil {
@@ -84,14 +144,17 @@ func (c *MemoryCache) Get(ctx context.Context, key string) (any, bool, error) {
 	defer c.mu.Unlock()
 	element, ok := c.items[key]
 	if !ok {
+		c.stats.Misses++
 		return nil, false, nil
 	}
 	entry := element.Value.(memoryCacheEntry)
-	if c.ttl > 0 && time.Since(entry.createdAt) > c.ttl {
-		c.removeElement(element)
+	if c.ttl > 0 && c.nowTime().Sub(entry.createdAt) > c.ttl {
+		c.stats.Misses++
+		c.removeElement(element, memoryCacheRemovalExpiration)
 		return nil, false, nil
 	}
 	c.order.MoveToFront(element)
+	c.stats.Hits++
 	return entry.value, true, nil
 }
 
@@ -105,18 +168,19 @@ func (c *MemoryCache) Put(ctx context.Context, key string, value any) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.stats.Puts++
 	if c.maxEntries == 0 {
 		return nil
 	}
 	if element, ok := c.items[key]; ok {
-		element.Value = memoryCacheEntry{key: key, value: value, createdAt: time.Now()}
+		element.Value = memoryCacheEntry{key: key, value: value, createdAt: c.nowTime()}
 		c.order.MoveToFront(element)
 		return nil
 	}
-	element := c.order.PushFront(memoryCacheEntry{key: key, value: value, createdAt: time.Now()})
+	element := c.order.PushFront(memoryCacheEntry{key: key, value: value, createdAt: c.nowTime()})
 	c.items[key] = element
 	for c.maxEntries > 0 && c.order.Len() > c.maxEntries {
-		c.removeElement(c.order.Back())
+		c.removeElement(c.order.Back(), memoryCacheRemovalEviction)
 	}
 	return nil
 }
@@ -132,7 +196,7 @@ func (c *MemoryCache) Remove(ctx context.Context, key string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if element, ok := c.items[key]; ok {
-		c.removeElement(element)
+		c.removeElement(element, memoryCacheRemovalExplicit)
 	}
 	return nil
 }
@@ -147,18 +211,34 @@ func (c *MemoryCache) Clear(ctx context.Context) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.stats.Clears++
 	c.items = make(map[string]*list.Element)
 	c.order.Init()
 	return nil
 }
 
-func (c *MemoryCache) removeElement(element *list.Element) {
+func (c *MemoryCache) removeElement(element *list.Element, reason memoryCacheRemovalReason) {
 	if c == nil || element == nil {
 		return
 	}
 	entry := element.Value.(memoryCacheEntry)
 	delete(c.items, entry.key)
 	c.order.Remove(element)
+	switch reason {
+	case memoryCacheRemovalExplicit:
+		c.stats.Removes++
+	case memoryCacheRemovalEviction:
+		c.stats.Evictions++
+	case memoryCacheRemovalExpiration:
+		c.stats.Expirations++
+	}
+}
+
+func (c *MemoryCache) nowTime() time.Time {
+	if c == nil || c.now == nil {
+		return time.Now()
+	}
+	return c.now()
 }
 
 func requireCacheContext(ctx context.Context) error {
@@ -180,5 +260,9 @@ func newMemoryCacheFromMeta(namespace string, meta CacheMeta) Cache {
 	if meta.FlushIntervalMillis > 0 {
 		options = append(options, WithMemoryCacheTTL(time.Duration(meta.FlushIntervalMillis)*time.Millisecond))
 	}
-	return NewMemoryCache(namespace, options...)
+	cache := NewMemoryCache(namespace, options...)
+	if meta.Blocking {
+		return NewBlockingCache(cache)
+	}
+	return cache
 }

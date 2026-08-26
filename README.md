@@ -45,7 +45,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - Go 原生错误层级：`ErrConfiguration`、`ErrRegistry`、`ErrStatementNotFound`、`ErrBinding`、`ErrMapping`、`ErrExecutor`、`ErrTooManyResults` 均可通过 `errors.Is` 归类，通过 `errors.As` 读取结构化上下文。
 - `BatchSession` 批处理执行器、`Flush` / `Clear`、事务内批处理和查询前自动 flush。
 - Session/Statement 级一级缓存配置，写操作、提交、回滚和关闭时自动失效。
-- Mapper namespace 级二级缓存 SPI、默认内存 LRU 缓存、XML `<cache>` / `<cache-ref>`，以及 statement 级 `useCache` / `flushCache` 策略。
+- Mapper namespace 级二级缓存 SPI、默认内存 LRU 缓存、XML `<cache>` / `<cache-ref>`、`blocking=true` 并发 miss 合并、`CacheStatsProvider` 统计快照，以及 statement 级 `useCache` / `flushCache` 策略。
 - ResultMap 支持 `constructor` 字段映射、显式/自动映射开关、内联 association/collection 扫描、`columnPrefix`、`notNullColumn`、collection 多行聚合、`discriminator` 运行期 case 分派，以及 `select` 嵌套查询 eager 和显式 lazy 回填；嵌套查询支持复合列参数并在单次父查询内复用相同参数结果，降低 N+1 重复查询。
 - `ResultHandler`、`QueryCursor`、`QueryEach` 和 `RowCursor` 支持逐行流式查询；游标查询不写入一级缓存和二级缓存，并拒绝需要多行聚合的 collection resultMap。生成 Mapper 可直接声明 Cursor 返回或 ResultHandler 回调签名。
 - `Lazy[T]` 和 `LazySlice[T]` 支持 `fetchType="lazy"` 的 Go 化显式延迟加载；业务必须调用 `Load(ctx)` 触发查询，不使用透明代理。
@@ -513,7 +513,7 @@ XML Mapper 可以声明 namespace 二级缓存：
 
 ```xml
 <mapper namespace="system.user.UserMapper">
-  <cache eviction="LRU" size="1024" flushInterval="60000"/>
+  <cache eviction="LRU" size="1024" flushInterval="60000" blocking="true"/>
   <select id="FindByID" useCache="true" flushCache="false">
     select id, name from sys_user where id = #{id}
   </select>

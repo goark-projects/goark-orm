@@ -122,6 +122,7 @@ func (defaultStatementExecutor) Query(ctx context.Context, session *SQLSession, 
 	if hit, err := session.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
 		return err
 	}
+	defer session.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	rows, err := session.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return executorFailure(meta, "query", compiled, err)
@@ -161,6 +162,7 @@ func (defaultStatementExecutor) QueryOne(ctx context.Context, session *SQLSessio
 	if hit, err := session.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
 		return err
 	}
+	defer session.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	rows, err := session.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return executorFailure(meta, "query", compiled, err)

@@ -77,6 +77,21 @@ func (s *SQLSession) putSecondLevelCache(ctx context.Context, statement Statemen
 	return cache.Put(ctx, key, value)
 }
 
+func (s *SQLSession) releaseSecondLevelCacheMiss(ctx context.Context, statement StatementMeta, key string) {
+	if s == nil || s.registry == nil || !s.cacheEnabled || !shouldUseSecondLevelCache(statement) {
+		return
+	}
+	cache, _, ok := s.registry.Cache(statement.Namespace)
+	if !ok {
+		return
+	}
+	releaser, ok := cache.(CacheMissReleaser)
+	if !ok {
+		return
+	}
+	_ = releaser.ReleaseMiss(ctx, key)
+}
+
 func (s *SQLSession) flushStatementCaches(ctx context.Context, statement StatementMeta) error {
 	if !shouldFlushStatementCache(statement) {
 		return nil
