@@ -49,6 +49,20 @@ GOWORK=off go test -run TestIntegrationDatabaseSuite_whenConfigured ./...
 
 core 仓库不提交临时 SQL、不生成迁移草稿、不硬编码私有 DSN。真实库用例应只做可回滚的兼容性检查，或者在外部测试库中执行。
 
+### 标准兼容矩阵
+
+`ormtest.NewCompatibilitySuiteConfig` 会构造一组可回滚的标准用例，覆盖安全绑定、CRUD、ResultMap、分页、批处理和 TypeHandler 入库/出库链路。当前标准 DDL 支持 `postgres`、`mysql`、`mariadb`、`sqlite` 和 `question`，PG/MySQL 是默认真实库验证目标。
+
+业务工程或临时测试 harness 只负责导入驱动并调用：
+
+```go
+func TestGoarkORMCompatibility(t *testing.T) {
+	ormtest.RunCompatibilitySuiteFromEnv(t)
+}
+```
+
+若同一个数据库里并发跑多套测试，可通过 `ormtest.WithCompatibilityTable("schema.table_name")` 指定隔离表名。表名只允许 schema/table 分段标识符，防止测试配置把任意 SQL 拼入 DDL。
+
 ## 存储过程能力
 
 `goark-orm` core 已通过 fake driver 覆盖 `sql.Out`、INOUT 回写和多结果集扫描链路。真实数据库的存储过程语法、OUT 参数绑定和多结果集支持由具体驱动决定，使用方需要在自己的 CI 或本地环境按上面的环境变量启用真实库 smoke。
