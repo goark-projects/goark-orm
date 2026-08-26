@@ -12,7 +12,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - XML 与注解在同一个 Mapper 接口中混用。
 - 生成 `RegisterGoarkORMMetadata`、实体 RowScanner、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
-- 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package，并提供 `--validate`、`--dry-run`、`--check`、`--diff` 作为 CI 生成一致性门禁。
+- 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package，并提供 `--validate`、`--dry-run`、`--check`、`--diff` 作为本地生成一致性门禁。
 - `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector`、`SQLSchemaIntrospector`、多数据库 `SQLSchemaDialect` 和 `ReverseEngineerWithRenderer`，可由外部数据库适配层或业务测试包做 schema 反向工程与自定义模板渲染；支持反向工程生成实体 struct、命名策略、忽略列、列过滤和列级覆盖，core 不直接依赖数据库驱动。
 - `ormgen` 提供 `DetectSchemaDrift` / `ValidateSchemaDrift`，可把已注册实体元数据与 `SchemaIntrospector` 读取到的真实 schema 做表、列、主键、自增、空值、长度/精度和数据库类型差异检测。
 - `ormtest` 提供环境变量门控的真实数据库兼容性测试套件，调用方在自己的测试二进制中显式 blank import 驱动后即可复用 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler 和 callable statement 用例；标准 PG/MySQL 兼容矩阵可直接通过 `RunCompatibilitySuiteFromEnv` 启用。
@@ -77,6 +77,12 @@ module goark.dev/orm
 GOWORK=off go test ./...
 GOWORK=off go vet ./...
 GOWORK=off go test -run '^$' -bench . -benchmem ./
+```
+
+发布前本地门禁：
+
+```bash
+GOWORK=off ./scripts/verify-release.sh
 ```
 
 真实数据库兼容性套件默认跳过；需要时设置 `GOARK_ORM_INTEGRATION_DRIVER` 和 `GOARK_ORM_INTEGRATION_DSN`，并在调用方测试二进制中显式注册数据库驱动。数据库方言和验证矩阵见 `docs/database-matrix.md`。

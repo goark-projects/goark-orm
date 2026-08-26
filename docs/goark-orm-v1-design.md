@@ -698,7 +698,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 MyBatis-Plus 风格 Service 层、QueryChain、UpdateChain，并由生成器为单主键实体输出 `New<Entity>Service` 工厂；Service/QueryChain 覆盖 map 条件、map 结果、首列结果和分页 map 结果等便捷方法。
 - 已支持 MyBatis-Plus 风格 `SQLInjector` 显式通用方法注入、无全局会话的 `Db` 快捷门面，以及 `EnumValuer` 枚举入库值接口。
 - 已支持 Mapper 本包内接口嵌入展平，公共查询/写入接口可以复用到具体 Mapper。
-- 已支持 `goark-orm generate orm --config` JSON 配置文件、多包批量输出、配置级 databaseId 和 typeHandlers 默认值，并提供 `--validate`、`--dry-run`、`--check`、`--diff` 支撑生成一致性门禁。
+- 已支持 `goark-orm generate orm --config` JSON 配置文件、多包批量输出、配置级 databaseId 和 typeHandlers 默认值，并提供 `--validate`、`--dry-run`、`--check`、`--diff` 支撑本地生成一致性门禁。
 - 已支持 `ormgen.TemplateRenderer` 自定义模板 SPI、`ReverseEngineerWithRenderer` 串联入口、`SchemaIntrospector` / `SQLSchemaIntrospector` / `SQLSchemaDialect` 反向工程扩展 SPI，以及 `DetectSchemaDrift` / `ValidateSchemaDrift` 元数据漂移检测；core 不引入具体数据库驱动。
 - 已支持存储过程和 callable statement：XML `<call>`、`//goark-orm:call`、IN/OUT/INOUT 参数、多结果集和生成 Mapper `orm.Call` 调用。
 - 已支持内建 JSON TypeHandler 使用 ByteDance Sonic，生成器配置和测试套件中的 JSON 解析也统一通过内部 JSON codec 封装。
