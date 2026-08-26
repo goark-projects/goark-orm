@@ -4,7 +4,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 
 ## 当前状态
 
-本仓库已落地第一版 ORM 元数据与生成器基础能力，当前尚未承诺稳定公共 API。已支持：
+本仓库已落地第一版 ORM 元数据与生成器基础能力，`orm.APIVersion` 当前为 `v1`。V1 公共契约采用兼容优先策略：已导出的运行时接口、元数据结构、生成器输入模型和 CLI 主命令保持向后兼容；新增能力优先通过可选字段、可选参数、独立适配层或新接口扩展。详细边界见 `docs/api-compatibility.md`。已支持：
 
 - 实体 `//goark-orm:entity` 与严格 `goark-orm` struct tag 解析。
 - Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点和显式 SQL Provider。
