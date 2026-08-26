@@ -36,7 +36,9 @@ func Render(model *PackageModel) ([]byte, error) {
 	builder.WriteString(model.PackageName)
 	builder.WriteString("\n\n")
 	writeImports(&builder, model)
-	writeEntitySupport(&builder, model)
+	if err := writeEntitySupport(&builder, model); err != nil {
+		return nil, err
+	}
 	writeRegisterFunction(&builder, model)
 	writeHelperFunctions(&builder, model)
 	for _, mapper := range model.Mappers {
@@ -51,9 +53,19 @@ func Render(model *PackageModel) ([]byte, error) {
 
 func writeImports(builder *bytes.Buffer, model *PackageModel) {
 	builder.WriteString("import (\n")
+	written := make(map[string]struct{})
 	if len(model.Mappers) > 0 || modelHasGeneratedRowScanners(model) {
 		builder.WriteString(strconv.Quote("context"))
 		builder.WriteByte('\n')
+		written["context"] = struct{}{}
+	}
+	for _, importPath := range modelKnownImportPaths(model) {
+		if _, ok := written[importPath]; ok {
+			continue
+		}
+		builder.WriteString(strconv.Quote(importPath))
+		builder.WriteByte('\n')
+		written[importPath] = struct{}{}
 	}
 	builder.WriteString("orm ")
 	builder.WriteString(strconv.Quote("goark.dev/orm"))
@@ -84,8 +96,11 @@ func writeRegisterFunction(builder *bytes.Buffer, model *PackageModel) {
 	builder.WriteString("}\n\n")
 }
 
-func writeEntitySupport(builder *bytes.Buffer, model *PackageModel) {
+func writeEntitySupport(builder *bytes.Buffer, model *PackageModel) error {
 	for _, entity := range model.Entities {
+		if err := writeDeclaredEntityStruct(builder, entity); err != nil {
+			return err
+		}
 		writeEntityMetaFunction(builder, entity)
 		writeEntityFields(builder, entity)
 		writeEntityTypedFields(builder, entity)
@@ -97,6 +112,7 @@ func writeEntitySupport(builder *bytes.Buffer, model *PackageModel) {
 			writeServiceFactory(builder, entity, primary)
 		}
 	}
+	return nil
 }
 
 func writeEntityMetaFunction(builder *bytes.Buffer, entity EntityModel) {

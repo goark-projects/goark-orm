@@ -20,12 +20,17 @@ type SchemaIntrospectionRequest struct {
 
 // ReverseEngineerSpec 描述 schema 到 ORM 生成模型的转换规则。
 type ReverseEngineerSpec struct {
-	PackageName string
-	DatabaseID  string
-	Schema      string
-	Tables      []string
-	TablePrefix string
-	TypeMapper  SchemaTypeMapper
+	PackageName      string
+	DatabaseID       string
+	Schema           string
+	Tables           []string
+	TablePrefix      string
+	TypeMapper       SchemaTypeMapper
+	NamingStrategy   SchemaNamingStrategy
+	IgnoreColumns    []string
+	ColumnFilter     SchemaColumnFilter
+	ColumnOverrides  map[string]SchemaColumnOverride
+	OmitEntityStruct bool
 }
 
 // SchemaModel 是数据库结构的 Go 化中间模型。
@@ -105,12 +110,18 @@ func BuildPackageModelFromSchema(spec ReverseEngineerSpec, schema SchemaModel) (
 	if mapper == nil {
 		mapper = DefaultSchemaTypeMapper()
 	}
+	naming := spec.NamingStrategy
+	if naming == nil {
+		naming = DefaultSchemaNamingStrategy()
+	}
+	spec.ColumnOverrides = normalizeColumnOverrides(spec.ColumnOverrides)
+	selection := newReverseColumnSelection(spec)
 	model := &PackageModel{
 		PackageName: packageName,
 		Entities:    make([]EntityModel, 0, len(schema.Tables)),
 	}
 	for _, table := range schema.Tables {
-		entity, err := schemaTableToEntity(table, spec.TablePrefix, mapper)
+		entity, err := schemaTableToEntity(table, spec, mapper, naming, selection)
 		if err != nil {
 			return nil, err
 		}
@@ -119,41 +130,63 @@ func BuildPackageModelFromSchema(spec ReverseEngineerSpec, schema SchemaModel) (
 	return model, nil
 }
 
-func schemaTableToEntity(table SchemaTable, tablePrefix string, mapper SchemaTypeMapper) (EntityModel, error) {
+func schemaTableToEntity(table SchemaTable, spec ReverseEngineerSpec, mapper SchemaTypeMapper, naming SchemaNamingStrategy, selection reverseColumnSelection) (EntityModel, error) {
 	tableName := strings.TrimSpace(table.Name)
 	if tableName == "" {
 		return EntityModel{}, fmt.Errorf("goark-orm: schema table name is required")
 	}
 	typeName := strings.TrimSpace(table.TypeName)
 	if typeName == "" {
-		typeName = pascalIdentifier(strings.TrimPrefix(tableName, strings.TrimSpace(tablePrefix)))
+		mapped, err := naming.EntityTypeName(table, spec.TablePrefix)
+		if err != nil {
+			return EntityModel{}, err
+		}
+		typeName = strings.TrimSpace(mapped)
 	}
 	if typeName == "" {
 		return EntityModel{}, fmt.Errorf("goark-orm: schema table %s cannot derive type name", tableName)
 	}
 	entity := EntityModel{
-		TypeName: typeName,
-		Table:    tableName,
-		Columns:  make([]ColumnModel, 0, len(table.Columns)),
+		TypeName:      typeName,
+		Table:         tableName,
+		Columns:       make([]ColumnModel, 0, len(table.Columns)),
+		DeclareStruct: !spec.OmitEntityStruct,
 	}
 	for _, column := range table.Columns {
-		mapped, err := schemaColumnToModel(column, mapper)
+		if !selection.include(table, column) {
+			continue
+		}
+		override, hasOverride := schemaColumnOverride(spec, table, column)
+		if hasOverride {
+			column = applySchemaColumnOverride(column, override)
+		}
+		mapped, err := schemaColumnToModel(table, column, mapper, naming)
 		if err != nil {
 			return EntityModel{}, err
 		}
+		if hasOverride {
+			mapped = applyColumnModelOverride(mapped, override)
+		}
 		entity.Columns = append(entity.Columns, mapped)
+	}
+	if len(entity.Columns) == 0 {
+		return EntityModel{}, fmt.Errorf("goark-orm: schema table %s has no generated columns", tableName)
 	}
 	return entity, nil
 }
 
-func schemaColumnToModel(column SchemaColumn, mapper SchemaTypeMapper) (ColumnModel, error) {
+func schemaColumnToModel(table SchemaTable, column SchemaColumn, mapper SchemaTypeMapper, naming SchemaNamingStrategy) (ColumnModel, error) {
 	columnName := strings.TrimSpace(column.Name)
 	if columnName == "" {
 		return ColumnModel{}, fmt.Errorf("goark-orm: schema column name is required")
 	}
 	fieldName := strings.TrimSpace(column.FieldName)
 	if fieldName == "" {
-		fieldName = pascalIdentifier(columnName)
+		mapped, err := naming.FieldName(table, column)
+		if err != nil {
+			return ColumnModel{}, err
+		}
+		fieldName = strings.TrimSpace(mapped)
 	}
 	goType := strings.TrimSpace(column.GoType)
 	if goType == "" {
@@ -177,13 +210,15 @@ func schemaColumnToModel(column SchemaColumn, mapper SchemaTypeMapper) (ColumnMo
 		NumericScale:  cloneIntPointer(column.NumericScale),
 		DBType:        strings.TrimSpace(column.DBType),
 		DefaultValue:  strings.TrimSpace(column.DefaultValue),
-		TypeHandler:   strings.TrimSpace(column.TypeHandler),
+		TypeHandler:   schemaColumnTypeHandler(column),
 	}, nil
 }
 
 func defaultSchemaGoType(column SchemaColumn) (string, error) {
 	dbType := strings.ToLower(strings.TrimSpace(column.DBType))
 	switch {
+	case strings.Contains(dbType, "json"):
+		return "map[string]any", nil
 	case strings.Contains(dbType, "bigint"):
 		return "int64", nil
 	case strings.Contains(dbType, "smallint"):
@@ -222,6 +257,47 @@ func pascalIdentifier(value string) string {
 		builder.WriteString(schemaIdentifierPart(string(runes)))
 	}
 	return builder.String()
+}
+
+func exportedSchemaIdentifier(value string) string {
+	identifier := pascalIdentifier(value)
+	if identifier == "" {
+		return ""
+	}
+	runes := []rune(identifier)
+	if len(runes) == 0 {
+		return ""
+	}
+	if !isGoIdentifierStart(runes[0]) {
+		identifier = "X" + identifier
+		runes = []rune(identifier)
+	}
+	for index, r := range runes {
+		if !isGoIdentifierPart(r) {
+			runes[index] = '_'
+		}
+	}
+	return string(runes)
+}
+
+func isGoIdentifierStart(value rune) bool {
+	return value == '_' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
+}
+
+func isGoIdentifierPart(value rune) bool {
+	return isGoIdentifierStart(value) || value >= '0' && value <= '9'
+}
+
+func schemaColumnTypeHandler(column SchemaColumn) string {
+	typeHandler := strings.TrimSpace(column.TypeHandler)
+	if typeHandler != "" {
+		return typeHandler
+	}
+	dbType := strings.ToLower(strings.TrimSpace(column.DBType))
+	if strings.Contains(dbType, "json") {
+		return "json"
+	}
+	return ""
 }
 
 func schemaIdentifierPart(value string) string {

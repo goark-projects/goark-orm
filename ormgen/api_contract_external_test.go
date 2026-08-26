@@ -34,10 +34,26 @@ func TestV1GeneratorPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 		}
 		return "string", nil
 	})
+	naming := ormgen.SchemaNamingStrategyFuncs{
+		FieldNameFunc: func(_ ormgen.SchemaTable, column ormgen.SchemaColumn) (string, error) {
+			if column.FieldName != "" {
+				return column.FieldName, nil
+			}
+			return "Contract" + column.Name, nil
+		},
+	}
+	filter := ormgen.SchemaColumnFilterFunc(func(_ ormgen.SchemaTable, column ormgen.SchemaColumn) bool {
+		return column.Name != "shadow"
+	})
+	selectDisabled := true
 	spec := ormgen.ReverseEngineerSpec{
-		PackageName: "contract",
-		DatabaseID:  "postgres",
-		TypeMapper:  mapper,
+		PackageName:     "contract",
+		DatabaseID:      "postgres",
+		TypeMapper:      mapper,
+		NamingStrategy:  naming,
+		IgnoreColumns:   []string{"legacy"},
+		ColumnFilter:    filter,
+		ColumnOverrides: map[string]ormgen.SchemaColumnOverride{"name": {SelectDisabled: &selectDisabled}},
 	}
 	model, err := ormgen.BuildPackageModelFromSchema(spec, schema)
 	if err != nil {
@@ -85,6 +101,8 @@ func TestV1GeneratorPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 
 	var _ ormgen.SchemaIntrospector = introspector
 	var _ ormgen.SchemaTypeMapper = mapper
+	var _ ormgen.SchemaNamingStrategy = naming
+	var _ ormgen.SchemaColumnFilter = filter
 	var _ ormgen.TemplateRenderer = renderer
 	var _ func(ormgen.GenerateSpec) ([]byte, error) = ormgen.Generate
 	var _ func(ormgen.GenerateSpec, ormgen.TemplateRenderer) ([]byte, error) = ormgen.GenerateWithRenderer

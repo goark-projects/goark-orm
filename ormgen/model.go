@@ -20,9 +20,10 @@ type PackageModel struct {
 
 // EntityModel 描述一个实体类型。
 type EntityModel struct {
-	TypeName string
-	Table    string
-	Columns  []ColumnModel
+	TypeName      string
+	Table         string
+	Columns       []ColumnModel
+	DeclareStruct bool
 }
 
 // ColumnModel 描述实体字段映射。

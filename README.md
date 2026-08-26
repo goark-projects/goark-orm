@@ -13,7 +13,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - 生成 `RegisterGoarkORMMetadata`、实体 RowScanner、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
 - Mapper 接口支持本包内接口嵌入，生成期会展平公共方法并按当前 Mapper namespace 绑定 Statement。
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package，并提供 `--validate`、`--dry-run`、`--check`、`--diff` 作为 CI 生成一致性门禁。
-- `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector`、`SQLSchemaIntrospector`、多数据库 `SQLSchemaDialect` 和 `ReverseEngineerWithRenderer`，可由外部数据库适配层或业务测试包做 schema 反向工程与自定义模板渲染；core 不直接依赖数据库驱动。
+- `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector`、`SQLSchemaIntrospector`、多数据库 `SQLSchemaDialect` 和 `ReverseEngineerWithRenderer`，可由外部数据库适配层或业务测试包做 schema 反向工程与自定义模板渲染；支持反向工程生成实体 struct、命名策略、忽略列、列过滤和列级覆盖，core 不直接依赖数据库驱动。
 - `ormgen` 提供 `DetectSchemaDrift` / `ValidateSchemaDrift`，可把已注册实体元数据与 `SchemaIntrospector` 读取到的真实 schema 做表、列、主键、自增、空值、长度/精度和数据库类型差异检测。
 - `ormtest` 提供环境变量门控的真实数据库兼容性测试套件，调用方在自己的测试二进制中显式 blank import 驱动后即可复用 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler 和 callable statement 用例；标准 PG/MySQL 兼容矩阵可直接通过 `RunCompatibilitySuiteFromEnv` 启用。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
@@ -133,6 +133,33 @@ goark-orm generate orm --config goark-orm.json --diff
 ```
 
 需要接入数据库反向工程时，可在业务侧或独立 adapter 实现 `ormgen.SchemaIntrospector`，也可以把已注册驱动的 `*sql.DB` / `*sql.Tx` 交给 `ormgen.NewSQLSchemaIntrospector`。schema 中间模型交给 `ormgen.ReverseEngineer` / `ormgen.Render`，或者用 `ormgen.ReverseEngineerWithRenderer` 直接走自定义模板；`goark-orm` core 不 blank import 具体数据库驱动、不提交 schema 脚本。
+
+反向工程默认会声明实体 struct，并生成严格 `goark-orm` tag、字段常量、类型化字段常量、BaseMapper 和 Service 工厂。已有实体由源码扫描路径生成时不会重复声明 struct。复杂命名或字段策略可通过显式选项控制：
+
+```go
+model, err := ormgen.ReverseEngineer(ctx, introspector, ormgen.ReverseEngineerSpec{
+	PackageName:   "account",
+	DatabaseID:    "postgres",
+	Schema:        "public",
+	TablePrefix:   "sys_",
+	IgnoreColumns: []string{"sys_user.password_hash"},
+	ColumnOverrides: map[string]ormgen.SchemaColumnOverride{
+		"profile": {
+			GoType:        "map[string]any",
+			TypeHandler:   "json",
+			WhereStrategy: orm.FieldStrategyNotNull,
+		},
+	},
+})
+if err != nil {
+	return err
+}
+source, err := ormgen.Render(model)
+if err != nil {
+	return err
+}
+_ = source
+```
 
 已有实体元数据也可以反向校验真实库结构：
 
