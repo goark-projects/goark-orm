@@ -80,6 +80,47 @@ func TestSQLSession_WithLayerMiddleware_whenWrapperReturnsNil_shouldReject(t *te
 	}
 }
 
+func TestSQLSession_WithStatementHandlerMiddleware_whenRuntimeArgsMutated_shouldKeepCallerArgs(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(8), "Bob"}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:         "FindByID",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.FindByID",
+		Command:    StatementCommandSelect,
+		Source:     StatementSourceAnnotation,
+		SQL:        "select id, name from sys_user where id = #{id}",
+		ResultType: "sqlSessionUser",
+	})
+	session, err := NewSQLSession(
+		registry,
+		state.db,
+		NewPostgresDialect(),
+		WithStatementHandlerMiddleware(StatementHandlerMiddlewareFunc(func(next StatementHandler) StatementHandler {
+			return mutatingStatementHandler{next: next}
+		})),
+	)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	args := NamedArgs{"id": int64(7)}
+	var user sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", args, &user); err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if args["id"] != int64(7) {
+		t.Fatalf("caller args were mutated: %#v", args)
+	}
+	if len(state.queryArgs) != 1 || state.queryArgs[0].Value != int64(8) {
+		t.Fatalf("expected runtime args to affect query only, got %#v", state.queryArgs)
+	}
+}
+
 type recordingExecutor struct {
 	next  StatementExecutor
 	calls *[]string
@@ -117,6 +158,27 @@ func (h recordingStatementHandler) Compile(ctx context.Context, runtime *Stateme
 
 func (h recordingStatementHandler) CompileText(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs) (CompiledSQL, error) {
 	*h.calls = append(*h.calls, "statement:compile-text")
+	return h.next.CompileText(ctx, meta, dialect, sqlText, args)
+}
+
+type mutatingStatementHandler struct {
+	next StatementHandler
+}
+
+func (h mutatingStatementHandler) Prepare(ctx context.Context, meta StatementMeta, args NamedArgs) (*StatementRuntime, error) {
+	runtime, err := h.next.Prepare(ctx, meta, args)
+	if err != nil || runtime == nil {
+		return runtime, err
+	}
+	runtime.Args["id"] = int64(8)
+	return runtime, nil
+}
+
+func (h mutatingStatementHandler) Compile(ctx context.Context, runtime *StatementRuntime) (CompiledSQL, error) {
+	return h.next.Compile(ctx, runtime)
+}
+
+func (h mutatingStatementHandler) CompileText(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs) (CompiledSQL, error) {
 	return h.next.CompileText(ctx, meta, dialect, sqlText, args)
 }
 

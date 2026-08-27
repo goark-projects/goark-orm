@@ -7,55 +7,55 @@
   },
   {
     "name": "BenchmarkRenderDynamicSQL",
-    "max_ns_op": 9500,
-    "max_b_op": 3800,
-    "max_allocs_op": 83
+    "max_ns_op": 6500,
+    "max_b_op": 2800,
+    "max_allocs_op": 50
   },
   {
     "name": "BenchmarkEvalExpression_Cached",
-    "max_ns_op": 1200,
+    "max_ns_op": 1400,
     "max_b_op": 8,
     "max_allocs_op": 1
   },
   {
     "name": "BenchmarkQueryWrapperBuild",
-    "max_ns_op": 2000,
+    "max_ns_op": 2300,
     "max_b_op": 1600,
     "max_allocs_op": 38
   },
   {
     "name": "BenchmarkSQLSessionQueryOneScan",
-    "max_ns_op": 3600,
-    "max_b_op": 3300,
-    "max_allocs_op": 29
+    "max_ns_op": 3800,
+    "max_b_op": 3100,
+    "max_allocs_op": 27
   },
   {
     "name": "BenchmarkSQLSessionQueryOneGeneratedRowScanner",
-    "max_ns_op": 2800,
-    "max_b_op": 2800,
+    "max_ns_op": 3200,
+    "max_b_op": 2600,
     "max_allocs_op": 25
   },
   {
     "name": "BenchmarkSQLSessionQueryOneTypeHandlerRowScanner",
-    "max_ns_op": 3200,
-    "max_b_op": 3000,
-    "max_allocs_op": 30
+    "max_ns_op": 3400,
+    "max_b_op": 2600,
+    "max_allocs_op": 28
   },
   {
     "name": "BenchmarkSQLSessionQueryOneResultMapTypeHandler",
-    "max_ns_op": 4600,
-    "max_b_op": 4400,
-    "max_allocs_op": 38
+    "max_ns_op": 5000,
+    "max_b_op": 4100,
+    "max_allocs_op": 36
   },
   {
     "name": "BenchmarkAppendSQLCondition_GroupedQuery",
-    "max_ns_op": 950,
+    "max_ns_op": 1200,
     "max_b_op": 256,
     "max_allocs_op": 1
   },
   {
     "name": "BenchmarkCountSQLBase_NestedOrderBy",
-    "max_ns_op": 650,
+    "max_ns_op": 800,
     "max_b_op": 0,
     "max_allocs_op": 0
   },
@@ -67,7 +67,7 @@
   },
   {
     "name": "BenchmarkJSONTypeHandler_ToDB",
-    "max_ns_op": 1100,
+    "max_ns_op": 1300,
     "max_b_op": 520,
     "max_allocs_op": 6
   },

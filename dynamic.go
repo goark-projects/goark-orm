@@ -155,25 +155,10 @@ func (c *dynamicRenderContext) renderChildren(nodes []DynamicSQLNode) (string, e
 
 func (c *dynamicRenderContext) renderText(text string) string {
 	text = normalizeSQLFragment(text)
-	if text == "" || len(c.aliases) == 0 {
+	if text == "" || len(c.aliases) == 0 || !strings.Contains(text, "#{") {
 		return text
 	}
-	return statementParamPattern.ReplaceAllStringFunc(text, func(raw string) string {
-		matches := statementParamPattern.FindStringSubmatch(raw)
-		if len(matches) < 2 {
-			return raw
-		}
-		parameter := strings.TrimSpace(matches[1])
-		path, err := parseParameterPath(parameter)
-		if err != nil || len(path.segments) == 0 {
-			return raw
-		}
-		if alias, ok := c.aliases[path.segments[0].name]; ok {
-			path.segments[0].name = alias
-			return "#{" + path.String() + "}"
-		}
-		return raw
-	})
+	return rewriteDynamicParameterAliases(text, c.aliases)
 }
 
 func (c *dynamicRenderContext) renderTrim(node DynamicSQLNode) (string, error) {
@@ -392,6 +377,9 @@ func removeSuffixOverride(sql string, overrides []string) string {
 }
 
 func normalizeSQLFragment(raw string) string {
+	if !strings.Contains(raw, "\n") {
+		return strings.TrimSpace(raw)
+	}
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
 	normalized := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -404,14 +392,38 @@ func normalizeSQLFragment(raw string) string {
 }
 
 func joinSQLFragments(fragments []string) string {
-	out := make([]string, 0, len(fragments))
+	count := 0
+	size := 0
+	only := ""
 	for _, fragment := range fragments {
 		fragment = strings.TrimSpace(fragment)
 		if fragment != "" {
-			out = append(out, fragment)
+			count++
+			size += len(fragment)
+			only = fragment
 		}
 	}
-	return strings.Join(out, " ")
+	if count == 0 {
+		return ""
+	}
+	if count == 1 {
+		return only
+	}
+	var builder strings.Builder
+	builder.Grow(size + count - 1)
+	wrote := false
+	for _, fragment := range fragments {
+		fragment = strings.TrimSpace(fragment)
+		if fragment == "" {
+			continue
+		}
+		if wrote {
+			builder.WriteByte(' ')
+		}
+		builder.WriteString(fragment)
+		wrote = true
+	}
+	return builder.String()
 }
 
 func (c *dynamicRenderContext) eval(expression string) (bool, error) {

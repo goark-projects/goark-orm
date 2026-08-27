@@ -18,26 +18,27 @@ type SQLExecutor interface {
 
 // SQLSession 基于 database/sql 执行已经注册的 Statement。
 type SQLSession struct {
-	registry                 *Registry
-	executor                 SQLExecutor
-	dialect                  Dialect
-	configuration            Configuration
-	typeHandlers             map[string]TypeHandler
-	interceptors             []StatementInterceptor
-	statementExecutor        StatementExecutor
-	statementHandler         StatementHandler
-	parameterHandler         ParameterHandler
-	resultSetHandler         ResultSetHandler
-	identifierGenerator      IdentifierGenerator
-	metaObjectHandler        MetaObjectHandler
-	localCache               *localCache
-	localCacheScope          LocalCacheScope
-	cacheEnabled             bool
-	mapUnderscoreToCamelCase bool
-	preparedMu               sync.Mutex
-	preparedStatements       *preparedStatementCache
-	columnBindingPlans       sync.Map
-	statementParameterPlans  sync.Map
+	registry                      *Registry
+	executor                      SQLExecutor
+	dialect                       Dialect
+	configuration                 Configuration
+	typeHandlers                  map[string]TypeHandler
+	interceptors                  []StatementInterceptor
+	statementExecutor             StatementExecutor
+	statementHandler              StatementHandler
+	parameterHandler              ParameterHandler
+	resultSetHandler              ResultSetHandler
+	hasStatementHandlerMiddleware bool
+	identifierGenerator           IdentifierGenerator
+	metaObjectHandler             MetaObjectHandler
+	localCache                    *localCache
+	localCacheScope               LocalCacheScope
+	cacheEnabled                  bool
+	mapUnderscoreToCamelCase      bool
+	preparedMu                    sync.Mutex
+	preparedStatements            *preparedStatementCache
+	columnBindingPlans            sync.Map
+	statementParameterPlans       sync.Map
 
 	transactionalCache           bool
 	secondLevelCacheMu           sync.Mutex
@@ -277,10 +278,7 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 	if s == nil {
 		return nil, configurationErrorf("session is nil")
 	}
-	renderArgs := copyNamedArgs(args)
-	if renderArgs == nil {
-		renderArgs = NamedArgs{}
-	}
+	renderArgs := s.statementRuntimeArgs(meta, args)
 	providerCacheKey := ""
 	if strings.TrimSpace(meta.Provider) != "" {
 		source, err := s.invokeSQLProvider(ctx, meta, renderArgs)
@@ -1177,6 +1175,9 @@ func destination(dest any) (reflect.Value, error) {
 
 func normalizeColumnKey(value string) string {
 	value = strings.TrimSpace(value)
+	if value == "" || columnKeyAlreadyNormalized(value) {
+		return value
+	}
 	var builder strings.Builder
 	builder.Grow(len(value))
 	for _, r := range value {
@@ -1188,6 +1189,22 @@ func normalizeColumnKey(value string) string {
 		}
 	}
 	return strings.ToLower(builder.String())
+}
+
+func columnKeyAlreadyNormalized(value string) bool {
+	for index := 0; index < len(value); index++ {
+		ch := value[index]
+		if ch == '_' || ch == '-' || ch == '.' || ch == ' ' {
+			return false
+		}
+		if ch >= 'A' && ch <= 'Z' {
+			return false
+		}
+		if ch >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func strictColumnKey(value string) string {

@@ -83,6 +83,9 @@ func WithStatementHandlerMiddleware(middleware ...StatementHandlerMiddleware) SQ
 		if err != nil {
 			return err
 		}
+		if containsStatementHandlerMiddleware(middleware) {
+			session.hasStatementHandlerMiddleware = true
+		}
 		session.statementHandler = handler
 		return nil
 	}
@@ -144,6 +147,15 @@ func wrapStatementHandler(next StatementHandler, middleware []StatementHandlerMi
 		}
 	}
 	return next, nil
+}
+
+func containsStatementHandlerMiddleware(middleware []StatementHandlerMiddleware) bool {
+	for _, item := range middleware {
+		if item != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func wrapParameterHandler(next ParameterHandler, middleware []ParameterHandlerMiddleware) (ParameterHandler, error) {
