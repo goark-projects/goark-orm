@@ -19,6 +19,7 @@ type MyBatisAssembly struct {
 type MyBatisAssemblyResult struct {
 	Configuration  Configuration
 	Registry       *Registry
+	Session        *SQLSession
 	SessionFactory *SQLSessionFactory
 	TypeAliases    map[string]string
 	TypeHandlers   []string
@@ -68,8 +69,13 @@ func AssembleMyBatisConfig(assembly MyBatisAssembly) (MyBatisAssemblyResult, err
 	}
 	options = append(options, pluginOptions...)
 	var factory *SQLSessionFactory
+	var session *SQLSession
 	if assembly.DB != nil {
 		factory, err = NewSQLSessionFactory(assembly.Registry, assembly.DB, configuration.Dialect, options...)
+		if err != nil {
+			return MyBatisAssemblyResult{}, err
+		}
+		session, err = factory.OpenSession()
 		if err != nil {
 			return MyBatisAssemblyResult{}, err
 		}
@@ -77,6 +83,7 @@ func AssembleMyBatisConfig(assembly MyBatisAssembly) (MyBatisAssemblyResult, err
 	return MyBatisAssemblyResult{
 		Configuration:  configuration,
 		Registry:       assembly.Registry,
+		Session:        session,
 		SessionFactory: factory,
 		TypeAliases:    aliases,
 		TypeHandlers:   append([]string(nil), typeHandlerNames...),

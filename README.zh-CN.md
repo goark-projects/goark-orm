@@ -28,7 +28,7 @@ module goark.dev/orm
 - 生成元数据注册、实体 RowScanner、Mapper 实现、类型化字段常量、`BaseMapper` 工厂和 `Service` 工厂。
 - XML 动态 SQL：`sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`。
 - 安全表达式执行，覆盖布尔逻辑、比较、算术、三元表达式、集合判断、`empty`、`in/not in` 和白名单只读方法。
-- PostgreSQL、MySQL、MariaDB、SQLite、SQL Server、Oracle 和问号占位符方言。
+- PostgreSQL 和 MySQL 是当前真实支持数据库；MariaDB、SQLite、SQL Server、Oracle 和问号占位符仅保留 SQL 生成方言能力。
 - Statement 级 timeout、fetch size、result set type、result ordered、key column、缓存策略和拦截器忽略配置。
 - Callable statement，支持 IN、OUT、INOUT 参数、`sql.Out` 绑定和多结果集扫描。
 - ResultMap constructor、association、collection、discriminator、nested select、显式 Lazy、column prefix 和 not-null guard。
@@ -194,6 +194,7 @@ if err != nil {
 	return err
 }
 session := assembled.Session
+defer session.Close()
 _ = session
 ```
 

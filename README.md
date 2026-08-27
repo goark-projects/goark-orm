@@ -28,7 +28,7 @@ module goark.dev/orm
 - Generated metadata registration, entity row scanners, mapper implementations, typed field constants, `BaseMapper` factories, and `Service` factories.
 - Dynamic XML SQL nodes: `sql/include`, `bind`, `if`, `where`, `set`, `trim`, `foreach`, and `choose/when/otherwise`.
 - Safe expression evaluation for dynamic SQL, including boolean logic, comparisons, arithmetic, ternary expressions, collection tests, `empty`, `in/not in`, and whitelisted read-only string or collection helpers.
-- Parameterized SQL compilation with dialect placeholders for PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, and a question-placeholder dialect.
+- PostgreSQL and MySQL are the current real supported database targets. MariaDB, SQLite, SQL Server, Oracle, and the question-placeholder dialect remain SQL generation dialects only.
 - Statement options for timeout, fetch size, result set type, ordered result mapping, generated key columns, cache behavior, and interceptor ignore lists.
 - Callable statements with IN, OUT, INOUT parameters, `sql.Out` binding, and ordered multi-result-set scanning.
 - Result maps with constructor arguments, associations, collections, discriminator branches, nested selects, explicit lazy loading, column prefixes, and not-null guards.
@@ -194,6 +194,7 @@ if err != nil {
 	return err
 }
 session := assembled.Session
+defer session.Close()
 _ = session
 ```
 

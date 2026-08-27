@@ -142,6 +142,13 @@ func TestAssembleMyBatisConfig_whenRegistryConfigured_shouldCreateFactory(t *tes
 	if assembled.SessionFactory == nil {
 		t.Fatalf("expected session factory")
 	}
+	if assembled.Session == nil {
+		t.Fatalf("expected default session")
+	}
+	defer assembled.Session.Close()
+	if assembled.Session.Dialect().Name() != "postgres" {
+		t.Fatalf("unexpected default session dialect %s", assembled.Session.Dialect().Name())
+	}
 	session, err := assembled.SessionFactory.OpenSession()
 	if err != nil {
 		t.Fatalf("open session failed: %v", err)
@@ -152,6 +159,26 @@ func TestAssembleMyBatisConfig_whenRegistryConfigured_shouldCreateFactory(t *tes
 	}
 	if assembled.TypeAliases == nil || len(assembled.Mappers) != 1 {
 		t.Fatalf("unexpected assembly result %#v", assembled)
+	}
+}
+
+func TestAssembleMyBatisConfig_whenDBMissing_shouldNotCreateRuntimeSessions(t *testing.T) {
+	registry := NewRegistry()
+
+	assembled, err := AssembleMyBatisConfig(MyBatisAssembly{
+		Config: MyBatisConfig{
+			Environment: MyBatisEnvironment{DbType: DbTypePostgres},
+		},
+		Registry: registry,
+	})
+	if err != nil {
+		t.Fatalf("assemble config failed: %v", err)
+	}
+	if assembled.Session != nil || assembled.SessionFactory != nil {
+		t.Fatalf("expected no runtime sessions without DB, got %#v", assembled)
+	}
+	if assembled.Configuration.Dialect.Name() != "postgres" {
+		t.Fatalf("unexpected dialect %s", assembled.Configuration.Dialect.Name())
 	}
 }
 

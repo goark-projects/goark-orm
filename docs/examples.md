@@ -362,7 +362,9 @@ assembled, err := orm.AssembleMyBatisConfig(orm.MyBatisAssembly{
 if err != nil {
 	return err
 }
-_ = assembled.Session
+session := assembled.Session
+defer session.Close()
+_ = session
 ```
 
 ## Schema Compatibility

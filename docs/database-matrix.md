@@ -4,7 +4,11 @@
 
 The matrix records SQL dialect behavior and reusable real database test coverage. Core packages do not import concrete drivers and do not manage migrations. Driver registration, DSNs, setup SQL, and cleanup SQL belong to the caller's test harness.
 
-## Dialects
+## Real Support Boundary
+
+PostgreSQL and MySQL are the only current real supported database targets. The reusable standard compatibility suite creates DDL and executable cases only for those two engines. Other dialects listed below are SQL generation capabilities, not a current real database support claim.
+
+## SQL Generation Dialects
 
 | Database | `DbType` | Factory | Placeholder | Identifier quote | Pagination |
 | --- | --- | --- | --- | --- | --- |
