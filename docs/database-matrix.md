@@ -30,6 +30,16 @@
 | SQL Server | `OUTPUT inserted` | `MERGE` | `WITH (...)` 锁提示 | 原生 | 支持 | 支持 |
 | Oracle | `RETURNING INTO` | `MERGE` | `FOR UPDATE`，支持 `NOWAIT` | 原生 | 支持 | 支持 |
 
+## 方言 SQL 辅助 API
+
+`goark-orm` core 只生成参数化 SQL 或执行计划，不持有具体数据库连接，也不处理 Migration / DDL 生命周期。
+
+| API | 用途 | 覆盖范围 |
+| --- | --- | --- |
+| `BuildUpsertSQL` | 生成 `SQLSource`，可直接交给 Provider 或 `CompileSQLContext` | PostgreSQL/SQLite `ON CONFLICT`，MySQL/MariaDB `ON DUPLICATE KEY UPDATE` |
+| `RowLockClause` | 生成 SELECT 行锁子句 | `FOR UPDATE`、`SKIP LOCKED`、`NOWAIT`，以及 SQL Server 锁提示 |
+| `NewGeneratedKeyPlan` | 返回主键回读计划 | `LastInsertId`、`RETURNING`、`OUTPUT inserted`、`RETURNING INTO` |
+
 ## 默认验证
 
 ```bash

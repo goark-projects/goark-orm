@@ -7,7 +7,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 本仓库已落地第一版 ORM 元数据与生成器基础能力，`orm.APIVersion` 当前为 `v1`。V1 公共契约采用兼容优先策略：已导出的运行时接口、元数据结构、生成器输入模型和 CLI 主命令保持向后兼容；新增能力优先通过可选字段、可选参数、独立适配层或新接口扩展。详细边界见 `docs/api-compatibility.md`。已支持：
 
 - 实体 `//goark-orm:entity` 与严格 `goark-orm` struct tag 解析。
-- Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete`、`call` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点和显式 SQL Provider。
+- Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete`、`call` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点、显式 SQL Provider、Provider 描述校验和 Provider SQL Builder。
 - XML Mapper 静态语句、动态 SQL 基础节点、`call`、`parameter`、`resultSet`、`bind`、`selectKey`、`databaseId`、`resultMap`、`constructor/idArg/arg`、`association`、`collection`、`extends`、`autoMapping`、`discriminator`、`columnPrefix`、`notNullColumn` 元数据和 namespace/类型一致性校验。
 - XML 与注解在同一个 Mapper 接口中混用。
 - 生成 `RegisterGoarkORMMetadata`、实体 RowScanner、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
@@ -16,7 +16,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector`、`SQLSchemaIntrospector`、多数据库 `SQLSchemaDialect` 和 `ReverseEngineerWithRenderer`，可由外部数据库适配层或业务测试包做 schema 反向工程与自定义模板渲染；支持反向工程生成实体 struct、命名策略、忽略列、列过滤和列级覆盖，core 不直接依赖数据库驱动。
 - `ormgen` 提供 `DetectSchemaDrift` / `ValidateSchemaDrift`，可把已注册实体元数据与 `SchemaIntrospector` 读取到的真实 schema 做表、列、主键、自增、空值、长度/精度和数据库类型差异检测。
 - `ormtest` 提供环境变量门控的真实数据库兼容性测试套件，调用方在自己的测试二进制中显式 blank import 驱动后即可复用 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler 和 callable statement 用例；标准 PG/MySQL 兼容矩阵可直接通过 `RunCompatibilitySuiteFromEnv` 启用。
-- `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`DialectCapabilities`、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
+- `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`DialectCapabilities`、方言 UPSERT / 行锁 / 生成主键辅助 API、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
 - MyBatis 风格 statement 级 `timeout`、`fetchSize`、`resultSetType`、`resultOrdered` 和 `keyColumn` 执行选项；语句级声明优先于全局默认值，并通过可选执行器接口传递给驱动适配层。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
 - MyBatis `${}` 原样替换的 Go 化安全版本：默认拒绝普通字符串，只允许 `RawSQLToken`，内置 `RawIdentifier` 和 `RawOrderBy` 白名单 token。
@@ -46,7 +46,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `BatchSession` 批处理执行器、`Flush` / `Clear`、事务内批处理和查询前自动 flush。
 - Session/Statement 级一级缓存配置，写操作、提交、回滚和关闭时自动失效。
 - Mapper namespace 级二级缓存 SPI、默认内存 LRU 缓存、XML `<cache>` / `<cache-ref>`、`blocking=true` 并发 miss 合并、`CacheStatsProvider` 统计快照，以及 statement 级 `useCache` / `flushCache` 策略。
-- ResultMap 支持 `constructor` 字段映射、显式/自动映射开关、内联 association/collection 扫描、`columnPrefix`、`notNullColumn`、collection 多行聚合、`discriminator` 运行期 case 分派，以及 `select` 嵌套查询 eager 和显式 lazy 回填；嵌套查询支持复合列参数并在单次父查询内复用相同参数结果，降低 N+1 重复查询。
+- ResultMap 支持 `constructor` 字段映射、显式/自动映射开关、内联 association/collection 扫描、`columnPrefix`、`notNullColumn`、collection 多行聚合、`discriminator` 运行期 case 分派，以及 `select` 嵌套查询 eager 和显式 lazy 回填；简单 ResultMap、association 组合和 discriminator 选中后的简单 effective ResultMap 会优先复用已注册 RowScanner。
 - `ResultHandler`、`QueryCursor`、`QueryEach` 和 `RowCursor` 支持逐行流式查询；游标查询不写入一级缓存和二级缓存，并拒绝需要多行聚合的 collection resultMap。生成 Mapper 可直接声明 Cursor 返回或 ResultHandler 回调签名。
 - `Lazy[T]` 和 `LazySlice[T]` 支持 `fetchType="lazy"` 的 Go 化显式延迟加载；业务必须调用 `Load(ctx)` 触发查询，不使用透明代理。
 - 二级缓存采用 MyBatis 风格事务语义：自动提交直接生效，事务内查询缓存和写入失效都延迟到 `Commit` 后发布，`Rollback` 丢弃待发布变更。
@@ -454,6 +454,55 @@ err := registry.RegisterSQLProvider("UserSQL.ListByStatus", func(ctx context.Con
 if err != nil {
 	return err
 }
+```
+
+复杂 Provider 建议用描述式注册和 SQL Builder：
+
+```go
+err := registry.RegisterSQLProviderDescriptor(orm.NewSQLProviderDescriptor(
+	"UserSQL.ListByStatus",
+	func(ctx context.Context, statement orm.StatementMeta, args orm.NamedArgs) (orm.SQLSource, error) {
+		return orm.NewSelectSQLBuilder().
+			Select("id", "name", "status").
+			From("sys_user").
+			WhereEq("status", args["status"]).
+			OrderByAsc("id").
+			Limit(args["limit"]).
+			CacheKey("tenant:" + args["tenant"].(string)).
+			Build()
+	},
+	orm.WithSQLProviderCommands(orm.StatementCommandSelect),
+	orm.WithSQLProviderStatements("system.user.UserMapper.ListByStatus"),
+))
+if err != nil {
+	return err
+}
+```
+
+方言 SQL 辅助 API 可用于 Provider 或业务数据访问层，不涉及建表或迁移：
+
+```go
+source, err := orm.BuildUpsertSQL(orm.NewPostgresDialect(), orm.UpsertSpec{
+	Table:           "sys_user",
+	InsertColumns:   []string{"id", "name", "status"},
+	ConflictColumns: []string{"id"},
+	UpdateColumns:   []string{"name", "status"},
+	Values: orm.NamedArgs{
+		"id":     int64(7),
+		"name":   "Alice",
+		"status": "ACTIVE",
+	},
+})
+if err != nil {
+	return err
+}
+_ = source
+
+lockClause, err := orm.RowLockClause(orm.NewPostgresDialect(), orm.RowLockOptions{SkipLocked: true})
+if err != nil {
+	return err
+}
+_ = lockClause
 ```
 
 `${}` 只允许显式安全 token，适合动态表名、列名或排序字段：

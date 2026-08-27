@@ -680,7 +680,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 ResultMap 的 association 和 collection 嵌套映射，collection 会按根对象 id 聚合多行结果。
 - 已支持 ResultMap association/collection 的 `select` 嵌套查询 eager 回填、`Lazy[T]` / `LazySlice[T]` 显式 lazy 延迟加载、复合列参数绑定和单次父查询内相同参数结果复用；非 Lazy 字段保持 eager 行为，避免引入透明代理。
 - 已支持 XML resultMap `constructor/idArg/arg`、`columnPrefix`、`notNullColumn`、`extends` 生成期继承合并、`autoMapping` 三态元数据和 `discriminator/case` 运行期分派。
-- 已支持 Annotation Mapper 的 `<script>` 动态 SQL 和显式注册 SQL Provider。
+- 已支持 Annotation Mapper 的 `<script>` 动态 SQL、显式注册 SQL Provider、Provider 描述校验、Provider 自带参数合并、Provider 缓存 key 维度和 Go 原生 SQL Builder。
 - 已支持 `ResultHandler`、`QueryCursor`、`QueryEach` 和 `RowCursor` 逐行流式查询；游标查询绕过缓存写入，并拒绝 collection resultMap 多行聚合场景。
 - 已支持独立 `Configuration` API，用于统一配置方言、缓存策略、下划线转驼峰和默认执行器类型。
 - 已支持 MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`。
@@ -691,7 +691,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 SQLSession 拦截器 SPI、全表更新/删除保护、SQL 观察、租户条件、数据权限条件、动态表名、分页拦截器和非观测 SQL 治理拦截器。
 - 已支持独立多数据源路由 Session、路由工厂、context 数据源强制路由、读写分离 resolver 和 Statement 映射 resolver。
 - 已支持 `UpdateWrapper` 局部更新、常用条件操作符、`TypedField` 字段引用、生成期 `UserTypedFields`、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
-- 已支持 `IDType` 主键策略、默认 ASSIGN_ID/ASSIGN_UUID 生成器、XML `<bind>` 和 `databaseId` 语句选择。
+- 已支持 `IDType` 主键策略、默认 ASSIGN_ID/ASSIGN_UUID 生成器、XML `<bind>`、`databaseId` 语句选择，以及方言 UPSERT / 行锁 / 生成主键辅助 API。
 - 已支持 `QueryWrapper` / `UpdateWrapper` 嵌套条件、EXISTS/NOT EXISTS、Apply、Last、Between/NotBetween、NotLike、LikeLeft/LikeRight、NotIn，以及 QueryWrapper 的 GroupBy/Having/Select/AllEq/条件化 OrderBy。
 - 已支持 BaseMapper 的 SelectOne、SelectCount、SelectMaps、SelectObjs、SelectByMap、SelectMapsPage、DeleteByMap、DeleteBatchIDs 和 SaveOrUpdate。
 - 已支持 BaseMapper / Service 的实体条件查询，字段 condition 和 whereStrategy 会进入 WHERE 构造；默认 whereStrategy 使用 Go 化 not-zero，避免基础类型零值误匹配。
@@ -703,7 +703,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持存储过程和 callable statement：XML `<call>`、`//goark-orm:call`、IN/OUT/INOUT 参数、多结果集和生成 Mapper `orm.Call` 调用。
 - 已支持内建 JSON TypeHandler 使用 ByteDance Sonic，生成器配置和测试套件中的 JSON 解析也统一通过内部 JSON codec 封装。
 - 已支持动态 SQL 安全 OGNL 表达式，包含算术、三元、集合、`empty`、`in/not in` 和白名单只读方法；不开放任意反射调用。
-- 已支持 `Registry.RegisterRowScanner` 显式注册生成式实体行扫描器；普通实体查询、callable 多结果集、简单 ResultMap 和关闭自动映射的 association ResultMap 优先走 RowScanner，collection、discriminator、nested select 和 TypeHandler 映射继续使用受控 fallback。
+- 已支持 `Registry.RegisterRowScanner` 显式注册生成式实体行扫描器；普通实体查询、callable 多结果集、简单 ResultMap、关闭自动映射的 association ResultMap 和 discriminator 选中后的简单 effective ResultMap 优先走 RowScanner，collection、nested select 和 TypeHandler 映射继续使用受控 fallback。
 - 增加 SQL 日志脱敏、慢 SQL、指标和 tracing 的更完整观测实现。
 - 已新增核心热路径 benchmark、环境变量门控的真实数据库兼容性测试套件，以及简单 ResultMap 复用生成式 RowScanner 的扫描快路径；数据库方言矩阵记录在 `docs/database-matrix.md`。
 
