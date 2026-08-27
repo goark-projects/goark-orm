@@ -25,6 +25,37 @@ func TestEvalExpression_whenParenthesesComparisonAndNotProvided_shouldEvaluateSa
 	}
 }
 
+func TestCompileExpressionPlan_whenRepeatedExpressionProvided_shouldReuseTokens(t *testing.T) {
+	t.Parallel()
+
+	first, err := compileExpressionPlan("status != nil and status != ''")
+	if err != nil {
+		t.Fatalf("compile first expression failed: %v", err)
+	}
+	second, err := compileExpressionPlan(" status != nil and status != '' ")
+	if err != nil {
+		t.Fatalf("compile second expression failed: %v", err)
+	}
+	if len(first.tokens) == 0 || len(second.tokens) == 0 {
+		t.Fatalf("expected compiled tokens")
+	}
+	if &first.tokens[0] != &second.tokens[0] {
+		t.Fatalf("expected cached expression tokens to be reused")
+	}
+	ok, err := evalExpression("status != nil and status != ''", func(name string) (any, bool) {
+		if name == "status" {
+			return "ACTIVE", true
+		}
+		return nil, false
+	})
+	if err != nil {
+		t.Fatalf("eval cached expression failed: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected cached expression to match")
+	}
+}
+
 func TestEvalExpression_whenCollectionSizeProvided_shouldCompareLength(t *testing.T) {
 	t.Parallel()
 

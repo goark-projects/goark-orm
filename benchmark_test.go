@@ -49,6 +49,30 @@ func BenchmarkRenderDynamicSQL(b *testing.B) {
 	}
 }
 
+func BenchmarkEvalExpression_Cached(b *testing.B) {
+	expression := "status != nil and status != '' and ids.size > 0 and (age + bonus) >= 21"
+	args := NamedArgs{"status": "ACTIVE", "ids": []int64{1, 2, 3}, "age": 18, "bonus": 3}
+	if _, err := compileExpressionPlan(expression); err != nil {
+		b.Fatalf("compile expression failed: %v", err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		ok, err := evalExpression(expression, func(name string) (any, bool) {
+			value, ok, err := resolveNamedArg(args, name)
+			if err != nil || !ok {
+				return nil, false
+			}
+			return value, true
+		})
+		if err != nil {
+			b.Fatalf("eval expression failed: %v", err)
+		}
+		if !ok {
+			b.Fatalf("expected expression to match")
+		}
+	}
+}
+
 func BenchmarkQueryWrapperBuild(b *testing.B) {
 	dialect := NewPostgresDialect()
 	wrapper := NewQueryWrapper[baseMapperUser]().

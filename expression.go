@@ -19,15 +19,15 @@ func evalExpression(expression string, lookup valueLookup) (bool, error) {
 }
 
 func evalValueExpression(expression string, lookup valueLookup) (any, error) {
-	expression = strings.TrimSpace(expression)
-	if expression == "" {
-		return nil, fmt.Errorf("goark-orm: dynamic SQL value expression is empty")
-	}
-	tokens, err := scanExpressionTokens(expression)
+	plan, err := compileExpressionPlan(expression)
 	if err != nil {
 		return nil, err
 	}
-	parser := expressionParser{tokens: tokens, lookup: lookup}
+	return plan.evalValue(lookup)
+}
+
+func (p expressionPlan) evalValue(lookup valueLookup) (any, error) {
+	parser := expressionParser{tokens: p.tokens, lookup: lookup}
 	value, err := parser.parseTernary()
 	if err != nil {
 		return nil, err
