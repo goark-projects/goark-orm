@@ -24,6 +24,7 @@ The following exported runtime concepts are covered by the V1 compatibility poli
 - `SQLSession`, `SQLSessionFactory`, `TxSession`, `BatchSession`, `RoutingSession`, and `RoutingSessionFactory`.
 - `Configuration`, `GlobalConfig`, `DbConfig`, `MyBatisConfig`, `MyBatisConfigFile`, `MyBatisGlobalConfigFile`, `MyBatisDbConfigFile`, `MyBatisAssembly`, and `MyBatisAssemblyResult`.
 - `BaseMapper`, `Service`, `QueryChain`, `UpdateChain`, `QueryWrapper`, `UpdateWrapper`, `Page`, `PageRequest`, `Cursor`, `Lazy`, and `LazySlice`.
+- `SQLInjector`, `SQLInjectorFunc`, `DefaultSQLInjector`, `InjectOption`, `InjectNamespaceResolver`, `RegisterInjectedStatements`, and `RegisterDefaultInjectedStatementsForRegistry`.
 - `Dialect`, `DialectCapabilities`, `DbType`, `UpsertSpec`, `RowLockOptions`, and `GeneratedKeyPlan`.
 - `TypeHandler`, `RowScanner`, `IdentifierGenerator`, `MetaObjectHandler`, and `EnumValuer`.
 - `StatementInterceptor`, `StatementHandler`, `ParameterHandler`, `ResultSetHandler`, and their middleware types.

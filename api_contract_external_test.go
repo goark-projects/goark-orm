@@ -196,6 +196,13 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ func(orm.StatementSession, orm.EntityMeta, ...orm.BaseMapperOption) (*orm.BaseMapper[contractUser, int64], error) = orm.NewBaseMapper[contractUser, int64]
 	var _ func(*orm.BaseMapper[contractUser, int64]) (*orm.Service[contractUser, int64], error) = orm.NewService[contractUser, int64]
 	var _ func(*orm.Registry) error = orm.ValidateRegistry
+	var _ orm.SQLInjector = orm.DefaultSQLInjector{}
+	var _ orm.SQLInjector = orm.SQLInjectorFunc(func(orm.EntityMeta, orm.Dialect, orm.GlobalConfig) ([]orm.StatementMeta, error) { return nil, nil })
+	var _ orm.InjectNamespaceResolver = func(orm.EntityMeta) string { return "" }
+	var _ orm.InjectOption = orm.WithInjectDialect(orm.NewPostgresDialect())
+	var _ orm.InjectOption = orm.WithInjectGlobalConfig(orm.DefaultGlobalConfig())
+	var _ func(*orm.Registry, string, orm.EntityMeta, orm.SQLInjector, ...orm.InjectOption) error = orm.RegisterInjectedStatements
+	var _ func(*orm.Registry, orm.InjectNamespaceResolver, ...orm.InjectOption) error = orm.RegisterDefaultInjectedStatementsForRegistry
 
 	if _, err := orm.ParseDbType("postgres"); err != nil {
 		t.Fatalf("parse db type failed: %v", err)
