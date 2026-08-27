@@ -19,6 +19,7 @@ const (
 	defaultCompatibilityResultMapID = "CompatibilityRecordMap"
 	compatibilityJSONHandler        = "ormtest_json"
 	compatibilityKeyTableSuffix     = "_keys"
+	compatibilityCallRoutineSuffix  = "_report"
 )
 
 // CompatibilityRecord 是标准真实库兼容套件使用的最小实体。
@@ -77,6 +78,10 @@ func NewCompatibilitySuiteConfig(dbType orm.DbType, options ...CompatibilitySuit
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
 	}
+	callRoutine, err := compatibilityRelatedTable(opts.table, compatibilityCallRoutineSuffix)
+	if err != nil {
+		return DatabaseSuiteConfig{}, err
+	}
 	quotedTable, err := quoteCompatibilityTable(dialect, opts.table)
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
@@ -85,11 +90,16 @@ func NewCompatibilitySuiteConfig(dbType orm.DbType, options ...CompatibilitySuit
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
 	}
-	setupSQL, cleanupSQL, err := compatibilityDDL(dbType, quotedTable, quotedKeyTable)
+	quotedCallRoutine, err := quoteCompatibilityTable(dialect, callRoutine)
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
 	}
-	registry, err := newCompatibilityRegistry(opts.namespace, quotedTable)
+	setupSQL, cleanupSQL, err := compatibilityDDL(dbType, quotedTable, quotedKeyTable, quotedCallRoutine)
+	if err != nil {
+		return DatabaseSuiteConfig{}, err
+	}
+	callSQL := compatibilityCallSQL(dbType, quotedTable, quotedCallRoutine)
+	registry, err := newCompatibilityRegistry(opts.namespace, quotedTable, callSQL)
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
 	}
@@ -99,7 +109,7 @@ func NewCompatibilitySuiteConfig(dbType orm.DbType, options ...CompatibilitySuit
 		Registry:   registry,
 		SetupSQL:   setupSQL,
 		CleanupSQL: cleanupSQL,
-		Cases:      compatibilityCases(opts.namespace, opts.table, quotedTable, keyTable),
+		Cases:      compatibilityCases(opts.namespace, opts.table, quotedTable, keyTable, callSQL),
 	}, nil
 }
 
@@ -150,22 +160,26 @@ func normalizeCompatibilitySuiteOptions(options ...CompatibilitySuiteOption) com
 	return opts
 }
 
-func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable string) ([]string, []string, error) {
+func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable string, quotedCallRoutine string) ([]string, []string, error) {
 	switch dbType {
 	case orm.DbTypePostgres:
 		return []string{
+			"DROP FUNCTION IF EXISTS " + quotedCallRoutine + "(INTEGER)",
 			"DROP TABLE IF EXISTS " + quotedKeyTable,
 			"DROP TABLE IF EXISTS " + quotedTable,
 			"CREATE TABLE " + quotedKeyTable + " (id BIGSERIAL PRIMARY KEY, name VARCHAR(64) NOT NULL)",
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
-		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
+			compatibilityPostgresCallRoutineDDL(quotedTable, quotedCallRoutine),
+		}, []string{"DROP FUNCTION IF EXISTS " + quotedCallRoutine + "(INTEGER)", "DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
 	case orm.DbTypeMySQL, orm.DbTypeMariaDB:
 		return []string{
+			"DROP PROCEDURE IF EXISTS " + quotedCallRoutine,
 			"DROP TABLE IF EXISTS " + quotedKeyTable,
 			"DROP TABLE IF EXISTS " + quotedTable,
 			"CREATE TABLE " + quotedKeyTable + " (id BIGINT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(64) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
+			compatibilityMySQLCallRoutineDDL(quotedTable, quotedCallRoutine),
+		}, []string{"DROP PROCEDURE IF EXISTS " + quotedCallRoutine, "DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
 	case orm.DbTypeSQLite:
 		return []string{
 			"DROP TABLE IF EXISTS " + quotedKeyTable,
@@ -185,7 +199,7 @@ func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable stri
 	}
 }
 
-func newCompatibilityRegistry(namespace string, table string) (*orm.Registry, error) {
+func newCompatibilityRegistry(namespace string, table string, callSQL string) (*orm.Registry, error) {
 	registry := orm.NewRegistry()
 	if err := registry.RegisterTypeHandler(compatibilityJSONHandler, compatibilityJSONTypeHandler{}); err != nil {
 		return nil, err
@@ -193,7 +207,7 @@ func newCompatibilityRegistry(namespace string, table string) (*orm.Registry, er
 	if err := registry.RegisterEntity(compatibilityEntityMeta(table)); err != nil {
 		return nil, err
 	}
-	if err := registry.RegisterMapper(compatibilityMapperMeta(namespace, table)); err != nil {
+	if err := registry.RegisterMapper(compatibilityMapperMeta(namespace, table, callSQL)); err != nil {
 		return nil, err
 	}
 	if err := registry.Validate(); err != nil {
@@ -216,7 +230,7 @@ func compatibilityEntityMeta(table string) orm.EntityMeta {
 	}
 }
 
-func compatibilityMapperMeta(namespace string, table string) orm.MapperMeta {
+func compatibilityMapperMeta(namespace string, table string, callSQL string) orm.MapperMeta {
 	statements := []orm.StatementMeta{
 		compatibilityStatement(namespace, "Insert", orm.StatementCommandInsert, "insert into "+table+" (id, name, age, profile, created_at) values (#{record.ID}, #{record.Name}, #{record.Age}, #{record.Profile}, #{record.CreatedAt})", ""),
 		compatibilityStatement(namespace, "Update", orm.StatementCommandUpdate, "update "+table+" set name = #{name}, age = #{age} where id = #{id}", ""),
@@ -224,6 +238,9 @@ func compatibilityMapperMeta(namespace string, table string) orm.MapperMeta {
 		compatibilityStatement(namespace, "SelectOne", orm.StatementCommandSelect, "select id, name, age, profile, created_at from "+table+" where id = #{id}", defaultCompatibilityResultMapID),
 		compatibilityStatement(namespace, "SelectList", orm.StatementCommandSelect, "select id, name, age, profile, created_at from "+table+" where age >= #{minAge} order by id", defaultCompatibilityResultMapID),
 		compatibilityStatement(namespace, "Count", orm.StatementCommandSelect, "select count(*) from "+table+" where age >= #{minAge}", ""),
+	}
+	if strings.TrimSpace(callSQL) != "" {
+		statements = append(statements, compatibilityCallStatement(namespace, callSQL))
 	}
 	return orm.MapperMeta{
 		TypeName:   "CompatibilityMapper",
@@ -260,7 +277,7 @@ func compatibilityResultMap() orm.ResultMapMeta {
 	}
 }
 
-func compatibilityCases(namespace string, table string, quotedTable string, keyTable string) []DatabaseCase {
+func compatibilityCases(namespace string, table string, quotedTable string, keyTable string, callSQL string) []DatabaseCase {
 	return []DatabaseCase{
 		compatibilityInsertCase(namespace, quotedTable),
 		compatibilityQueryOneCase(namespace, quotedTable),
@@ -268,6 +285,7 @@ func compatibilityCases(namespace string, table string, quotedTable string, keyT
 		compatibilityUpsertCase(namespace, table, quotedTable),
 		compatibilityGeneratedKeyCase(keyTable),
 		compatibilityRowLockCase(table),
+		compatibilityCallableCase(namespace, callSQL),
 		compatibilityQueryListCase(namespace, quotedTable),
 		compatibilityPageCase(namespace, quotedTable),
 		compatibilityBatchCase(namespace, quotedTable),
@@ -503,7 +521,7 @@ func compatibilityDeleteCase(namespace string, table string) DatabaseCase {
 }
 
 func compatibilityCaseStatement(namespace string, table string, id string) orm.StatementMeta {
-	mapper := compatibilityMapperMeta(namespace, table)
+	mapper := compatibilityMapperMeta(namespace, table, "")
 	for _, statement := range mapper.Statements {
 		if statement.ID == id {
 			return statement
