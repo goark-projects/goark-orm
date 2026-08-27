@@ -57,6 +57,7 @@ func (c *localCache) clear() {
 
 func localCacheKey(statement StatementMeta, compiled CompiledSQL) string {
 	var builder strings.Builder
+	builder.Grow(len(statement.FullName) + len(compiled.CacheKey) + len(compiled.SQL) + len(compiled.Args)*24 + 2)
 	builder.WriteString(statement.FullName)
 	builder.WriteByte(0)
 	builder.WriteString(compiled.CacheKey)
@@ -67,6 +68,23 @@ func localCacheKey(statement StatementMeta, compiled CompiledSQL) string {
 		_, _ = fmt.Fprintf(&builder, "%d:%T:%#v", index, arg, arg)
 	}
 	return builder.String()
+}
+
+func (s *SQLSession) queryCacheKey(statement StatementMeta, compiled CompiledSQL) (string, bool) {
+	if !s.queryCacheEnabled(statement) {
+		return "", false
+	}
+	return localCacheKey(statement, compiled), true
+}
+
+func (s *SQLSession) queryCacheEnabled(statement StatementMeta) bool {
+	if s == nil {
+		return false
+	}
+	if s.localCache != nil {
+		return true
+	}
+	return s.hasSecondLevelCache(statement)
 }
 
 func cloneDestinationValue(dest any) (reflect.Value, error) {

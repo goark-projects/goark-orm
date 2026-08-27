@@ -284,7 +284,8 @@ func appendCollectionElement(root reflect.Value, plan resultCollectionPlan, chil
 
 func scanRowValues(rows interface{ Scan(dest ...any) error }, count int) ([]any, error) {
 	values := make([]any, count)
-	targets := make([]any, count)
+	var targetStack [rowScanStackTargetCount]any
+	targets := rowScanTargets(count, &targetStack)
 	for index := range values {
 		targets[index] = &values[index]
 	}

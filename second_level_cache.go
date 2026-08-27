@@ -34,6 +34,14 @@ func shouldFlushStatementCache(statement StatementMeta) bool {
 	}
 }
 
+func (s *SQLSession) hasSecondLevelCache(statement StatementMeta) bool {
+	if s == nil || s.registry == nil || !s.cacheEnabled || !shouldUseSecondLevelCache(statement) {
+		return false
+	}
+	_, _, ok := s.registry.Cache(statement.Namespace)
+	return ok
+}
+
 func (s *SQLSession) getSecondLevelCache(ctx context.Context, statement StatementMeta, key string, dest any) (bool, error) {
 	if s == nil || s.registry == nil || !s.cacheEnabled || !shouldUseSecondLevelCache(statement) {
 		return false, nil

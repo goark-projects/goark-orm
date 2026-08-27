@@ -115,14 +115,16 @@ func (s *SQLSession) queryCompiledOne(ctx context.Context, meta StatementMeta, d
 		return err
 	}
 	compiled.CacheKey = strings.TrimSpace(providerCacheKey)
-	cacheKey := localCacheKey(meta, compiled)
-	if hit, err := s.getLocalCache(cacheKey, dest); err != nil || hit {
-		return err
+	cacheKey, useCache := s.queryCacheKey(meta, compiled)
+	if useCache {
+		if hit, err := s.getLocalCache(cacheKey, dest); err != nil || hit {
+			return err
+		}
+		if hit, err := s.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
+			return err
+		}
+		defer s.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	}
-	if hit, err := s.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
-		return err
-	}
-	defer s.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	rows, err := s.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return err
@@ -135,10 +137,13 @@ func (s *SQLSession) queryCompiledOne(ctx context.Context, meta StatementMeta, d
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := s.putLocalCache(cacheKey, dest); err != nil {
-		return err
+	if useCache {
+		if err := s.putLocalCache(cacheKey, dest); err != nil {
+			return err
+		}
+		return s.putSecondLevelCache(ctx, meta, cacheKey, dest)
 	}
-	return s.putSecondLevelCache(ctx, meta, cacheKey, dest)
+	return nil
 }
 
 func (s *SQLSession) queryCompiledRows(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs, providerCacheKey string, dest any) error {
@@ -147,14 +152,16 @@ func (s *SQLSession) queryCompiledRows(ctx context.Context, meta StatementMeta, 
 		return err
 	}
 	compiled.CacheKey = strings.TrimSpace(providerCacheKey)
-	cacheKey := localCacheKey(meta, compiled)
-	if hit, err := s.getLocalCache(cacheKey, dest); err != nil || hit {
-		return err
+	cacheKey, useCache := s.queryCacheKey(meta, compiled)
+	if useCache {
+		if hit, err := s.getLocalCache(cacheKey, dest); err != nil || hit {
+			return err
+		}
+		if hit, err := s.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
+			return err
+		}
+		defer s.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	}
-	if hit, err := s.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
-		return err
-	}
-	defer s.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	rows, err := s.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return err
@@ -167,10 +174,13 @@ func (s *SQLSession) queryCompiledRows(ctx context.Context, meta StatementMeta, 
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := s.putLocalCache(cacheKey, dest); err != nil {
-		return err
+	if useCache {
+		if err := s.putLocalCache(cacheKey, dest); err != nil {
+			return err
+		}
+		return s.putSecondLevelCache(ctx, meta, cacheKey, dest)
 	}
-	return s.putSecondLevelCache(ctx, meta, cacheKey, dest)
+	return nil
 }
 
 func (s *SQLSession) compileSQLText(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs) (CompiledSQL, error) {

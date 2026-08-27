@@ -307,7 +307,7 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 	runtime := &StatementRuntime{
 		Meta:          meta,
 		SQL:           sqlText,
-		Args:          copyNamedArgs(renderArgs),
+		Args:          renderArgs,
 		CacheKey:      providerCacheKey,
 		Dialect:       s.Dialect(),
 		Configuration: s.Configuration(),
@@ -840,7 +840,8 @@ func scanMap(scanner interface{ Scan(dest ...any) error }, columns []string, tar
 		return mappingErrorf("map destination must be map[string]any")
 	}
 	values := make([]any, len(columns))
-	scanTargets := make([]any, len(columns))
+	var scanTargetStack [rowScanStackTargetCount]any
+	scanTargets := rowScanTargets(len(columns), &scanTargetStack)
 	for index := range values {
 		scanTargets[index] = &values[index]
 	}
@@ -870,8 +871,12 @@ type columnBinding struct {
 
 func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(dest ...any) error }, columns []string, statement StatementMeta, target reflect.Value) error {
 	bindings := s.columnBindings(statement, target.Type())
-	targets := make([]any, len(columns))
-	postScan := make([]func() error, 0)
+	var targetStack [rowScanStackTargetCount]any
+	targets := rowScanTargets(len(columns), &targetStack)
+	var rawValueStack [rowScanStackTargetCount]any
+	var rawValues []any
+	var conversionStack [rowScanStackConversionCount]scanPostConversion
+	postScan := conversionStack[:0]
 	for index, column := range columns {
 		binding, ok := s.lookupColumnBinding(bindings, column)
 		if !ok {
@@ -903,32 +908,26 @@ func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(des
 				Message:   fmt.Sprintf("type-handler %q is not registered", binding.typeHandler),
 			}
 		}
-		holder := new(any)
-		targets[index] = holder
+		if rawValues == nil {
+			rawValues = rowScanTargets(len(columns), &rawValueStack)
+		}
+		targets[index] = &rawValues[index]
 		fieldTarget := field.Addr().Interface()
-		handlerName := binding.typeHandler
-		fieldName := binding.fieldName
-		columnName := column
-		postScan = append(postScan, func() error {
-			if err := handler.FromDB(ctx, *holder, fieldTarget); err != nil {
-				return &MappingError{
-					Statement: statement.FullName,
-					Column:    columnName,
-					Field:     fieldName,
-					Message:   fmt.Sprintf("type-handler %q failed", handlerName),
-					Err:       err,
-				}
-			}
-			return nil
+		postScan = append(postScan, scanPostConversion{
+			statement:   statement.FullName,
+			column:      column,
+			field:       binding.fieldName,
+			handlerName: binding.typeHandler,
+			handler:     handler,
+			value:       &rawValues[index],
+			target:      fieldTarget,
 		})
 	}
 	if err := scanner.Scan(targets...); err != nil {
 		return &MappingError{Statement: statement.FullName, Err: err}
 	}
-	for _, apply := range postScan {
-		if err := apply(); err != nil {
-			return mappingFailure(statement, err)
-		}
+	if err := applyScanPostConversions(ctx, postScan); err != nil {
+		return mappingFailure(statement, err)
 	}
 	return nil
 }

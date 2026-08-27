@@ -115,14 +115,16 @@ func (defaultStatementExecutor) Query(ctx context.Context, session *SQLSession, 
 	if err := session.flushStatementCaches(ctx, meta); err != nil {
 		return err
 	}
-	cacheKey := localCacheKey(meta, compiled)
-	if hit, err := session.getLocalCache(cacheKey, dest); err != nil || hit {
-		return err
+	cacheKey, useCache := session.queryCacheKey(meta, compiled)
+	if useCache {
+		if hit, err := session.getLocalCache(cacheKey, dest); err != nil || hit {
+			return err
+		}
+		if hit, err := session.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
+			return err
+		}
+		defer session.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	}
-	if hit, err := session.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
-		return err
-	}
-	defer session.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	rows, err := session.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return executorFailure(meta, "query", compiled, err)
@@ -135,10 +137,13 @@ func (defaultStatementExecutor) Query(ctx context.Context, session *SQLSession, 
 	if closeErr != nil {
 		return executorFailure(meta, "close rows", compiled, closeErr)
 	}
-	if err := session.putLocalCache(cacheKey, dest); err != nil {
-		return err
+	if useCache {
+		if err := session.putLocalCache(cacheKey, dest); err != nil {
+			return err
+		}
+		return session.putSecondLevelCache(ctx, meta, cacheKey, dest)
 	}
-	return session.putSecondLevelCache(ctx, meta, cacheKey, dest)
+	return nil
 }
 
 func (defaultStatementExecutor) QueryOne(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs, dest any) error {
@@ -155,14 +160,16 @@ func (defaultStatementExecutor) QueryOne(ctx context.Context, session *SQLSessio
 	if err := session.flushStatementCaches(ctx, meta); err != nil {
 		return err
 	}
-	cacheKey := localCacheKey(meta, compiled)
-	if hit, err := session.getLocalCache(cacheKey, dest); err != nil || hit {
-		return err
+	cacheKey, useCache := session.queryCacheKey(meta, compiled)
+	if useCache {
+		if hit, err := session.getLocalCache(cacheKey, dest); err != nil || hit {
+			return err
+		}
+		if hit, err := session.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
+			return err
+		}
+		defer session.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	}
-	if hit, err := session.getSecondLevelCache(ctx, meta, cacheKey, dest); err != nil || hit {
-		return err
-	}
-	defer session.releaseSecondLevelCacheMiss(ctx, meta, cacheKey)
 	rows, err := session.querySQL(ctx, meta, compiled)
 	if err != nil {
 		return executorFailure(meta, "query", compiled, err)
@@ -178,10 +185,13 @@ func (defaultStatementExecutor) QueryOne(ctx context.Context, session *SQLSessio
 	if closeErr != nil {
 		return executorFailure(meta, "close rows", compiled, closeErr)
 	}
-	if err := session.putLocalCache(cacheKey, dest); err != nil {
-		return err
+	if useCache {
+		if err := session.putLocalCache(cacheKey, dest); err != nil {
+			return err
+		}
+		return session.putSecondLevelCache(ctx, meta, cacheKey, dest)
 	}
-	return session.putSecondLevelCache(ctx, meta, cacheKey, dest)
+	return nil
 }
 
 func (defaultStatementExecutor) Exec(ctx context.Context, session *SQLSession, meta StatementMeta, args NamedArgs) (Result, error) {

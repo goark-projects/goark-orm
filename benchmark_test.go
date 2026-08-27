@@ -161,6 +161,68 @@ func BenchmarkSQLSessionQueryOneGeneratedRowScanner(b *testing.B) {
 	}
 }
 
+func BenchmarkSQLSessionQueryOneTypeHandlerRowScanner(b *testing.B) {
+	registry := newSQLSessionRegistry(b, StatementMeta{
+		ID:         "FindProfile",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.FindProfile",
+		Command:    StatementCommandSelect,
+		SQL:        "select id, profile from sys_user where id = #{id}",
+		ResultType: "sqlSessionUser",
+	})
+	if err := registry.RegisterRowScanner("sqlSessionUser", TypeHandlerRowScannerFunc(func(ctx context.Context, columns []string, row RowScannerRow, dest any, handlers RowScannerTypeHandlers) error {
+		user := dest.(*sqlSessionUser)
+		var profileValue any
+		var targetStack [2]any
+		targets := targetStack[:]
+		if len(columns) > len(targets) {
+			targets = make([]any, len(columns))
+		} else {
+			targets = targets[:len(columns)]
+		}
+		for index, column := range columns {
+			switch normalizeColumnKey(column) {
+			case "id":
+				targets[index] = &user.ID
+			case "profile":
+				targets[index] = &profileValue
+			default:
+				var discard any
+				targets[index] = &discard
+			}
+		}
+		if err := row.Scan(targets...); err != nil {
+			return err
+		}
+		handler, ok := handlers.TypeHandler("profile")
+		if !ok {
+			return mappingErrorf("profile handler missing")
+		}
+		return handler.FromDB(ctx, profileValue, &user.Profile)
+	})); err != nil {
+		b.Fatalf("register row scanner failed: %v", err)
+	}
+	state := openTestSQLState(b)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "profile"},
+		values:  [][]driver.Value{{int64(7), []byte("profile-fast-path")}},
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithLocalCache(false), WithTypeHandler("profile", profileTypeHandler{}))
+	if err != nil {
+		b.Fatalf("new SQL session failed: %v", err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var user sqlSessionUser
+		if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindProfile", NamedArgs{"id": int64(7)}, &user); err != nil {
+			b.Fatalf("query one failed: %v", err)
+		}
+		if user.ID != 7 || user.Profile.Text != "profile-fast-path" {
+			b.Fatalf("unexpected user %#v", user)
+		}
+	}
+}
+
 func BenchmarkSQLSessionQueryOneResultMapTypeHandler(b *testing.B) {
 	registry := newSQLSessionRegistry(b, StatementMeta{
 		ID:        "FindProfile",
