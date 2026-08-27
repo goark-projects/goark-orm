@@ -81,6 +81,9 @@ func (s *SQLSession) queryCacheEnabled(statement StatementMeta) bool {
 	if s == nil {
 		return false
 	}
+	if !shouldUseQueryCache(statement) {
+		return false
+	}
 	if s.localCache != nil {
 		return true
 	}

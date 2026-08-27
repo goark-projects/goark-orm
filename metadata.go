@@ -294,6 +294,7 @@ type StatementMeta struct {
 	ResultType         string
 	ParameterType      string
 	DatabaseID         string
+	AffectData         bool
 	UseGeneratedKeys   bool
 	KeyProperty        string
 	Options            StatementOptions

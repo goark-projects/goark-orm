@@ -2522,6 +2522,63 @@ func TestSQLSession_QueryOne_whenSelectFlushCacheEnabled_shouldRefreshSecondLeve
 	}
 }
 
+func TestSQLSession_QueryOne_whenSelectAffectsData_shouldFlushAndBypassCaches(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Carol"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Dave"}}},
+	}
+	registry := newCachedSQLSessionRegistry(t, CacheMeta{Enabled: true, Size: 16},
+		StatementMeta{
+			ID:        "FindByID",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.FindByID",
+			Command:   StatementCommandSelect,
+			Source:    StatementSourceAnnotation,
+			SQL:       "select id, name from sys_user where id = #{id}",
+		},
+		StatementMeta{
+			ID:         "UpsertReturning",
+			Namespace:  "system.user.UserMapper",
+			FullName:   "system.user.UserMapper.UpsertReturning",
+			Command:    StatementCommandSelect,
+			Source:     StatementSourceAnnotation,
+			SQL:        "insert into sys_user(id, name) values(#{id}, #{name}) returning id, name",
+			AffectData: true,
+		},
+	)
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var cached sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &cached); err != nil {
+		t.Fatalf("cache warm query failed: %v", err)
+	}
+	var first sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.UpsertReturning", NamedArgs{"id": int64(7), "name": "Bob"}, &first); err != nil {
+		t.Fatalf("first affectData query failed: %v", err)
+	}
+	var second sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.UpsertReturning", NamedArgs{"id": int64(7), "name": "Carol"}, &second); err != nil {
+		t.Fatalf("second affectData query failed: %v", err)
+	}
+	var after sqlSessionUser
+	if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &after); err != nil {
+		t.Fatalf("post affectData query failed: %v", err)
+	}
+
+	if cached.Name != "Alice" || first.Name != "Bob" || second.Name != "Carol" || after.Name != "Dave" {
+		t.Fatalf("unexpected affectData cache behavior cached=%#v first=%#v second=%#v after=%#v", cached, first, second, after)
+	}
+	if len(state.queries) != 4 {
+		t.Fatalf("expected affectData select to bypass caches and flush old entries, got queries %#v", state.queries)
+	}
+}
+
 func TestSQLSession_Exec_whenDefaultWriteOccurs_shouldClearSecondLevelCache(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryResults = []testRowsData{

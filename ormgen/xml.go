@@ -95,6 +95,7 @@ type xmlStatementModel struct {
 	ResultType         string
 	ParameterType      string
 	DatabaseID         string
+	AffectData         bool
 	UseGeneratedKeys   bool
 	KeyProperty        string
 	Options            orm.StatementOptions
@@ -529,6 +530,10 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 	if err != nil {
 		return xmlStatementModel{}, err
 	}
+	affectData, _, err := parseOptionalXMLBool(start, "affectData")
+	if err != nil {
+		return xmlStatementModel{}, err
+	}
 	options, err := parseXMLStatementOptions(start)
 	if err != nil {
 		return xmlStatementModel{}, err
@@ -539,6 +544,7 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 		ResultType:         attrValue(start, "resultType"),
 		ParameterType:      attrValue(start, "parameterType"),
 		DatabaseID:         attrValue(start, "databaseId"),
+		AffectData:         affectData,
 		UseGeneratedKeys:   attrValue(start, "useGeneratedKeys") == "true",
 		KeyProperty:        attrValue(start, "keyProperty"),
 		Options:            options,
@@ -1354,6 +1360,7 @@ func xmlStatements(namespace string, mapper xmlMapperModel, databaseID string) (
 				ResultType:         strings.TrimSpace(item.ResultType),
 				ParameterType:      strings.TrimSpace(item.ParameterType),
 				DatabaseID:         strings.TrimSpace(item.DatabaseID),
+				AffectData:         item.AffectData,
 				UseGeneratedKeys:   item.UseGeneratedKeys,
 				KeyProperty:        strings.TrimSpace(item.KeyProperty),
 				Options:            item.Options,

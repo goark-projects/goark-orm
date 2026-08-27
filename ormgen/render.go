@@ -613,6 +613,7 @@ func writeStatementMeta(builder *bytes.Buffer, statement StatementModel) {
 	writeStringField(builder, "ResultType", statement.ResultType)
 	writeStringField(builder, "ParameterType", statement.ParameterType)
 	writeStringField(builder, "DatabaseID", statement.DatabaseID)
+	writeBoolField(builder, "AffectData", statement.AffectData)
 	writeBoolField(builder, "UseGeneratedKeys", statement.UseGeneratedKeys)
 	writeStringField(builder, "KeyProperty", statement.KeyProperty)
 	if !statementOptionsZero(statement.Options) {

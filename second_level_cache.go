@@ -17,7 +17,7 @@ func withTransactionalSecondLevelCache() SQLSessionOption {
 }
 
 func shouldUseSecondLevelCache(statement StatementMeta) bool {
-	if statement.Command != StatementCommandSelect {
+	if !shouldUseQueryCache(statement) {
 		return false
 	}
 	return statement.UseCache != StatementCacheDisabled
@@ -30,8 +30,14 @@ func shouldFlushStatementCache(statement StatementMeta) bool {
 	case StatementCacheDisabled:
 		return false
 	default:
-		return statement.Command != StatementCommandSelect
+		return statement.Command != StatementCommandSelect || statement.AffectData
 	}
+}
+
+func shouldUseQueryCache(statement StatementMeta) bool {
+	return statement.Command == StatementCommandSelect &&
+		!statement.AffectData &&
+		statement.UseCache != StatementCacheDisabled
 }
 
 func (s *SQLSession) hasSecondLevelCache(statement StatementMeta) bool {

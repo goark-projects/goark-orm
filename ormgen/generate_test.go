@@ -913,6 +913,43 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenSelectAffectsDataDeclared_shouldRenderStatementMetadata(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name'"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper", xml="mapper/user_mapper.xml")
+type UserMapper interface {
+	UpsertXML(ctx context.Context, user *User) (*User, error)
+
+	//goark-orm:select(sql="insert into sys_user(id, name) values(#{ID}, #{Name}) returning id, name", affectData=true)
+	UpsertAnnotation(ctx context.Context, user *User) (*User, error)
+}
+`)
+	mustWriteFile(t, filepath.Join(dir, "mapper", "user_mapper.xml"), `<mapper namespace="system.user.UserMapper">
+  <select id="UpsertXML" parameterType="User" resultType="User" affectData="true">
+    insert into sys_user(id, name) values(#{ID}, #{Name}) returning id, name
+  </select>
+</mapper>
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := strings.Join(strings.Fields(string(source)), " ")
+	if count := strings.Count(output, `AffectData: true`); count != 2 {
+		t.Fatalf("expected two affectData metadata entries, got %d:\n%s", count, source)
+	}
+}
+
 func TestGenerate_whenXMLDeclaresCacheRef_shouldRenderCacheRefMetadata(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

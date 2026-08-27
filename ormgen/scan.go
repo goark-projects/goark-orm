@@ -719,6 +719,10 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 	if err != nil {
 		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s annotation %s parses options failed: %w", methodName, selected.Name, err)
 	}
+	affectData, err := parseAnnotationBool(selected.Args, "affectData")
+	if err != nil {
+		return StatementModel{}, true, fmt.Errorf("goark-orm: method %s affectData requires boolean value", methodName)
+	}
 	useGeneratedKeys := false
 	if value := strings.TrimSpace(selected.Args["useGeneratedKeys"]); value != "" {
 		switch value {
@@ -739,6 +743,7 @@ func statementFromMethodAnnotation(namespace string, methodName string, annotati
 		Source:             orm.StatementSourceAnnotation,
 		SQL:                sql,
 		Provider:           provider,
+		AffectData:         affectData,
 		UseGeneratedKeys:   useGeneratedKeys,
 		KeyProperty:        strings.TrimSpace(selected.Args["keyProperty"]),
 		Options:            options,
