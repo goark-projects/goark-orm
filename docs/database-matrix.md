@@ -6,7 +6,7 @@ The matrix records SQL dialect behavior and reusable real database test coverage
 
 ## Real Support Boundary
 
-PostgreSQL and MySQL are the only current real supported database targets. The reusable standard compatibility suite creates DDL and executable cases only for those two engines. Other dialects listed below are SQL generation capabilities, not a current real database support claim.
+PostgreSQL, MySQL, MariaDB, and SQLite are the current standard real database targets. The reusable compatibility suite creates DDL and executable cases for these engines without importing concrete drivers into core. SQL Server, Oracle, and the question-placeholder dialect remain SQL generation capabilities until they get driver-specific real database suites.
 
 ## SQL Generation Dialects
 
@@ -46,9 +46,9 @@ These APIs produce SQL or execution plans only. They do not create tables and do
 
 ## Real Database Suite
 
-The standard suite is disabled unless all required environment variables are provided and the caller's test binary imports a concrete driver. It currently supports PostgreSQL and MySQL only; other database engines are intentionally outside the standard real-database support boundary until they get their own verified matrix.
+The standard suite is disabled unless all required environment variables are provided and the caller's test binary imports a concrete driver. It currently supports PostgreSQL, MySQL, MariaDB, and SQLite. SQL Server, Oracle, and the question-placeholder dialect remain outside the standard real-database support boundary.
 
-Use `ormtest.SupportedCompatibilityDBTypes()` or `ormtest.IsCompatibilityDBTypeSupported(dbType)` when a caller-owned harness needs to branch on the current standard support boundary. The list is intentionally limited to `postgres` and `mysql`.
+Use `ormtest.SupportedCompatibilityDBTypes()` or `ormtest.IsCompatibilityDBTypeSupported(dbType)` when a caller-owned harness needs to branch on the current standard support boundary. The list is intentionally limited to `postgres`, `mysql`, `mariadb`, and `sqlite`.
 
 ```bash
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
@@ -61,7 +61,7 @@ GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 | --- | --- |
 | `GOARK_ORM_INTEGRATION_DRIVER` | Registered `database/sql` driver name |
 | `GOARK_ORM_INTEGRATION_DSN` | Real database DSN |
-| `GOARK_ORM_INTEGRATION_DBTYPE` | Required standard-suite database type: `postgres` or `mysql` |
+| `GOARK_ORM_INTEGRATION_DBTYPE` | Required standard-suite database type: `postgres`, `mysql`, `mariadb`, or `sqlite` |
 | `GOARK_ORM_INTEGRATION_SETUP_SQL` | Optional setup SQL as a JSON string array or separated text |
 | `GOARK_ORM_INTEGRATION_CLEANUP_SQL` | Optional cleanup SQL as a JSON string array or separated text |
 | `GOARK_ORM_INTEGRATION_SQL_SEPARATOR` | Optional multi-statement separator; default is `-- goark-orm statement --` as a standalone segment |
@@ -80,9 +80,9 @@ GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 - upsert
 - generated key readback
 - row-lock smoke paths
-- callable statements
+- callable statements for PostgreSQL, MySQL, and MariaDB
 
-Current standard DDL support covers only `postgres` and `mysql`. The generic dialect APIs may still compile SQL for other dialects, but the reusable real database suite does not claim support for them.
+Current standard DDL support covers `postgres`, `mysql`, `mariadb`, and `sqlite`. SQLite runs the same CRUD, pagination, batch, TypeHandler, UPSERT, and generated-key paths, but skips callable because `database/sql` SQLite drivers do not expose a portable stored-procedure model.
 
 ```go
 package user_test
@@ -101,9 +101,9 @@ func TestORMDatabaseCompatibility(t *testing.T) {
 
 Use `ormtest.WithCompatibilityTable("schema.table_name")` when multiple suites need isolated table names in one database. Table names are parsed as identifier segments to keep test configuration from injecting arbitrary SQL into DDL.
 
-## Local PostgreSQL/MySQL Matrix Verification
+## Local Real Database Matrix Verification
 
-Use `scripts/verify-real-db.ps1` to run the standard PostgreSQL and MySQL suites from an isolated temporary module. The script imports concrete drivers only inside the temporary module, keeps `goark.dev/orm` dependency-light, and removes the temporary module after the run.
+Use `scripts/verify-real-db.ps1` to run the standard PostgreSQL, MySQL, MariaDB, and SQLite suites from an isolated temporary module. The script imports concrete drivers only inside the temporary module, keeps `goark.dev/orm` dependency-light, and removes the temporary module after the run.
 
 ```powershell
 $env:GOARK_ORM_POSTGRES_DSN = 'postgres://user:pass@127.0.0.1:5432/goark-orm-test?sslmode=disable'
@@ -119,6 +119,11 @@ Optional variables:
 | `GOARK_ORM_POSTGRES_DSN` | none | PostgreSQL DSN; empty value skips PostgreSQL |
 | `GOARK_ORM_MYSQL_DRIVER` | `mysql` | Registered MySQL `database/sql` driver name |
 | `GOARK_ORM_MYSQL_DSN` | none | MySQL DSN; empty value skips MySQL |
+| `GOARK_ORM_MARIADB_DRIVER` | `mysql` | Registered MariaDB-compatible `database/sql` driver name |
+| `GOARK_ORM_MARIADB_DSN` | none | MariaDB DSN; empty value skips MariaDB |
+| `GOARK_ORM_SQLITE_DRIVER` | `sqlite` | Registered SQLite `database/sql` driver name |
+| `GOARK_ORM_SQLITE_DSN` | none | SQLite DSN; empty value skips SQLite |
+| `GOARK_ORM_SQLITE_IMPORT` | none | Required Go blank-import path when `GOARK_ORM_SQLITE_DSN` is set, for example `modernc.org/sqlite` |
 
 ## Callable Statement Notes
 

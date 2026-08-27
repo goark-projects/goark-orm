@@ -24,13 +24,13 @@ const (
 
 // SupportedCompatibilityDBTypes 返回标准真实库兼容套件当前承诺支持的数据库类型。
 func SupportedCompatibilityDBTypes() []orm.DbType {
-	return []orm.DbType{orm.DbTypePostgres, orm.DbTypeMySQL}
+	return []orm.DbType{orm.DbTypePostgres, orm.DbTypeMySQL, orm.DbTypeMariaDB, orm.DbTypeSQLite}
 }
 
 // IsCompatibilityDBTypeSupported 判断标准真实库兼容套件是否支持指定数据库类型。
 func IsCompatibilityDBTypeSupported(dbType orm.DbType) bool {
 	switch dbType {
-	case orm.DbTypePostgres, orm.DbTypeMySQL:
+	case orm.DbTypePostgres, orm.DbTypeMySQL, orm.DbTypeMariaDB, orm.DbTypeSQLite:
 		return true
 	default:
 		return false
@@ -189,7 +189,7 @@ func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable stri
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
 			compatibilityPostgresCallRoutineDDL(quotedTable, quotedCallRoutine),
 		}, []string{"DROP FUNCTION IF EXISTS " + quotedCallRoutine + "(INTEGER)", "DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
-	case orm.DbTypeMySQL:
+	case orm.DbTypeMySQL, orm.DbTypeMariaDB:
 		return []string{
 			"DROP PROCEDURE IF EXISTS " + quotedCallRoutine,
 			"DROP TABLE IF EXISTS " + quotedKeyTable,
@@ -198,13 +198,20 @@ func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable stri
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 			compatibilityMySQLCallRoutineDDL(quotedTable, quotedCallRoutine),
 		}, []string{"DROP PROCEDURE IF EXISTS " + quotedCallRoutine, "DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
+	case orm.DbTypeSQLite:
+		return []string{
+			"DROP TABLE IF EXISTS " + quotedKeyTable,
+			"DROP TABLE IF EXISTS " + quotedTable,
+			"CREATE TABLE " + quotedKeyTable + " (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(64) NOT NULL)",
+			"CREATE TABLE " + quotedTable + " (id INTEGER PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
+		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
 	default:
 		return nil, nil, unsupportedCompatibilityDBTypeError(dbType)
 	}
 }
 
 func unsupportedCompatibilityDBTypeError(dbType orm.DbType) error {
-	return fmt.Errorf("goark-orm: standard compatibility suite supports only postgres and mysql, got %q", dbType)
+	return fmt.Errorf("goark-orm: standard compatibility suite supports postgres, mysql, mariadb and sqlite, got %q", dbType)
 }
 
 func newCompatibilityRegistry(namespace string, table string, callSQL string) (*orm.Registry, error) {
@@ -286,19 +293,30 @@ func compatibilityResultMap() orm.ResultMapMeta {
 }
 
 func compatibilityCases(namespace string, table string, quotedTable string, keyTable string, callSQL string) []DatabaseCase {
-	return []DatabaseCase{
+	hasCallable := strings.TrimSpace(callSQL) != ""
+	capacity := 10
+	if hasCallable {
+		capacity++
+	}
+	cases := make([]DatabaseCase, 0, capacity)
+	cases = append(cases,
 		compatibilityInsertCase(namespace, quotedTable),
 		compatibilityQueryOneCase(namespace, quotedTable),
 		compatibilityUpdateCase(namespace, quotedTable),
 		compatibilityUpsertCase(namespace, table, quotedTable),
 		compatibilityGeneratedKeyCase(keyTable),
 		compatibilityRowLockCase(table),
-		compatibilityCallableCase(namespace, callSQL),
+	)
+	if hasCallable {
+		cases = append(cases, compatibilityCallableCase(namespace, callSQL))
+	}
+	cases = append(cases,
 		compatibilityQueryListCase(namespace, quotedTable),
 		compatibilityPageCase(namespace, quotedTable),
 		compatibilityBatchCase(namespace, quotedTable),
 		compatibilityDeleteCase(namespace, quotedTable),
-	}
+	)
+	return cases
 }
 
 func compatibilityInsertCase(namespace string, table string) DatabaseCase {

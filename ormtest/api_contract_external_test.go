@@ -38,7 +38,10 @@ func TestV1ORMTestPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if compatibility.DBType != orm.DbTypePostgres || len(compatibility.Cases) == 0 {
 		t.Fatalf("unexpected compatibility config %#v", compatibility)
 	}
-	if !ormtest.IsCompatibilityDBTypeSupported(orm.DbTypePostgres) || len(ormtest.SupportedCompatibilityDBTypes()) != 2 {
+	if !ormtest.IsCompatibilityDBTypeSupported(orm.DbTypePostgres) ||
+		!ormtest.IsCompatibilityDBTypeSupported(orm.DbTypeMariaDB) ||
+		!ormtest.IsCompatibilityDBTypeSupported(orm.DbTypeSQLite) ||
+		len(ormtest.SupportedCompatibilityDBTypes()) != 4 {
 		t.Fatalf("unexpected compatibility support boundary")
 	}
 

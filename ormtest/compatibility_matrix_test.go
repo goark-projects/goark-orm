@@ -69,26 +69,73 @@ func TestNewCompatibilitySuiteConfig_whenMySQL_shouldUseUTF8MB4DDL(t *testing.T)
 	}
 }
 
+func TestNewCompatibilitySuiteConfig_whenMariaDB_shouldUseMySQLCompatibleDDL(t *testing.T) {
+	config, err := NewCompatibilitySuiteConfig(orm.DbTypeMariaDB)
+	if err != nil {
+		t.Fatalf("create compatibility suite failed: %v", err)
+	}
+	if config.Dialect.Name() != "mariadb" {
+		t.Fatalf("unexpected dialect %s", config.Dialect.Name())
+	}
+	if len(config.SetupSQL) != 6 {
+		t.Fatalf("unexpected setup SQL count %d", len(config.SetupSQL))
+	}
+	if !strings.Contains(config.SetupSQL[3], "AUTO_INCREMENT") {
+		t.Fatalf("mariadb key DDL should declare AUTO_INCREMENT: %s", config.SetupSQL[3])
+	}
+	if !strings.Contains(config.SetupSQL[5], "CREATE PROCEDURE `goark_orm_compat_users_report`") {
+		t.Fatalf("mariadb setup SQL should create callable procedure: %s", config.SetupSQL[5])
+	}
+	if len(config.Cases) != 11 || !containsDatabaseCase(config.Cases, "compatibility-callable") {
+		t.Fatalf("expected callable cases for mariadb, got %#v", config.Cases)
+	}
+}
+
+func TestNewCompatibilitySuiteConfig_whenSQLite_shouldBuildDDLWithoutCallable(t *testing.T) {
+	config, err := NewCompatibilitySuiteConfig(orm.DbTypeSQLite)
+	if err != nil {
+		t.Fatalf("create compatibility suite failed: %v", err)
+	}
+	if config.Dialect.Name() != "sqlite" {
+		t.Fatalf("unexpected dialect %s", config.Dialect.Name())
+	}
+	if len(config.SetupSQL) != 4 {
+		t.Fatalf("unexpected setup SQL count %d", len(config.SetupSQL))
+	}
+	if !strings.Contains(config.SetupSQL[2], "AUTOINCREMENT") {
+		t.Fatalf("sqlite key DDL should declare AUTOINCREMENT: %s", config.SetupSQL[2])
+	}
+	if strings.Contains(strings.Join(config.SetupSQL, " "), "PROCEDURE") || strings.Contains(strings.Join(config.SetupSQL, " "), "FUNCTION") {
+		t.Fatalf("sqlite setup SQL must not create callable routine: %#v", config.SetupSQL)
+	}
+	if len(config.Cases) != 10 || containsDatabaseCase(config.Cases, "compatibility-callable") {
+		t.Fatalf("sqlite should skip callable case, got %#v", config.Cases)
+	}
+}
+
 func TestNewCompatibilitySuiteConfig_whenUnsupportedDBType_shouldReject(t *testing.T) {
-	for _, dbType := range []orm.DbType{orm.DbTypeMariaDB, orm.DbTypeSQLite, orm.DbTypeQuestion, orm.DbTypeSQLServer, orm.DbTypeOracle} {
+	for _, dbType := range []orm.DbType{orm.DbTypeQuestion, orm.DbTypeSQLServer, orm.DbTypeOracle} {
 		_, err := NewCompatibilitySuiteConfig(dbType)
-		if err == nil || !strings.Contains(err.Error(), "supports only postgres and mysql") {
+		if err == nil || !strings.Contains(err.Error(), "supports postgres, mysql, mariadb and sqlite") {
 			t.Fatalf("expected %s to be rejected, got %v", dbType, err)
 		}
 	}
 }
 
-func TestSupportedCompatibilityDBTypes_shouldOnlyExposePostgresAndMySQL(t *testing.T) {
+func TestSupportedCompatibilityDBTypes_shouldExposeStandardRealDatabaseTargets(t *testing.T) {
 	supported := SupportedCompatibilityDBTypes()
-	if len(supported) != 2 || supported[0] != orm.DbTypePostgres || supported[1] != orm.DbTypeMySQL {
+	expected := []orm.DbType{orm.DbTypePostgres, orm.DbTypeMySQL, orm.DbTypeMariaDB, orm.DbTypeSQLite}
+	if len(supported) != len(expected) {
 		t.Fatalf("unexpected supported database types %#v", supported)
 	}
-	supported[0] = orm.DbTypeSQLite
-	if IsCompatibilityDBTypeSupported(orm.DbTypeSQLite) {
-		t.Fatalf("sqlite must stay outside current real database support boundary")
+	for index, dbType := range expected {
+		if supported[index] != dbType || !IsCompatibilityDBTypeSupported(dbType) {
+			t.Fatalf("expected %s at index %d, got %#v", dbType, index, supported)
+		}
 	}
-	if !IsCompatibilityDBTypeSupported(orm.DbTypePostgres) || !IsCompatibilityDBTypeSupported(orm.DbTypeMySQL) {
-		t.Fatalf("postgres and mysql must be supported")
+	supported[0] = orm.DbTypeOracle
+	if IsCompatibilityDBTypeSupported(orm.DbTypeOracle) {
+		t.Fatalf("oracle must stay outside current standard real database boundary")
 	}
 }
 

@@ -14,7 +14,7 @@ func compatibilityCallSQL(dbType orm.DbType, quotedTable string, quotedRoutine s
 	switch dbType {
 	case orm.DbTypePostgres:
 		return "select id, name, age, profile, created_at from " + quotedRoutine + "(#{minAge})"
-	case orm.DbTypeMySQL:
+	case orm.DbTypeMySQL, orm.DbTypeMariaDB:
 		return "call " + quotedRoutine + "(#{minAge})"
 	default:
 		return ""

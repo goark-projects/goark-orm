@@ -2,7 +2,12 @@ param(
     [string]$PostgresDriver = $env:GOARK_ORM_POSTGRES_DRIVER,
     [string]$PostgresDSN = $env:GOARK_ORM_POSTGRES_DSN,
     [string]$MySQLDriver = $env:GOARK_ORM_MYSQL_DRIVER,
-    [string]$MySQLDSN = $env:GOARK_ORM_MYSQL_DSN
+    [string]$MySQLDSN = $env:GOARK_ORM_MYSQL_DSN,
+    [string]$MariaDBDriver = $env:GOARK_ORM_MARIADB_DRIVER,
+    [string]$MariaDBDSN = $env:GOARK_ORM_MARIADB_DSN,
+    [string]$SQLiteDriver = $env:GOARK_ORM_SQLITE_DRIVER,
+    [string]$SQLiteDSN = $env:GOARK_ORM_SQLITE_DSN,
+    [string]$SQLiteImport = $env:GOARK_ORM_SQLITE_IMPORT
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,9 +18,22 @@ if ([string]::IsNullOrWhiteSpace($PostgresDriver)) {
 if ([string]::IsNullOrWhiteSpace($MySQLDriver)) {
     $MySQLDriver = "mysql"
 }
+if ([string]::IsNullOrWhiteSpace($MariaDBDriver)) {
+    $MariaDBDriver = "mysql"
+}
+if ([string]::IsNullOrWhiteSpace($SQLiteDriver)) {
+    $SQLiteDriver = "sqlite"
+}
+if (-not [string]::IsNullOrWhiteSpace($SQLiteDSN) -and [string]::IsNullOrWhiteSpace($SQLiteImport)) {
+    throw "GOARK_ORM_SQLITE_IMPORT is required when GOARK_ORM_SQLITE_DSN is set"
+}
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("goark-orm-real-db-" + [System.Guid]::NewGuid().ToString("N"))
+$sqliteImportBlock = ""
+if (-not [string]::IsNullOrWhiteSpace($SQLiteDSN)) {
+    $sqliteImportBlock = "`n`t_ `"$SQLiteImport`""
+}
 
 function Write-Utf8File {
     param(
@@ -25,8 +43,20 @@ function Write-Utf8File {
     [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Assert-GoImportPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$ImportPath
+    )
+    if ($ImportPath -notmatch '^[A-Za-z0-9._~/+-]+$') {
+        throw "invalid Go import path: $ImportPath"
+    }
+}
+
 try {
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($SQLiteDSN)) {
+        Assert-GoImportPath -ImportPath $SQLiteImport
+    }
     Write-Utf8File -Path (Join-Path $tempRoot "go.mod") -Content @"
 module goark.dev/orm-real-db-smoke
 
@@ -50,36 +80,39 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+$sqliteImportBlock
 	"goark.dev/orm/ormtest"
 )
 
 func TestPostgresCompatibility(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("GOARK_ORM_POSTGRES_DSN"))
-	if dsn == "" {
-		t.Skip("set GOARK_ORM_POSTGRES_DSN to run PostgreSQL compatibility suite")
-	}
-	driver := strings.TrimSpace(os.Getenv("GOARK_ORM_POSTGRES_DRIVER"))
-	if driver == "" {
-		driver = "pgx"
-	}
-	t.Setenv("GOARK_ORM_INTEGRATION_DRIVER", driver)
-	t.Setenv("GOARK_ORM_INTEGRATION_DSN", dsn)
-	t.Setenv("GOARK_ORM_INTEGRATION_DBTYPE", "postgres")
-	ormtest.RunCompatibilitySuiteFromEnv(t)
+	runCompatibility(t, "GOARK_ORM_POSTGRES_DSN", "GOARK_ORM_POSTGRES_DRIVER", "pgx", "postgres")
 }
 
 func TestMySQLCompatibility(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("GOARK_ORM_MYSQL_DSN"))
+	runCompatibility(t, "GOARK_ORM_MYSQL_DSN", "GOARK_ORM_MYSQL_DRIVER", "mysql", "mysql")
+}
+
+func TestMariaDBCompatibility(t *testing.T) {
+	runCompatibility(t, "GOARK_ORM_MARIADB_DSN", "GOARK_ORM_MARIADB_DRIVER", "mysql", "mariadb")
+}
+
+func TestSQLiteCompatibility(t *testing.T) {
+	runCompatibility(t, "GOARK_ORM_SQLITE_DSN", "GOARK_ORM_SQLITE_DRIVER", "sqlite", "sqlite")
+}
+
+func runCompatibility(t *testing.T, dsnEnv string, driverEnv string, defaultDriver string, dbType string) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv(dsnEnv))
 	if dsn == "" {
-		t.Skip("set GOARK_ORM_MYSQL_DSN to run MySQL compatibility suite")
+		t.Skipf("set %s to run %s compatibility suite", dsnEnv, dbType)
 	}
-	driver := strings.TrimSpace(os.Getenv("GOARK_ORM_MYSQL_DRIVER"))
+	driver := strings.TrimSpace(os.Getenv(driverEnv))
 	if driver == "" {
-		driver = "mysql"
+		driver = defaultDriver
 	}
 	t.Setenv("GOARK_ORM_INTEGRATION_DRIVER", driver)
 	t.Setenv("GOARK_ORM_INTEGRATION_DSN", dsn)
-	t.Setenv("GOARK_ORM_INTEGRATION_DBTYPE", "mysql")
+	t.Setenv("GOARK_ORM_INTEGRATION_DBTYPE", dbType)
 	ormtest.RunCompatibilitySuiteFromEnv(t)
 }
 "@
@@ -91,6 +124,10 @@ func TestMySQLCompatibility(t *testing.T) {
         $env:GOARK_ORM_POSTGRES_DSN = $PostgresDSN
         $env:GOARK_ORM_MYSQL_DRIVER = $MySQLDriver
         $env:GOARK_ORM_MYSQL_DSN = $MySQLDSN
+        $env:GOARK_ORM_MARIADB_DRIVER = $MariaDBDriver
+        $env:GOARK_ORM_MARIADB_DSN = $MariaDBDSN
+        $env:GOARK_ORM_SQLITE_DRIVER = $SQLiteDriver
+        $env:GOARK_ORM_SQLITE_DSN = $SQLiteDSN
         go mod tidy
         go test -count=1 -v
     } finally {
