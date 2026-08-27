@@ -680,7 +680,7 @@ V1 已提供 `StatementInterceptor` around-style SPI，拦截器在动态 SQL �
 - 已支持 ResultMap 的 association 和 collection 嵌套映射，collection 会按根对象 id 聚合多行结果。
 - 已支持 ResultMap association/collection 的 `select` 嵌套查询 eager 回填、`Lazy[T]` / `LazySlice[T]` 显式 lazy 延迟加载、复合列参数绑定和单次父查询内相同参数结果复用；非 Lazy 字段保持 eager 行为，避免引入透明代理。
 - 已支持 XML resultMap `constructor/idArg/arg`、`columnPrefix`、`notNullColumn`、`extends` 生成期继承合并、`autoMapping` 三态元数据和 `discriminator/case` 运行期分派。
-- 已支持 Annotation Mapper 的 `<script>` 动态 SQL、显式注册 SQL Provider、Provider 描述校验、Provider 自带参数合并、Provider 缓存 key 维度和 Go 原生 SQL Builder。
+- 已支持 Annotation Mapper 的 `<script>` 动态 SQL、显式注册 SQL Provider、Provider 描述校验、Registry 启动前静态校验、Provider 自带参数合并、Provider 缓存 key 维度和 Go 原生 SQL Builder。
 - 已支持 `ResultHandler`、`QueryCursor`、`QueryEach` 和 `RowCursor` 逐行流式查询；游标查询绕过缓存写入，并拒绝 collection resultMap 多行聚合场景。
 - 已支持独立 `Configuration` API，用于统一配置方言、缓存策略、下划线转驼峰和默认执行器类型。
 - 已支持 MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`。

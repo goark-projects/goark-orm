@@ -23,7 +23,7 @@ err := registry.RegisterSQLProviderDescriptor(orm.NewSQLProviderDescriptor(
 ))
 ```
 
-描述式注册会在执行前校验 Provider 是否允许服务当前 Statement，错误进入 `ErrBinding` 分类。
+描述式注册会在执行前校验 Provider 是否允许服务当前 Statement，错误进入 `ErrBinding` 分类。应用启动完成元数据注册后，可以调用 `registry.Validate()` 或 `orm.ValidateRegistry(registry)` 提前校验 Provider、ResultMap、TypeHandler、cache-ref、selectKey 和 nested select 引用，避免首次 SQL 请求才暴露装配错误。
 
 ## SQLSource 参数
 

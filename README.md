@@ -7,7 +7,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 本仓库已落地第一版 ORM 元数据与生成器基础能力，`orm.APIVersion` 当前为 `v1`。V1 公共契约采用兼容优先策略：已导出的运行时接口、元数据结构、生成器输入模型和 CLI 主命令保持向后兼容；新增能力优先通过可选字段、可选参数、独立适配层或新接口扩展。详细边界见 `docs/api-compatibility.md`。已支持：
 
 - 实体 `//goark-orm:entity` 与严格 `goark-orm` struct tag 解析。
-- Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete`、`call` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点、显式 SQL Provider、Provider 描述校验和 Provider SQL Builder。
+- Mapper `//goark-orm:mapper`、`select`、`insert`、`update`、`delete`、`call` 方法注解扫描，注解 SQL 支持 `<script>` 动态节点、显式 SQL Provider、Provider 描述校验、Registry 启动前静态校验和 Provider SQL Builder。
 - XML Mapper 静态语句、动态 SQL 基础节点、`call`、`parameter`、`resultSet`、`bind`、`selectKey`、`databaseId`、`resultMap`、`constructor/idArg/arg`、`association`、`collection`、`extends`、`autoMapping`、`discriminator`、`columnPrefix`、`notNullColumn` 元数据和 namespace/类型一致性校验。
 - XML 与注解在同一个 Mapper 接口中混用。
 - 生成 `RegisterGoarkORMMetadata`、实体 RowScanner、Mapper 实现、分页 Mapper 签名、Cursor/ResultHandler 流式 Mapper 签名、BaseMapper/Service 工厂和 `orm.Session` 调用代码。
@@ -35,6 +35,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - `QueryWrapper` / `UpdateWrapper` 支持嵌套条件、`EXISTS` / `NOT EXISTS`、`Apply`、`Last`、`Between`、`NotBetween`、`NotLike`、`LikeLeft`、`LikeRight`、`NotIn`，查询 Wrapper 额外支持 `GroupBy` / `Having` / `Select` / `AllEq` / 条件化 `OrderBy`。
 - `UpdateWrapper`、`TypedField` 和生成期 `UserTypedFields` 字段常量，支持局部更新、类型化字段引用、`SetSQL`、`SetIncrBy` 和 `SetDecrBy`。
 - Registry / Session 级 `TypeHandler` SPI，支持 `RegisterTypeHandlers` / `WithTypeHandlers` 批量装配和 `NewTypeHandler` 函数适配器；内建基于 ByteDance Sonic 的 `json` 处理器，以及 `time`、`decimal`、`string`、`bool`、`bytes` 处理器。
+- `Registry.Validate` / `ValidateRegistry` 支持启动前 fail-fast 校验 Provider、ResultMap、TypeHandler、cache-ref、selectKey 和 nested select 引用，错误保持 `ErrRegistry` 分类。
 - `SQLSession` 执行器/StatementHandler/ParameterHandler/ResultSetHandler SPI、拦截器链，以及 BlockAttack、SQL Observer、租户条件/INSERT 字段注入、数据权限条件、动态表名、分页和实体语义内置拦截器。
 - `SQLSession` 支持 `StatementExecutor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler` 四层 middleware，业务可用 decorator 方式扩展执行、编译、参数绑定和结果映射链路。
 - `Registry.RegisterRowScanner` 支持显式注册生成式实体行扫描器，普通实体查询、存储过程多结果集、无 TypeHandler 的简单 ResultMap 和关闭自动映射的 association ResultMap 会先走 RowScanner，collection、discriminator、nested select、TypeHandler 字段和未注册实体保持反射 fallback。

@@ -32,6 +32,12 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	_ = memoryCache.Stats().Hits
 
 	registry := orm.NewRegistry()
+	if err := orm.ValidateRegistry(orm.NewRegistry()); err != nil {
+		t.Fatalf("validate empty registry failed: %v", err)
+	}
+	if err := orm.NewRegistry().Validate(); err != nil {
+		t.Fatalf("validate empty registry method failed: %v", err)
+	}
 	handler := orm.NewTypeHandler(
 		func(context.Context, any) (any, error) { return nil, nil },
 		func(context.Context, any, any) error { return nil },
@@ -176,6 +182,7 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ func(orm.Session) (*orm.BatchSession, error) = orm.NewBatchSession
 	var _ func(orm.StatementSession, orm.EntityMeta, ...orm.BaseMapperOption) (*orm.BaseMapper[contractUser, int64], error) = orm.NewBaseMapper[contractUser, int64]
 	var _ func(*orm.BaseMapper[contractUser, int64]) (*orm.Service[contractUser, int64], error) = orm.NewService[contractUser, int64]
+	var _ func(*orm.Registry) error = orm.ValidateRegistry
 
 	if _, err := orm.ParseDbType("postgres"); err != nil {
 		t.Fatalf("parse db type failed: %v", err)
