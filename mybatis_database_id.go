@@ -61,8 +61,22 @@ func databaseIDCandidates(environment MyBatisEnvironment) []string {
 	}
 	if environment.DbType != "" {
 		out = append(out, string(environment.DbType))
+		if productName := databaseProductName(environment.DbType); productName != "" {
+			out = append(out, productName)
+		}
 	}
 	return out
+}
+
+func databaseProductName(dbType DbType) string {
+	switch dbType {
+	case DbTypePostgres:
+		return "PostgreSQL"
+	case DbTypeMySQL:
+		return "MySQL"
+	default:
+		return ""
+	}
 }
 
 func lookupDatabaseID(properties ConfigProperties, key string) (string, bool) {

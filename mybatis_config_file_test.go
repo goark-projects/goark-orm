@@ -98,7 +98,7 @@ func TestMyBatisConfig_BuildConfiguration_whenDatabaseIDProviderConfigured_shoul
 		Environment: MyBatisEnvironment{DbType: DbTypePostgres},
 		DatabaseIDProvider: DatabaseIDProvider{
 			Type:       DatabaseIDProviderVendor,
-			Properties: map[string]string{"postgres": "postgresql", "mysql": "mysql8"},
+			Properties: map[string]string{"PostgreSQL": "postgresql", "MySQL": "mysql8"},
 		},
 	}
 
