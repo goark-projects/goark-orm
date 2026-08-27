@@ -130,6 +130,7 @@ Multi-package generation can be driven by a committed JSON file:
 {
   "databaseId": "postgres",
   "typeHandlers": ["json", "decimal"],
+  "buildTags": ["enterprise"],
   "packages": [
     {
       "dir": "internal/user",

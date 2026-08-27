@@ -14,12 +14,14 @@ func TestGenerateConfig_Resolve_whenPackagesProvided_shouldApplyDefaultsAndResol
 	if err := os.WriteFile(configPath, []byte(`{
   "databaseId": "postgres",
   "typeHandlers": ["json"],
+  "buildTags": ["global", "goark"],
   "naming": {"table": "snake_case", "column": "snake_case"},
   "packages": [
     {
       "dir": "internal/user",
       "output": "internal/user/zz_goark_orm_user_gen.go",
       "typeHandlers": ["decimal", "json"],
+      "buildTags": ["goark", "feature"],
       "naming": {"tablePrefix": "sys_"}
     }
   ]
@@ -52,6 +54,9 @@ func TestGenerateConfig_Resolve_whenPackagesProvided_shouldApplyDefaultsAndResol
 	if !reflect.DeepEqual(item.Spec.TypeHandlers, []string{"json", "decimal"}) {
 		t.Fatalf("unexpected type handlers %#v", item.Spec.TypeHandlers)
 	}
+	if !reflect.DeepEqual(item.Spec.BuildTags, []string{"global", "goark", "feature"}) {
+		t.Fatalf("unexpected build tags %#v", item.Spec.BuildTags)
+	}
 	if item.Spec.Naming.Table != NamingStrategySnakeCase || item.Spec.Naming.Column != NamingStrategySnakeCase || item.Spec.Naming.TablePrefix != "sys_" {
 		t.Fatalf("unexpected naming config %#v", item.Spec.Naming)
 	}
@@ -64,6 +69,7 @@ func TestGenerateConfig_Resolve_whenTopLevelSinglePackageProvided_shouldResolveO
 		Output:       "gen/user.go",
 		PackageName:  "sample",
 		TypeHandlers: []string{"json"},
+		BuildTags:    []string{"scan_extra"},
 	}
 
 	items, err := config.Resolve(root)
@@ -82,6 +88,9 @@ func TestGenerateConfig_Resolve_whenTopLevelSinglePackageProvided_shouldResolveO
 	}
 	if items[0].Output != filepath.Join(root, "gen", "user.go") {
 		t.Fatalf("unexpected output %q", items[0].Output)
+	}
+	if !reflect.DeepEqual(items[0].Spec.BuildTags, []string{"scan_extra"}) {
+		t.Fatalf("unexpected build tags %#v", items[0].Spec.BuildTags)
 	}
 }
 

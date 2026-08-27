@@ -101,6 +101,7 @@ func (c Command) runGenerateORM(args []string) int {
 	var check bool
 	var diff bool
 	var typeHandlers stringList
+	var buildTags stringList
 	spec := ormgen.GenerateSpec{Dir: "."}
 	flags := flag.NewFlagSet("goark-orm generate orm", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -113,6 +114,7 @@ func (c Command) runGenerateORM(args []string) int {
 	flags.BoolVar(&check, "check", false, "检查生成文件是否与当前元数据一致")
 	flags.BoolVar(&diff, "diff", false, "输出生成文件与当前元数据的差异")
 	flags.Var(&typeHandlers, "type-handler", "额外已注册 TypeHandler 名称，可重复")
+	flags.Var(&buildTags, "build-tag", "额外 Go build tag，可重复")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -124,6 +126,7 @@ func (c Command) runGenerateORM(args []string) int {
 		return 2
 	}
 	spec.TypeHandlers = append(spec.TypeHandlers, typeHandlers...)
+	spec.BuildTags = append(spec.BuildTags, buildTags...)
 	mode, err := generateORMModeFromFlags(dryRun, validate, check, diff)
 	if err != nil {
 		_, _ = fmt.Fprintf(c.Err, "%v\n", err)
@@ -298,6 +301,7 @@ Flags:
   --check                    Fail if generated files are missing or out of date.
   --diff                     Print a unified diff when generated files are out of date.
   --type-handler string      Extra registered TypeHandler name. Repeatable.
+  --build-tag string         Extra Go build tag for scanning. Repeatable.
 
 Examples:
   goark-orm generate orm --dir .

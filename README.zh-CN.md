@@ -130,6 +130,7 @@ _ = page
 {
   "databaseId": "postgres",
   "typeHandlers": ["json", "decimal"],
+  "buildTags": ["enterprise"],
   "packages": [
     {
       "dir": "internal/user",

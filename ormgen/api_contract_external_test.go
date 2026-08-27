@@ -106,7 +106,7 @@ func TestV1GeneratorPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ ormgen.TemplateRenderer = renderer
 	var _ func(ormgen.GenerateSpec) ([]byte, error) = ormgen.Generate
 	var _ func(ormgen.GenerateSpec, ormgen.TemplateRenderer) ([]byte, error) = ormgen.GenerateWithRenderer
-	_ = ormgen.GenerateSpec{PackageName: "contract", TypeHandlers: []string{"json"}}
+	_ = ormgen.GenerateSpec{PackageName: "contract", TypeHandlers: []string{"json"}, BuildTags: []string{"goark"}}
 	_ = ormgen.PackageModel{PackageName: "contract"}
 	_ = ormgen.MapperModel{Namespace: "contract.UserMapper", Cache: orm.CacheMeta{Enabled: true, Blocking: true}}
 	_ = ormgen.StatementModel{Command: orm.StatementCommandSelect, UseCache: orm.StatementCacheEnabled}

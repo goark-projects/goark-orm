@@ -16,6 +16,7 @@ type GenerateConfig struct {
 	Output       string                `json:"output,omitempty"`
 	DatabaseID   string                `json:"databaseId,omitempty"`
 	TypeHandlers []string              `json:"typeHandlers,omitempty"`
+	BuildTags    []string              `json:"buildTags,omitempty"`
 	Naming       NamingConfig          `json:"naming,omitempty"`
 	Packages     []GeneratePackageSpec `json:"packages,omitempty"`
 }
@@ -27,6 +28,7 @@ type GeneratePackageSpec struct {
 	Output       string       `json:"output,omitempty"`
 	DatabaseID   string       `json:"databaseId,omitempty"`
 	TypeHandlers []string     `json:"typeHandlers,omitempty"`
+	BuildTags    []string     `json:"buildTags,omitempty"`
 	Naming       NamingConfig `json:"naming,omitempty"`
 }
 
@@ -69,6 +71,7 @@ func (c GenerateConfig) Resolve(baseDir string) ([]ConfiguredGenerateSpec, error
 			Output:       c.Output,
 			DatabaseID:   c.DatabaseID,
 			TypeHandlers: c.TypeHandlers,
+			BuildTags:    c.BuildTags,
 		}}
 	} else if len(packages) > 1 && strings.TrimSpace(c.Output) != "" {
 		return nil, fmt.Errorf("goark-orm: top-level output cannot be used with multiple packages")
@@ -85,6 +88,7 @@ func (c GenerateConfig) Resolve(baseDir string) ([]ConfiguredGenerateSpec, error
 			PackageName:  configFirstNonEmpty(item.PackageName, c.PackageName),
 			DatabaseID:   configFirstNonEmpty(item.DatabaseID, c.DatabaseID),
 			TypeHandlers: uniqueConfigStrings(append(append([]string(nil), c.TypeHandlers...), item.TypeHandlers...)),
+			BuildTags:    uniqueConfigStrings(append(append([]string(nil), c.BuildTags...), item.BuildTags...)),
 			Naming:       naming,
 		}
 		output := strings.TrimSpace(item.Output)

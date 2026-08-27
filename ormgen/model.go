@@ -8,6 +8,7 @@ type GenerateSpec struct {
 	PackageName  string
 	DatabaseID   string
 	TypeHandlers []string
+	BuildTags    []string
 	Naming       NamingConfig
 }
 

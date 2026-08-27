@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/printer"
 	"go/token"
@@ -39,14 +40,31 @@ func ScanPackage(spec GenerateSpec) (*PackageModel, error) {
 	}
 	spec.Naming = naming
 	fset := token.NewFileSet()
+	buildContext := build.Default
+	buildContext.BuildTags = uniqueConfigStrings(spec.BuildTags)
+	var matchErr error
 	packages, err := parser.ParseDir(fset, spec.Dir, func(info os.FileInfo) bool {
+		if matchErr != nil {
+			return false
+		}
 		name := info.Name()
-		return strings.HasSuffix(name, ".go") &&
-			!strings.HasSuffix(name, "_test.go") &&
-			!strings.HasPrefix(name, "zz_goark_orm_")
+		if !strings.HasSuffix(name, ".go") ||
+			strings.HasSuffix(name, "_test.go") ||
+			strings.HasPrefix(name, "zz_goark_orm_") {
+			return false
+		}
+		ok, err := buildContext.MatchFile(spec.Dir, name)
+		if err != nil {
+			matchErr = err
+			return false
+		}
+		return ok
 	}, parser.ParseComments)
 	if err != nil {
 		return nil, err
+	}
+	if matchErr != nil {
+		return nil, matchErr
 	}
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("goark-orm: no Go package found in %s", spec.Dir)
