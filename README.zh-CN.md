@@ -174,16 +174,10 @@ if err != nil {
 }
 ```
 
-JSON 配置解码是严格模式，并使用内部 Sonic JSON codec：
+JSON 配置解码是严格模式，并使用内部 Sonic JSON codec。`LoadAndAssembleMyBatisConfig` 可以一站式读取配置并装配运行期对象：
 
 ```go
-runtimeConfig, err := orm.LoadMyBatisConfig("orm-runtime.json")
-if err != nil {
-	return err
-}
-
-assembled, err := orm.AssembleMyBatisConfig(orm.MyBatisAssembly{
-	Config:   runtimeConfig,
+assembled, err := orm.LoadAndAssembleMyBatisConfig("orm-runtime.json", orm.MyBatisAssembly{
 	Registry: registry,
 	DB:       db,
 	TypeHandlers: map[string]orm.TypeHandler{

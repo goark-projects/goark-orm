@@ -2,6 +2,8 @@ package orm
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -30,6 +32,19 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
     "properties": {
       "postgres": "postgresql",
       "mysql": "mysql8"
+    }
+  },
+  "global": {
+    "dbConfig": {
+      "idType": "assign_id",
+      "tablePrefix": "${systemPackage}_",
+      "schema": "public",
+      "logicDeleteField": "Deleted",
+      "logicDeleteValue": 1,
+      "logicNotDeleteValue": 0,
+      "insertStrategy": "not_empty",
+      "updateStrategy": "not_null",
+      "whereStrategy": "not_zero"
     }
   },
   "typeAliases": [
@@ -70,12 +85,55 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
 	if config.TypeAliases[0].TypeName != "system.User" || config.Mappers[0].Namespace != "system.user.UserMapper" {
 		t.Fatalf("properties were not resolved, aliases=%#v mappers=%#v", config.TypeAliases, config.Mappers)
 	}
+	if config.Global.DbConfig.IDType != IDTypeAssignID || config.Global.DbConfig.TablePrefix != "system_" {
+		t.Fatalf("unexpected global db config %#v", config.Global.DbConfig)
+	}
+	if config.Global.DbConfig.InsertStrategy != FieldStrategyNotEmpty ||
+		config.Global.DbConfig.UpdateStrategy != FieldStrategyNotNull ||
+		config.Global.DbConfig.WhereStrategy != FieldStrategyNotZero {
+		t.Fatalf("unexpected field strategies %#v", config.Global.DbConfig)
+	}
 	runtimeConfig, err := config.BuildConfiguration()
 	if err != nil {
 		t.Fatalf("build runtime config failed: %v", err)
 	}
 	if runtimeConfig.DatabaseID != "postgres" {
 		t.Fatalf("explicit databaseId should win over provider, got %q", runtimeConfig.DatabaseID)
+	}
+	if runtimeConfig.GlobalConfig.DbConfig.Schema != "public" ||
+		runtimeConfig.GlobalConfig.DbConfig.LogicDeleteField != "Deleted" {
+		t.Fatalf("global db config not applied %#v", runtimeConfig.GlobalConfig.DbConfig)
+	}
+}
+
+func TestLoadAndAssembleMyBatisConfig_whenFileProvided_shouldReturnFactoryAndSession(t *testing.T) {
+	state := openTestSQLState(t)
+	registry := NewRegistry()
+	if err := registry.RegisterMapper(MapperMeta{TypeName: "UserMapper", Namespace: "system.user.UserMapper"}); err != nil {
+		t.Fatalf("register mapper failed: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "orm-runtime.json")
+	if err := os.WriteFile(path, []byte(`{
+  "settings": {"defaultExecutorType": "REUSE"},
+  "environment": {"dbType": "postgres"},
+  "mappers": [{"namespace": "system.user.UserMapper"}]
+}`), 0o600); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	assembled, err := LoadAndAssembleMyBatisConfig(path, MyBatisAssembly{
+		Registry: registry,
+		DB:       state.db,
+	})
+	if err != nil {
+		t.Fatalf("load and assemble config failed: %v", err)
+	}
+	if assembled.Session == nil || assembled.SessionFactory == nil {
+		t.Fatalf("expected session and factory, got %#v", assembled)
+	}
+	defer assembled.Session.Close()
+	if assembled.Session.Configuration().DefaultExecutorType != ExecutorTypeReuse {
+		t.Fatalf("runtime configuration was not applied")
 	}
 }
 
@@ -90,6 +148,16 @@ func TestDecodeMyBatisConfig_whenPropertyMissing_shouldReject(t *testing.T) {
 	_, err := DecodeMyBatisConfig(strings.NewReader(`{"mappers": [{"namespace": "${missing}"}]}`))
 	if err == nil || !strings.Contains(err.Error(), "property") {
 		t.Fatalf("expected missing property error, got %v", err)
+	}
+}
+
+func TestDecodeMyBatisConfig_whenGlobalAliasesBothProvided_shouldReject(t *testing.T) {
+	_, err := DecodeMyBatisConfig(strings.NewReader(`{
+  "global": {"dbConfig": {"idType": "input"}},
+  "globalConfig": {"dbConfig": {"idType": "assign_id"}}
+}`))
+	if err == nil || !strings.Contains(err.Error(), "global and globalConfig") {
+		t.Fatalf("expected duplicate global config error, got %v", err)
 	}
 }
 

@@ -174,16 +174,10 @@ if err != nil {
 }
 ```
 
-The JSON configuration decoder is strict and uses the internal Sonic-backed JSON codec:
+The JSON configuration decoder is strict and uses the internal Sonic-backed JSON codec. `LoadAndAssembleMyBatisConfig` loads the file and assembles runtime objects in one step:
 
 ```go
-runtimeConfig, err := orm.LoadMyBatisConfig("orm-runtime.json")
-if err != nil {
-	return err
-}
-
-assembled, err := orm.AssembleMyBatisConfig(orm.MyBatisAssembly{
-	Config:   runtimeConfig,
+assembled, err := orm.LoadAndAssembleMyBatisConfig("orm-runtime.json", orm.MyBatisAssembly{
 	Registry: registry,
 	DB:       db,
 	TypeHandlers: map[string]orm.TypeHandler{

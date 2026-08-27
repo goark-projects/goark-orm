@@ -25,6 +25,12 @@ func (f MyBatisConfigFile) resolveProperties(resolver *configPropertyResolver) (
 	if out.Plugins, err = resolvePluginRefs(resolver, f.Plugins); err != nil {
 		return MyBatisConfigFile{}, err
 	}
+	if out.Global, err = resolveGlobalFile(resolver, f.Global); err != nil {
+		return MyBatisConfigFile{}, err
+	}
+	if out.GlobalConfig, err = resolveGlobalFile(resolver, f.GlobalConfig); err != nil {
+		return MyBatisConfigFile{}, err
+	}
 	return out, nil
 }
 
@@ -139,6 +145,58 @@ func resolvePluginRefs(resolver *configPropertyResolver, items []PluginRef) ([]P
 		})
 	}
 	return out, nil
+}
+
+func resolveGlobalFile(resolver *configPropertyResolver, item *MyBatisGlobalConfigFile) (*MyBatisGlobalConfigFile, error) {
+	if item == nil {
+		return nil, nil
+	}
+	dbConfig, err := item.DbConfig.resolveProperties(resolver)
+	if err != nil {
+		return nil, err
+	}
+	return &MyBatisGlobalConfigFile{DbConfig: dbConfig}, nil
+}
+
+func (f MyBatisDbConfigFile) resolveProperties(resolver *configPropertyResolver) (MyBatisDbConfigFile, error) {
+	var err error
+	out := f
+	if out.IDType, err = resolveConfigString(resolver, f.IDType); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.TablePrefix, err = resolveConfigString(resolver, f.TablePrefix); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.Schema, err = resolveConfigString(resolver, f.Schema); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.LogicDeleteField, err = resolveConfigString(resolver, f.LogicDeleteField); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.LogicDeleteValue, err = resolveConfigValue(resolver, f.LogicDeleteValue); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.LogicNotDeleteValue, err = resolveConfigValue(resolver, f.LogicNotDeleteValue); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.InsertStrategy, err = resolveConfigString(resolver, f.InsertStrategy); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.UpdateStrategy, err = resolveConfigString(resolver, f.UpdateStrategy); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	if out.WhereStrategy, err = resolveConfigString(resolver, f.WhereStrategy); err != nil {
+		return MyBatisDbConfigFile{}, err
+	}
+	return out, nil
+}
+
+func resolveConfigValue(resolver *configPropertyResolver, value any) (any, error) {
+	text, ok := value.(string)
+	if !ok {
+		return value, nil
+	}
+	return resolveConfigString(resolver, text)
 }
 
 func resolveConfigProperties(resolver *configPropertyResolver, properties ConfigProperties) (ConfigProperties, error) {

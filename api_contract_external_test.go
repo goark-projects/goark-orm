@@ -177,6 +177,7 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ orm.RowScanner = orm.RowScannerFunc(func(context.Context, []string, orm.RowScannerRow, any) error { return nil })
 	var _ orm.IdentifierGenerator = orm.NewDefaultIdentifierGenerator()
 	var _ orm.MetaObjectHandler = orm.MetaObjectHandlerFuncs{}
+	var _ = orm.MyBatisGlobalConfigFile{DbConfig: orm.MyBatisDbConfigFile{IDType: "assign_id"}}
 	var _ orm.StatementInterceptor = orm.StatementInterceptorFunc(func(ctx context.Context, invocation *orm.StatementInvocation) error {
 		return invocation.Proceed(ctx)
 	})
@@ -191,6 +192,7 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ func(orm.Session) (*orm.BatchSession, error) = orm.NewBatchSession
 	var _ func(io.Reader) (orm.MyBatisConfig, error) = orm.DecodeMyBatisConfig
 	var _ func(string) (orm.MyBatisConfig, error) = orm.LoadMyBatisConfig
+	var _ func(string, orm.MyBatisAssembly) (orm.MyBatisAssemblyResult, error) = orm.LoadAndAssembleMyBatisConfig
 	var _ func(orm.StatementSession, orm.EntityMeta, ...orm.BaseMapperOption) (*orm.BaseMapper[contractUser, int64], error) = orm.NewBaseMapper[contractUser, int64]
 	var _ func(*orm.BaseMapper[contractUser, int64]) (*orm.Service[contractUser, int64], error) = orm.NewService[contractUser, int64]
 	var _ func(*orm.Registry) error = orm.ValidateRegistry

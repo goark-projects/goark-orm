@@ -326,6 +326,18 @@ _ = mapper
     "id": "local",
     "dbType": "postgres"
   },
+  "global": {
+    "dbConfig": {
+      "idType": "assign_id",
+      "tablePrefix": "sys_",
+      "logicDeleteField": "Deleted",
+      "logicDeleteValue": true,
+      "logicNotDeleteValue": false,
+      "insertStrategy": "not_empty",
+      "updateStrategy": "not_null",
+      "whereStrategy": "not_zero"
+    }
+  },
   "typeAliases": [
     {
       "alias": "User",
@@ -346,13 +358,7 @@ _ = mapper
 ```
 
 ```go
-runtimeConfig, err := orm.LoadMyBatisConfig("orm-runtime.json")
-if err != nil {
-	return err
-}
-
-assembled, err := orm.AssembleMyBatisConfig(orm.MyBatisAssembly{
-	Config:   runtimeConfig,
+assembled, err := orm.LoadAndAssembleMyBatisConfig("orm-runtime.json", orm.MyBatisAssembly{
 	Registry: registry,
 	DB:       db,
 	TypeHandlers: map[string]orm.TypeHandler{

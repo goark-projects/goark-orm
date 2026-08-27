@@ -13,14 +13,16 @@ import (
 
 // MyBatisConfigFile 描述可提交的 ORM 运行期 JSON 配置文件。
 type MyBatisConfigFile struct {
-	Properties         ConfigProperties       `json:"properties,omitempty"`
-	Settings           MyBatisSettingsFile    `json:"settings,omitempty"`
-	Environment        MyBatisEnvironmentFile `json:"environment,omitempty"`
-	DatabaseIDProvider DatabaseIDProviderFile `json:"databaseIdProvider,omitempty"`
-	TypeAliases        []TypeAlias            `json:"typeAliases,omitempty"`
-	TypeHandlers       []TypeHandlerRef       `json:"typeHandlers,omitempty"`
-	Mappers            []MapperRef            `json:"mappers,omitempty"`
-	Plugins            []PluginRef            `json:"plugins,omitempty"`
+	Properties         ConfigProperties         `json:"properties,omitempty"`
+	Settings           MyBatisSettingsFile      `json:"settings,omitempty"`
+	Environment        MyBatisEnvironmentFile   `json:"environment,omitempty"`
+	DatabaseIDProvider DatabaseIDProviderFile   `json:"databaseIdProvider,omitempty"`
+	TypeAliases        []TypeAlias              `json:"typeAliases,omitempty"`
+	TypeHandlers       []TypeHandlerRef         `json:"typeHandlers,omitempty"`
+	Mappers            []MapperRef              `json:"mappers,omitempty"`
+	Plugins            []PluginRef              `json:"plugins,omitempty"`
+	Global             *MyBatisGlobalConfigFile `json:"global,omitempty"`
+	GlobalConfig       *MyBatisGlobalConfigFile `json:"globalConfig,omitempty"`
 }
 
 // MyBatisSettingsFile 使用字符串承载需要解析的枚举和时间配置。
@@ -99,6 +101,10 @@ func (f MyBatisConfigFile) Build() (MyBatisConfig, error) {
 	if err != nil {
 		return MyBatisConfig{}, err
 	}
+	global, err := resolved.BuildGlobalConfig()
+	if err != nil {
+		return MyBatisConfig{}, err
+	}
 	config := MyBatisConfig{
 		Properties:         copyConfigProperties(resolved.Properties),
 		Settings:           settings,
@@ -108,12 +114,22 @@ func (f MyBatisConfigFile) Build() (MyBatisConfig, error) {
 		TypeHandlers:       append([]TypeHandlerRef(nil), resolved.TypeHandlers...),
 		Mappers:            append([]MapperRef(nil), resolved.Mappers...),
 		Plugins:            append([]PluginRef(nil), resolved.Plugins...),
-		Global:             DefaultGlobalConfig(),
+		Global:             global,
 	}
 	if err := config.Validate(); err != nil {
 		return MyBatisConfig{}, err
 	}
 	return config, nil
+}
+
+// LoadAndAssembleMyBatisConfig 读取 JSON 配置并完成运行期装配。
+func LoadAndAssembleMyBatisConfig(path string, assembly MyBatisAssembly) (MyBatisAssemblyResult, error) {
+	config, err := LoadMyBatisConfig(path)
+	if err != nil {
+		return MyBatisAssemblyResult{}, err
+	}
+	assembly.Config = config
+	return AssembleMyBatisConfig(assembly)
 }
 
 // Build 转换 settings 子配置。
