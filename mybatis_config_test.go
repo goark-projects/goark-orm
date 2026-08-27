@@ -13,16 +13,17 @@ func TestMyBatisConfig_BuildConfiguration_whenGoNativeModelProvided_shouldApplyR
 	localCacheEnabled := false
 	config, err := MyBatisConfig{
 		Settings: MyBatisSettings{
-			CacheEnabled:             &cacheEnabled,
-			LocalCacheEnabled:        &localCacheEnabled,
-			LocalCacheScope:          LocalCacheScopeStatement,
-			MapUnderscoreToCamelCase: true,
-			UseGeneratedKeys:         true,
-			LazyLoadingEnabled:       true,
-			DefaultExecutorType:      ExecutorTypeReuse,
-			DefaultStatementTimeout:  3 * time.Second,
-			DefaultFetchSize:         128,
-			DatabaseID:               "mysql8",
+			CacheEnabled:               &cacheEnabled,
+			LocalCacheEnabled:          &localCacheEnabled,
+			LocalCacheScope:            LocalCacheScopeStatement,
+			MapUnderscoreToCamelCase:   true,
+			UseGeneratedKeys:           true,
+			LazyLoadingEnabled:         true,
+			DefaultExecutorType:        ExecutorTypeReuse,
+			PreparedStatementCacheSize: 64,
+			DefaultStatementTimeout:    3 * time.Second,
+			DefaultFetchSize:           128,
+			DatabaseID:                 "mysql8",
 		},
 		Environment: MyBatisEnvironment{
 			ID:     "prod",
@@ -59,6 +60,9 @@ func TestMyBatisConfig_BuildConfiguration_whenGoNativeModelProvided_shouldApplyR
 	if config.DefaultExecutorType != ExecutorTypeReuse {
 		t.Fatalf("unexpected executor type %q", config.DefaultExecutorType)
 	}
+	if config.PreparedStatementCacheSize != 64 {
+		t.Fatalf("unexpected prepared statement cache size %d", config.PreparedStatementCacheSize)
+	}
 	if config.DefaultStatementTimeout != 3*time.Second || config.DefaultFetchSize != 128 {
 		t.Fatalf("unexpected timeout or fetch size")
 	}
@@ -91,6 +95,17 @@ func TestMyBatisConfig_Validate_whenDuplicateAliasOrMapperProvided_shouldReject(
 	}.BuildConfiguration()
 	if err == nil || !errors.Is(err, ErrConfiguration) {
 		t.Fatalf("expected configuration error for duplicate mapper, got %v", err)
+	}
+}
+
+func TestMyBatisConfig_Validate_whenPreparedStatementCacheSizeNegative_shouldReject(t *testing.T) {
+	t.Parallel()
+
+	_, err := MyBatisConfig{
+		Settings: MyBatisSettings{PreparedStatementCacheSize: -1},
+	}.BuildConfiguration()
+	if err == nil || !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("expected configuration error for negative prepared statement cache size, got %v", err)
 	}
 }
 

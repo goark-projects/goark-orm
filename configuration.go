@@ -19,6 +19,11 @@ const (
 type ExecutorType string
 
 const (
+	// DefaultPreparedStatementCacheSize 是 REUSE 执行器的默认预编译语句缓存容量。
+	DefaultPreparedStatementCacheSize = 256
+)
+
+const (
 	// ExecutorTypeSimple 表示普通即时执行器。
 	ExecutorTypeSimple ExecutorType = "SIMPLE"
 	// ExecutorTypeReuse 表示可复用预编译语句执行器。
@@ -29,19 +34,20 @@ const (
 
 // Configuration 描述 ORM 运行期配置。
 type Configuration struct {
-	Dialect                  Dialect
-	DatabaseID               string
-	GlobalConfig             GlobalConfig
-	LocalCacheEnabled        *bool
-	LocalCacheScope          LocalCacheScope
-	CacheEnabled             *bool
-	MapUnderscoreToCamelCase bool
-	UseGeneratedKeys         bool
-	LazyLoadingEnabled       bool
-	DefaultExecutorType      ExecutorType
-	DefaultStatementTimeout  time.Duration
-	DefaultFetchSize         int
-	MetaObjectHandler        MetaObjectHandler
+	Dialect                    Dialect
+	DatabaseID                 string
+	GlobalConfig               GlobalConfig
+	LocalCacheEnabled          *bool
+	LocalCacheScope            LocalCacheScope
+	CacheEnabled               *bool
+	MapUnderscoreToCamelCase   bool
+	UseGeneratedKeys           bool
+	LazyLoadingEnabled         bool
+	DefaultExecutorType        ExecutorType
+	PreparedStatementCacheSize int
+	DefaultStatementTimeout    time.Duration
+	DefaultFetchSize           int
+	MetaObjectHandler          MetaObjectHandler
 }
 
 // DefaultConfiguration 返回独立 ORM 的默认运行期配置。
@@ -49,11 +55,12 @@ func DefaultConfiguration() Configuration {
 	localCacheEnabled := true
 	cacheEnabled := true
 	return Configuration{
-		LocalCacheEnabled:   &localCacheEnabled,
-		LocalCacheScope:     LocalCacheScopeSession,
-		CacheEnabled:        &cacheEnabled,
-		DefaultExecutorType: ExecutorTypeSimple,
-		GlobalConfig:        DefaultGlobalConfig(),
+		LocalCacheEnabled:          &localCacheEnabled,
+		LocalCacheScope:            LocalCacheScopeSession,
+		CacheEnabled:               &cacheEnabled,
+		DefaultExecutorType:        ExecutorTypeSimple,
+		PreparedStatementCacheSize: DefaultPreparedStatementCacheSize,
+		GlobalConfig:               DefaultGlobalConfig(),
 	}
 }
 
@@ -157,6 +164,12 @@ func normalizeConfiguration(config Configuration, fallbackDialect Dialect) (Conf
 	}
 	if out.DefaultFetchSize < 0 {
 		return Configuration{}, configurationErrorf("defaultFetchSize must be >= 0")
+	}
+	switch {
+	case out.PreparedStatementCacheSize == 0:
+		out.PreparedStatementCacheSize = defaults.PreparedStatementCacheSize
+	case out.PreparedStatementCacheSize < 0:
+		return Configuration{}, configurationErrorf("preparedStatementCacheSize must be >= 0")
 	}
 	return out, nil
 }

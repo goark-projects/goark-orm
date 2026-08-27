@@ -203,6 +203,8 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ orm.InjectOption = orm.WithInjectGlobalConfig(orm.DefaultGlobalConfig())
 	var _ func(*orm.Registry, string, orm.EntityMeta, orm.SQLInjector, ...orm.InjectOption) error = orm.RegisterInjectedStatements
 	var _ func(*orm.Registry, orm.InjectNamespaceResolver, ...orm.InjectOption) error = orm.RegisterDefaultInjectedStatementsForRegistry
+	var _ func(int) orm.SQLSessionOption = orm.WithPreparedStatementCacheSize
+	var _ int = orm.DefaultPreparedStatementCacheSize
 
 	if _, err := orm.ParseDbType("postgres"); err != nil {
 		t.Fatalf("parse db type failed: %v", err)

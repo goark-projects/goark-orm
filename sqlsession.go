@@ -3,6 +3,7 @@ package orm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -34,7 +35,7 @@ type SQLSession struct {
 	cacheEnabled             bool
 	mapUnderscoreToCamelCase bool
 	preparedMu               sync.Mutex
-	preparedStatements       map[string]*sql.Stmt
+	preparedStatements       *preparedStatementCache
 	columnBindingPlans       sync.Map
 	statementParameterPlans  sync.Map
 
@@ -74,6 +75,24 @@ func WithLocalCache(enabled bool) SQLSessionOption {
 			session.localCache = nil
 		}
 		return nil
+	}
+}
+
+// WithPreparedStatementCacheSize 设置 REUSE 执行器的预编译语句缓存容量，0 表示使用默认容量。
+func WithPreparedStatementCacheSize(maxEntries int) SQLSessionOption {
+	return func(session *SQLSession) error {
+		if maxEntries < 0 {
+			return configurationErrorf("preparedStatementCacheSize must be >= 0")
+		}
+		if maxEntries == 0 {
+			maxEntries = DefaultPreparedStatementCacheSize
+		}
+		session.configuration.PreparedStatementCacheSize = maxEntries
+		session.preparedMu.Lock()
+		old := session.preparedStatements
+		session.preparedStatements = nil
+		session.preparedMu.Unlock()
+		return errors.Join(old.closeAll()...)
 	}
 }
 

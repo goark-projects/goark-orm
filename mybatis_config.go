@@ -7,16 +7,17 @@ import (
 
 // MyBatisSettings 描述运行期 settings 配置子集。
 type MyBatisSettings struct {
-	CacheEnabled             *bool
-	LocalCacheEnabled        *bool
-	LocalCacheScope          LocalCacheScope
-	MapUnderscoreToCamelCase bool
-	UseGeneratedKeys         bool
-	LazyLoadingEnabled       bool
-	DefaultExecutorType      ExecutorType
-	DefaultStatementTimeout  time.Duration
-	DefaultFetchSize         int
-	DatabaseID               string
+	CacheEnabled               *bool
+	LocalCacheEnabled          *bool
+	LocalCacheScope            LocalCacheScope
+	MapUnderscoreToCamelCase   bool
+	UseGeneratedKeys           bool
+	LazyLoadingEnabled         bool
+	DefaultExecutorType        ExecutorType
+	PreparedStatementCacheSize int
+	DefaultStatementTimeout    time.Duration
+	DefaultFetchSize           int
+	DatabaseID                 string
 }
 
 // MyBatisEnvironment 描述数据库环境配置。Dialect 显式指定时优先于 DbType。
@@ -122,6 +123,7 @@ func (c MyBatisConfig) BuildConfiguration() (Configuration, error) {
 	if c.Settings.DefaultExecutorType != "" {
 		out.DefaultExecutorType = c.Settings.DefaultExecutorType
 	}
+	out.PreparedStatementCacheSize = c.Settings.PreparedStatementCacheSize
 	out.DefaultStatementTimeout = c.Settings.DefaultStatementTimeout
 	out.DefaultFetchSize = c.Settings.DefaultFetchSize
 	return normalizeConfiguration(out, nil)
@@ -146,6 +148,9 @@ func (c MyBatisConfig) Validate() error {
 	}
 	if c.Settings.DefaultFetchSize < 0 {
 		return configurationErrorf("defaultFetchSize must be >= 0")
+	}
+	if c.Settings.PreparedStatementCacheSize < 0 {
+		return configurationErrorf("preparedStatementCacheSize must be >= 0")
 	}
 	if c.Settings.DefaultStatementTimeout < 0 {
 		return configurationErrorf("defaultStatementTimeout must be >= 0")

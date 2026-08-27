@@ -126,7 +126,12 @@ func (s *SQLSession) preparedStatement(ctx context.Context, query string) (*sql.
 		return nil, configurationErrorf("executor type REUSE requires PrepareContext support")
 	}
 	s.preparedMu.Lock()
-	if statement := s.preparedStatements[query]; statement != nil {
+	cache := s.preparedStatements
+	if cache == nil {
+		cache = newPreparedStatementCache(s.configuration.PreparedStatementCacheSize)
+		s.preparedStatements = cache
+	}
+	if statement, ok := cache.get(query); ok {
 		s.preparedMu.Unlock()
 		return statement, nil
 	}
@@ -137,15 +142,19 @@ func (s *SQLSession) preparedStatement(ctx context.Context, query string) (*sql.
 		return nil, err
 	}
 	s.preparedMu.Lock()
-	defer s.preparedMu.Unlock()
 	if s.preparedStatements == nil {
-		s.preparedStatements = make(map[string]*sql.Stmt)
+		s.preparedStatements = newPreparedStatementCache(s.configuration.PreparedStatementCacheSize)
 	}
-	if existing := s.preparedStatements[query]; existing != nil {
+	if existing, ok := s.preparedStatements.get(query); ok {
+		s.preparedMu.Unlock()
 		_ = statement.Close()
 		return existing, nil
 	}
-	s.preparedStatements[query] = statement
+	evicted := s.preparedStatements.put(query, statement)
+	s.preparedMu.Unlock()
+	for _, old := range evicted {
+		_ = old.Close()
+	}
 	return statement, nil
 }
 
@@ -154,12 +163,8 @@ func (s *SQLSession) closePreparedStatements() error {
 		return configurationErrorf("session is nil")
 	}
 	s.preparedMu.Lock()
-	statements := s.preparedStatements
+	cache := s.preparedStatements
 	s.preparedStatements = nil
 	s.preparedMu.Unlock()
-	var err error
-	for _, statement := range statements {
-		err = errors.Join(err, statement.Close())
-	}
-	return err
+	return errors.Join(cache.closeAll()...)
 }

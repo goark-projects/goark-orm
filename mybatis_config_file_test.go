@@ -19,6 +19,7 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
     "localCacheScope": "STATEMENT",
     "mapUnderscoreToCamelCase": true,
     "defaultExecutorType": "REUSE",
+    "preparedStatementCacheSize": 64,
     "defaultStatementTimeout": "2s",
     "defaultFetchSize": 128,
     "databaseId": "postgres"
@@ -72,6 +73,9 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
 	}
 	if config.Settings.DefaultStatementTimeout.String() != "2s" {
 		t.Fatalf("unexpected statement timeout %s", config.Settings.DefaultStatementTimeout)
+	}
+	if config.Settings.PreparedStatementCacheSize != 64 {
+		t.Fatalf("unexpected prepared statement cache size %d", config.Settings.PreparedStatementCacheSize)
 	}
 	if config.Environment.DbType != DbTypePostgres {
 		t.Fatalf("unexpected db type %q", config.Environment.DbType)

@@ -27,16 +27,17 @@ type MyBatisConfigFile struct {
 
 // MyBatisSettingsFile 使用字符串承载需要解析的枚举和时间配置。
 type MyBatisSettingsFile struct {
-	CacheEnabled             *bool  `json:"cacheEnabled,omitempty"`
-	LocalCacheEnabled        *bool  `json:"localCacheEnabled,omitempty"`
-	LocalCacheScope          string `json:"localCacheScope,omitempty"`
-	MapUnderscoreToCamelCase bool   `json:"mapUnderscoreToCamelCase,omitempty"`
-	UseGeneratedKeys         bool   `json:"useGeneratedKeys,omitempty"`
-	LazyLoadingEnabled       bool   `json:"lazyLoadingEnabled,omitempty"`
-	DefaultExecutorType      string `json:"defaultExecutorType,omitempty"`
-	DefaultStatementTimeout  string `json:"defaultStatementTimeout,omitempty"`
-	DefaultFetchSize         int    `json:"defaultFetchSize,omitempty"`
-	DatabaseID               string `json:"databaseId,omitempty"`
+	CacheEnabled               *bool  `json:"cacheEnabled,omitempty"`
+	LocalCacheEnabled          *bool  `json:"localCacheEnabled,omitempty"`
+	LocalCacheScope            string `json:"localCacheScope,omitempty"`
+	MapUnderscoreToCamelCase   bool   `json:"mapUnderscoreToCamelCase,omitempty"`
+	UseGeneratedKeys           bool   `json:"useGeneratedKeys,omitempty"`
+	LazyLoadingEnabled         bool   `json:"lazyLoadingEnabled,omitempty"`
+	DefaultExecutorType        string `json:"defaultExecutorType,omitempty"`
+	PreparedStatementCacheSize int    `json:"preparedStatementCacheSize,omitempty"`
+	DefaultStatementTimeout    string `json:"defaultStatementTimeout,omitempty"`
+	DefaultFetchSize           int    `json:"defaultFetchSize,omitempty"`
+	DatabaseID                 string `json:"databaseId,omitempty"`
 }
 
 // MyBatisEnvironmentFile 描述 JSON 中的数据库环境。
@@ -154,16 +155,17 @@ func (f MyBatisSettingsFile) Build() (MyBatisSettings, error) {
 		return MyBatisSettings{}, err
 	}
 	return MyBatisSettings{
-		CacheEnabled:             cloneBoolPointer(f.CacheEnabled),
-		LocalCacheEnabled:        cloneBoolPointer(f.LocalCacheEnabled),
-		LocalCacheScope:          scope,
-		MapUnderscoreToCamelCase: f.MapUnderscoreToCamelCase,
-		UseGeneratedKeys:         f.UseGeneratedKeys,
-		LazyLoadingEnabled:       f.LazyLoadingEnabled,
-		DefaultExecutorType:      executorType,
-		DefaultStatementTimeout:  timeout,
-		DefaultFetchSize:         f.DefaultFetchSize,
-		DatabaseID:               strings.TrimSpace(f.DatabaseID),
+		CacheEnabled:               cloneBoolPointer(f.CacheEnabled),
+		LocalCacheEnabled:          cloneBoolPointer(f.LocalCacheEnabled),
+		LocalCacheScope:            scope,
+		MapUnderscoreToCamelCase:   f.MapUnderscoreToCamelCase,
+		UseGeneratedKeys:           f.UseGeneratedKeys,
+		LazyLoadingEnabled:         f.LazyLoadingEnabled,
+		DefaultExecutorType:        executorType,
+		PreparedStatementCacheSize: f.PreparedStatementCacheSize,
+		DefaultStatementTimeout:    timeout,
+		DefaultFetchSize:           f.DefaultFetchSize,
+		DatabaseID:                 strings.TrimSpace(f.DatabaseID),
 	}, nil
 }
 

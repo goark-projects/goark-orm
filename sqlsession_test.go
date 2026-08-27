@@ -1557,6 +1557,74 @@ func TestSQLSession_Exec_whenExecutorTypeReuse_shouldReusePreparedStatement(t *t
 	}
 }
 
+func TestSQLSession_Exec_whenPreparedStatementCacheSizeExceeded_shouldEvictLeastRecentlyUsed(t *testing.T) {
+	state := openTestSQLState(t)
+	state.db.SetMaxOpenConns(1)
+	registry := newSQLSessionRegistry(t,
+		StatementMeta{
+			ID:        "UpdateA",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.UpdateA",
+			Command:   StatementCommandUpdate,
+			Source:    StatementSourceAnnotation,
+			SQL:       "update sys_user set name = #{name} where id = 1",
+		},
+		StatementMeta{
+			ID:        "UpdateB",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.UpdateB",
+			Command:   StatementCommandUpdate,
+			Source:    StatementSourceAnnotation,
+			SQL:       "update sys_user set name = #{name} where id = 2",
+		},
+		StatementMeta{
+			ID:        "UpdateC",
+			Namespace: "system.user.UserMapper",
+			FullName:  "system.user.UserMapper.UpdateC",
+			Command:   StatementCommandUpdate,
+			Source:    StatementSourceAnnotation,
+			SQL:       "update sys_user set name = #{name} where id = 3",
+		},
+	)
+	session, err := NewSQLSession(
+		registry,
+		state.db,
+		NewPostgresDialect(),
+		WithConfiguration(Configuration{
+			DefaultExecutorType:        ExecutorTypeReuse,
+			PreparedStatementCacheSize: 2,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	for _, statement := range []string{
+		"system.user.UserMapper.UpdateA",
+		"system.user.UserMapper.UpdateB",
+		"system.user.UserMapper.UpdateA",
+		"system.user.UserMapper.UpdateC",
+		"system.user.UserMapper.UpdateB",
+	} {
+		if _, err := session.Exec(context.Background(), statement, NamedArgs{"name": "Alice"}); err != nil {
+			t.Fatalf("exec %s failed: %v", statement, err)
+		}
+	}
+
+	if state.prepareCount != 4 {
+		t.Fatalf("expected four prepared statements after LRU eviction, got %d queries=%#v", state.prepareCount, state.prepareQueries)
+	}
+	if state.stmtClosed != 2 {
+		t.Fatalf("expected two evicted statements to close, got %d", state.stmtClosed)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close session failed: %v", err)
+	}
+	if state.stmtClosed != 4 {
+		t.Fatalf("expected all prepared statements to close, got %d", state.stmtClosed)
+	}
+}
+
 func TestSQLSession_Exec_whenGeneratedKeysHasKeyProperty_shouldBackfillEntityField(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1, lastInsertID: 42}
