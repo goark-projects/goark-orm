@@ -860,7 +860,7 @@ func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(des
 			targets[index] = &discard
 			continue
 		}
-		field, ok := fieldByIndexAlloc(target, binding.index)
+		field, ok := fieldByBindingIndexAlloc(target, binding.index)
 		if !ok {
 			var discard any
 			targets[index] = &discard

@@ -144,7 +144,7 @@ func resultCollectionPlans(rootType reflect.Type, collections []ResultCollection
 }
 
 func (s *SQLSession) applyBindings(ctx context.Context, target reflect.Value, bindings map[string]columnBinding, columns []string, values []any) error {
-	columnIndexes := resultColumnIndexes(columns)
+	var columnIndexes map[string]int
 	for index, column := range columns {
 		if index < 0 || index >= len(values) {
 			continue
@@ -153,10 +153,15 @@ func (s *SQLSession) applyBindings(ctx context.Context, target reflect.Value, bi
 		if !ok {
 			continue
 		}
-		if len(binding.presenceColumns) > 0 && !resultColumnsPresent(binding.presenceColumns, columnIndexes, values) {
-			continue
+		if len(binding.presenceColumns) > 0 {
+			if columnIndexes == nil {
+				columnIndexes = resultColumnIndexes(columns)
+			}
+			if !resultColumnsPresent(binding.presenceColumns, columnIndexes, values) {
+				continue
+			}
 		}
-		field, ok := fieldByIndexAlloc(target, binding.index)
+		field, ok := fieldByBindingIndexAlloc(target, binding.index)
 		if !ok || !field.IsValid() || !field.CanSet() {
 			continue
 		}
@@ -230,6 +235,17 @@ func fieldByIndexAlloc(root reflect.Value, index []int) (reflect.Value, bool) {
 		value = value.Field(item)
 	}
 	return value, true
+}
+
+func fieldByBindingIndexAlloc(root reflect.Value, index []int) (reflect.Value, bool) {
+	if len(index) == 1 && root.Kind() == reflect.Struct {
+		item := index[0]
+		if item < 0 || item >= root.NumField() {
+			return reflect.Value{}, false
+		}
+		return root.Field(item), true
+	}
+	return fieldByIndexAlloc(root, index)
 }
 
 func rootValueAt(target reflect.Value, index int) reflect.Value {

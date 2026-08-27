@@ -137,6 +137,36 @@ func BenchmarkSQLSessionQueryOneGeneratedRowScanner(b *testing.B) {
 	}
 }
 
+func BenchmarkSQLSessionQueryOneResultMapTypeHandler(b *testing.B) {
+	registry := newSQLSessionRegistry(b, StatementMeta{
+		ID:        "FindProfile",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindProfile",
+		Command:   StatementCommandSelect,
+		SQL:       "select id, profile from sys_user where id = #{id}",
+		ResultMap: "UserResult",
+	})
+	state := openTestSQLState(b)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "profile"},
+		values:  [][]driver.Value{{int64(7), []byte("profile-fast-path")}},
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect(), WithLocalCache(false), WithTypeHandler("profile", profileTypeHandler{}))
+	if err != nil {
+		b.Fatalf("new SQL session failed: %v", err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var user sqlSessionUser
+		if err := session.QueryOne(context.Background(), "system.user.UserMapper.FindProfile", NamedArgs{"id": int64(7)}, &user); err != nil {
+			b.Fatalf("query one failed: %v", err)
+		}
+		if user.ID != 7 || user.Profile.Text != "profile-fast-path" {
+			b.Fatalf("unexpected user %#v", user)
+		}
+	}
+}
+
 func BenchmarkAppendSQLCondition_GroupedQuery(b *testing.B) {
 	query := `select status, count(*) from sys_user where active = #{active} and exists (select 1 from audit_log where audit_log.user_id = sys_user.id and audit_log.type = #{type}) group by status having count(*) > #{min} order by status`
 	condition := `"tenant_id" = #{tenantID}`
