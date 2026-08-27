@@ -18,6 +18,7 @@ const (
 	defaultCompatibilityNamespace   = "goark.ormtest.CompatibilityMapper"
 	defaultCompatibilityResultMapID = "CompatibilityRecordMap"
 	compatibilityJSONHandler        = "ormtest_json"
+	compatibilityKeyTableSuffix     = "_keys"
 )
 
 // CompatibilityRecord 是标准真实库兼容套件使用的最小实体。
@@ -72,11 +73,19 @@ func NewCompatibilitySuiteConfig(dbType orm.DbType, options ...CompatibilitySuit
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
 	}
+	keyTable, err := compatibilityRelatedTable(opts.table, compatibilityKeyTableSuffix)
+	if err != nil {
+		return DatabaseSuiteConfig{}, err
+	}
 	quotedTable, err := quoteCompatibilityTable(dialect, opts.table)
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
 	}
-	setupSQL, cleanupSQL, err := compatibilityDDL(dbType, quotedTable)
+	quotedKeyTable, err := quoteCompatibilityTable(dialect, keyTable)
+	if err != nil {
+		return DatabaseSuiteConfig{}, err
+	}
+	setupSQL, cleanupSQL, err := compatibilityDDL(dbType, quotedTable, quotedKeyTable)
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
 	}
@@ -90,7 +99,7 @@ func NewCompatibilitySuiteConfig(dbType orm.DbType, options ...CompatibilitySuit
 		Registry:   registry,
 		SetupSQL:   setupSQL,
 		CleanupSQL: cleanupSQL,
-		Cases:      compatibilityCases(opts.namespace, quotedTable),
+		Cases:      compatibilityCases(opts.namespace, opts.table, quotedTable, keyTable),
 	}, nil
 }
 
@@ -141,23 +150,36 @@ func normalizeCompatibilitySuiteOptions(options ...CompatibilitySuiteOption) com
 	return opts
 }
 
-func compatibilityDDL(dbType orm.DbType, quotedTable string) ([]string, []string, error) {
+func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable string) ([]string, []string, error) {
 	switch dbType {
 	case orm.DbTypePostgres:
 		return []string{
+			"DROP TABLE IF EXISTS " + quotedKeyTable,
 			"DROP TABLE IF EXISTS " + quotedTable,
+			"CREATE TABLE " + quotedKeyTable + " (id BIGSERIAL PRIMARY KEY, name VARCHAR(64) NOT NULL)",
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
-		}, []string{"DROP TABLE IF EXISTS " + quotedTable}, nil
+		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
 	case orm.DbTypeMySQL, orm.DbTypeMariaDB:
 		return []string{
+			"DROP TABLE IF EXISTS " + quotedKeyTable,
 			"DROP TABLE IF EXISTS " + quotedTable,
+			"CREATE TABLE " + quotedKeyTable + " (id BIGINT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(64) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-		}, []string{"DROP TABLE IF EXISTS " + quotedTable}, nil
-	case orm.DbTypeQuestion, orm.DbTypeSQLite:
+		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
+	case orm.DbTypeSQLite:
 		return []string{
+			"DROP TABLE IF EXISTS " + quotedKeyTable,
 			"DROP TABLE IF EXISTS " + quotedTable,
+			"CREATE TABLE " + quotedKeyTable + " (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(64) NOT NULL)",
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
-		}, []string{"DROP TABLE IF EXISTS " + quotedTable}, nil
+		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
+	case orm.DbTypeQuestion:
+		return []string{
+			"DROP TABLE IF EXISTS " + quotedKeyTable,
+			"DROP TABLE IF EXISTS " + quotedTable,
+			"CREATE TABLE " + quotedKeyTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL)",
+			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
+		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
 	default:
 		return nil, nil, fmt.Errorf("goark-orm: compatibility suite does not support db type %q", dbType)
 	}
@@ -172,6 +194,9 @@ func newCompatibilityRegistry(namespace string, table string) (*orm.Registry, er
 		return nil, err
 	}
 	if err := registry.RegisterMapper(compatibilityMapperMeta(namespace, table)); err != nil {
+		return nil, err
+	}
+	if err := registry.Validate(); err != nil {
 		return nil, err
 	}
 	return registry, nil
@@ -235,15 +260,18 @@ func compatibilityResultMap() orm.ResultMapMeta {
 	}
 }
 
-func compatibilityCases(namespace string, table string) []DatabaseCase {
+func compatibilityCases(namespace string, table string, quotedTable string, keyTable string) []DatabaseCase {
 	return []DatabaseCase{
-		compatibilityInsertCase(namespace, table),
-		compatibilityQueryOneCase(namespace, table),
-		compatibilityUpdateCase(namespace, table),
-		compatibilityQueryListCase(namespace, table),
-		compatibilityPageCase(namespace, table),
-		compatibilityBatchCase(namespace, table),
-		compatibilityDeleteCase(namespace, table),
+		compatibilityInsertCase(namespace, quotedTable),
+		compatibilityQueryOneCase(namespace, quotedTable),
+		compatibilityUpdateCase(namespace, quotedTable),
+		compatibilityUpsertCase(namespace, table, quotedTable),
+		compatibilityGeneratedKeyCase(keyTable),
+		compatibilityRowLockCase(table),
+		compatibilityQueryListCase(namespace, quotedTable),
+		compatibilityPageCase(namespace, quotedTable),
+		compatibilityBatchCase(namespace, quotedTable),
+		compatibilityDeleteCase(namespace, quotedTable),
 	}
 }
 
@@ -276,6 +304,136 @@ func compatibilityUpdateCase(namespace string, table string) DatabaseCase {
 		}
 		return nil
 	})
+}
+
+func compatibilityUpsertCase(namespace string, table string, quotedTable string) DatabaseCase {
+	return DatabaseCase{
+		Name: "compatibility-upsert",
+		Run: func(ctx context.Context, session *orm.SQLSession, db *sql.DB) error {
+			if !orm.DialectCapabilitiesOf(session.Dialect()).SupportsUpsert() {
+				return nil
+			}
+			if err := execCompatibilityUpsert(ctx, db, session.Dialect(), table, "Dora"); err != nil {
+				return err
+			}
+			if err := execCompatibilityUpsert(ctx, db, session.Dialect(), table, "Dora Updated"); err != nil {
+				return err
+			}
+			var record CompatibilityRecord
+			err := session.QueryOneStatement(
+				ctx,
+				compatibilityCaseStatement(namespace, quotedTable, "SelectOne"),
+				orm.NamedArgs{"id": int64(4)},
+				&record,
+			)
+			if err != nil {
+				return err
+			}
+			if record.ID != 4 || record.Name != "Dora Updated" || record.Age != 18 {
+				return fmt.Errorf("unexpected upsert record %#v", record)
+			}
+			return nil
+		},
+	}
+}
+
+func compatibilityGeneratedKeyCase(table string) DatabaseCase {
+	return DatabaseCase{
+		Name: "compatibility-generated-key",
+		Run: func(ctx context.Context, session *orm.SQLSession, db *sql.DB) error {
+			plan, err := orm.NewGeneratedKeyPlan(session.Dialect(), "id")
+			if err != nil {
+				return err
+			}
+			switch plan.Style {
+			case orm.DialectGeneratedKeyNone:
+				return nil
+			case orm.DialectGeneratedKeyReturning:
+				source, err := orm.NewInsertSQLBuilder().Into(table).Value("name", "Generated").Build()
+				if err != nil {
+					return err
+				}
+				compiled, err := orm.CompileSQLContext(ctx, source.SQL+" "+plan.SQLClause, source.Args, session.Dialect())
+				if err != nil {
+					return err
+				}
+				var id int64
+				if err := db.QueryRowContext(ctx, compiled.SQL, compiled.Args...).Scan(&id); err != nil {
+					return err
+				}
+				if id <= 0 {
+					return fmt.Errorf("generated key id = %d", id)
+				}
+				return nil
+			case orm.DialectGeneratedKeyLastInsertID:
+				source, err := orm.NewInsertSQLBuilder().Into(table).Value("name", "Generated").Build()
+				if err != nil {
+					return err
+				}
+				compiled, err := orm.CompileSQLContext(ctx, source.SQL, source.Args, session.Dialect())
+				if err != nil {
+					return err
+				}
+				result, err := db.ExecContext(ctx, compiled.SQL, compiled.Args...)
+				if err != nil {
+					return err
+				}
+				id, err := result.LastInsertId()
+				if err != nil {
+					return err
+				}
+				if id <= 0 {
+					return fmt.Errorf("generated key id = %d", id)
+				}
+				return nil
+			default:
+				return nil
+			}
+		},
+	}
+}
+
+func compatibilityRowLockCase(table string) DatabaseCase {
+	return DatabaseCase{
+		Name: "compatibility-row-lock",
+		Run: func(ctx context.Context, session *orm.SQLSession, db *sql.DB) error {
+			capabilities := orm.DialectCapabilitiesOf(session.Dialect())
+			if !capabilities.SupportsRowLock() {
+				return nil
+			}
+			options := orm.RowLockOptions{SkipLocked: capabilities.SkipLocked}
+			lockClause, err := orm.RowLockClause(session.Dialect(), options)
+			if err != nil {
+				return err
+			}
+			source, err := orm.NewSelectSQLBuilder().
+				Select("id").
+				From(table).
+				WhereEq("id", int64(1)).
+				Last(lockClause).
+				Build()
+			if err != nil {
+				return err
+			}
+			compiled, err := orm.CompileSQLContext(ctx, source.SQL, source.Args, session.Dialect())
+			if err != nil {
+				return err
+			}
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			var id int64
+			if err := tx.QueryRowContext(ctx, compiled.SQL, compiled.Args...).Scan(&id); err != nil {
+				return err
+			}
+			if id != 1 {
+				return fmt.Errorf("row lock id = %d", id)
+			}
+			return tx.Commit()
+		},
+	}
 }
 
 func compatibilityQueryListCase(namespace string, table string) DatabaseCase {
@@ -354,6 +512,41 @@ func compatibilityCaseStatement(namespace string, table string, id string) orm.S
 	return orm.StatementMeta{}
 }
 
+func execCompatibilityUpsert(ctx context.Context, db *sql.DB, dialect orm.Dialect, table string, name string) error {
+	source, err := orm.BuildUpsertSQL(dialect, orm.UpsertSpec{
+		Table:           table,
+		InsertColumns:   []string{"id", "name", "age", "profile", "created_at"},
+		ConflictColumns: []string{"id"},
+		UpdateColumns:   []string{"name", "age", "profile", "created_at"},
+		Values: orm.NamedArgs{
+			"id":         int64(4),
+			"name":       name,
+			"age":        18,
+			"profile":    `{"role":"guest","level":1}`,
+			"created_at": "2026-08-26T00:03:00Z",
+		},
+	})
+	if err != nil {
+		return err
+	}
+	compiled, err := orm.CompileSQLContext(ctx, source.SQL, source.Args, dialect)
+	if err != nil {
+		return err
+	}
+	result, err := db.ExecContext(ctx, compiled.SQL, compiled.Args...)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected <= 0 {
+		return fmt.Errorf("upsert rows affected = %d", rowsAffected)
+	}
+	return nil
+}
+
 type compatibilityJSONTypeHandler struct{}
 
 func (compatibilityJSONTypeHandler) ToDB(ctx context.Context, value any) (any, error) {
@@ -409,6 +602,24 @@ func quoteCompatibilityTable(dialect orm.Dialect, table string) (string, error) 
 		quoted = append(quoted, dialect.QuoteIdent(part))
 	}
 	return strings.Join(quoted, "."), nil
+}
+
+func compatibilityRelatedTable(table string, suffix string) (string, error) {
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return "", fmt.Errorf("goark-orm: compatibility table is required")
+	}
+	parts := strings.Split(table, ".")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if !validCompatibilityIdentifier(last) {
+		return "", fmt.Errorf("goark-orm: invalid compatibility table identifier %q", table)
+	}
+	related := last + strings.TrimSpace(suffix)
+	if !validCompatibilityIdentifier(related) {
+		return "", fmt.Errorf("goark-orm: invalid compatibility related table identifier %q", related)
+	}
+	parts[len(parts)-1] = related
+	return strings.Join(parts, "."), nil
 }
 
 func validCompatibilityIdentifier(value string) bool {

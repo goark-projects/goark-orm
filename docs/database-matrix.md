@@ -75,7 +75,7 @@ core 仓库不提交临时 SQL、不生成迁移草稿、不硬编码私有 DSN�
 
 ### 标准兼容矩阵
 
-`ormtest.NewCompatibilitySuiteConfig` 会构造一组可回滚的标准用例，覆盖安全绑定、CRUD、ResultMap、分页、批处理和 TypeHandler 入库/出库链路。当前标准 DDL 支持 `postgres`、`mysql`、`mariadb`、`sqlite` 和 `question`，PG/MySQL 是默认真实库验证目标。
+`ormtest.NewCompatibilitySuiteConfig` 会构造一组可回滚的标准用例，覆盖安全绑定、CRUD、ResultMap、分页、批处理、TypeHandler 入库/出库、UPSERT、生成主键回读和行锁 smoke 链路。当前标准 DDL 支持 `postgres`、`mysql`、`mariadb`、`sqlite` 和 `question`，PG/MySQL 是默认真实库验证目标。
 
 业务工程或临时测试 harness 只负责导入驱动并调用：
 

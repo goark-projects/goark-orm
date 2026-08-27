@@ -16,10 +16,13 @@ func TestNewCompatibilitySuiteConfig_whenPostgres_shouldBuildQuotedDDLAndCases(t
 	if config.Dialect.Name() != "postgres" {
 		t.Fatalf("unexpected dialect %s", config.Dialect.Name())
 	}
-	if len(config.SetupSQL) != 2 || !strings.Contains(config.SetupSQL[1], `"public"."goark_orm_compat_users"`) {
+	if len(config.SetupSQL) != 4 || !strings.Contains(config.SetupSQL[3], `"public"."goark_orm_compat_users"`) {
 		t.Fatalf("unexpected setup SQL %#v", config.SetupSQL)
 	}
-	if len(config.Cases) != 7 {
+	if !strings.Contains(config.SetupSQL[2], `"public"."goark_orm_compat_users_keys"`) {
+		t.Fatalf("setup SQL should create generated key table: %#v", config.SetupSQL)
+	}
+	if len(config.Cases) != 10 {
 		t.Fatalf("unexpected case count %d", len(config.Cases))
 	}
 	statement, ok := config.Registry.Statement(defaultCompatibilityNamespace + ".SelectOne")
@@ -36,14 +39,17 @@ func TestNewCompatibilitySuiteConfig_whenMySQL_shouldUseUTF8MB4DDL(t *testing.T)
 	if err != nil {
 		t.Fatalf("create compatibility suite failed: %v", err)
 	}
-	if len(config.SetupSQL) != 2 {
+	if len(config.SetupSQL) != 4 {
 		t.Fatalf("unexpected setup SQL count %d", len(config.SetupSQL))
 	}
-	if !strings.Contains(config.SetupSQL[1], "DEFAULT CHARSET=utf8mb4") {
-		t.Fatalf("mysql DDL should declare utf8mb4: %s", config.SetupSQL[1])
+	if !strings.Contains(config.SetupSQL[2], "AUTO_INCREMENT") {
+		t.Fatalf("mysql key DDL should declare AUTO_INCREMENT: %s", config.SetupSQL[2])
 	}
-	if !strings.Contains(config.SetupSQL[1], "`goark_orm_compat_users`") {
-		t.Fatalf("mysql DDL should quote table: %s", config.SetupSQL[1])
+	if !strings.Contains(config.SetupSQL[3], "DEFAULT CHARSET=utf8mb4") {
+		t.Fatalf("mysql DDL should declare utf8mb4: %s", config.SetupSQL[3])
+	}
+	if !strings.Contains(config.SetupSQL[3], "`goark_orm_compat_users`") {
+		t.Fatalf("mysql DDL should quote table: %s", config.SetupSQL[3])
 	}
 }
 
@@ -51,6 +57,16 @@ func TestNewCompatibilitySuiteConfig_whenTableNameInvalid_shouldReject(t *testin
 	_, err := NewCompatibilitySuiteConfig(orm.DbTypePostgres, WithCompatibilityTable("compat;drop table users"))
 	if err == nil {
 		t.Fatalf("expected invalid table error")
+	}
+}
+
+func TestCompatibilityRelatedTable_whenSchemaProvided_shouldSuffixTableOnly(t *testing.T) {
+	table, err := compatibilityRelatedTable("public.goark_orm_compat_users", "_keys")
+	if err != nil {
+		t.Fatalf("build related table failed: %v", err)
+	}
+	if table != "public.goark_orm_compat_users_keys" {
+		t.Fatalf("unexpected related table %q", table)
 	}
 }
 

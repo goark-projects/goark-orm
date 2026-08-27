@@ -15,7 +15,7 @@ Goark ORM 是可独立使用的数据映射模块，同时也可以接入 Goark 
 - 独立 `goark-orm` CLI，可不安装 Goark 主 CLI 直接生成代码；支持 `--config` JSON 配置文件批量生成多 package，并提供 `--validate`、`--dry-run`、`--check`、`--diff` 作为本地生成一致性门禁。
 - `ormgen` 提供 `TemplateRenderer`、`SchemaIntrospector`、`SQLSchemaIntrospector`、多数据库 `SQLSchemaDialect` 和 `ReverseEngineerWithRenderer`，可由外部数据库适配层或业务测试包做 schema 反向工程与自定义模板渲染；支持反向工程生成实体 struct、命名策略、忽略列、列过滤和列级覆盖，core 不直接依赖数据库驱动。
 - `ormgen` 提供 `DetectSchemaDrift` / `ValidateSchemaDrift`，可把已注册实体元数据与 `SchemaIntrospector` 读取到的真实 schema 做表、列、主键、自增、空值、长度/精度和数据库类型差异检测。
-- `ormtest` 提供环境变量门控的真实数据库兼容性测试套件，调用方在自己的测试二进制中显式 blank import 驱动后即可复用 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler 和 callable statement 用例；标准 PG/MySQL 兼容矩阵可直接通过 `RunCompatibilitySuiteFromEnv` 启用。
+- `ormtest` 提供环境变量门控的真实数据库兼容性测试套件，调用方在自己的测试二进制中显式 blank import 驱动后即可复用 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler、UPSERT、生成主键回读、行锁 smoke 和 callable statement 用例；标准 PG/MySQL 兼容矩阵可直接通过 `RunCompatibilitySuiteFromEnv` 启用。
 - `database/sql` Session、独立 `Configuration`、MyBatis-Plus 风格 `GlobalConfig` / `DbConfig`、`Dialect`、`DialectCapabilities`、方言 UPSERT / 行锁 / 生成主键辅助 API、`ExecutorType.SIMPLE/REUSE`、`#{name}` / `#{user.name}` 安全参数编译、MyBatis 风格 `param1` / `_parameter` / `list` 别名、生成主键回填和显式注册 RowScanner 优先的基础结果扫描。
 - MyBatis 风格 statement 级 `timeout`、`fetchSize`、`resultSetType`、`resultOrdered` 和 `keyColumn` 执行选项；语句级声明优先于全局默认值，并通过可选执行器接口传递给驱动适配层。
 - MyBatis 风格 `MyBatisConfig`、`MyBatisSettings`、`MyBatisEnvironment`、`TypeAlias` 和 `MapperRef` Go 化配置模型，可显式构建运行期 `Configuration`。
