@@ -5,7 +5,7 @@ set -eu
 GO_BIN="${GO:-go}"
 GOFMT_BIN="${GOFMT:-gofmt}"
 BENCHTIME="${GOARK_ORM_BENCHTIME:-100x}"
-BENCHMARKS='Benchmark(CompileSQL_Postgres|RenderDynamicSQL|QueryWrapperBuild|SQLSessionQueryOneGeneratedRowScanner|AppendSQLCondition_GroupedQuery|CountSQLBase_NestedOrderBy|JSONTypeHandler_(ToDB|FromDB))$'
+BENCHMARKS='Benchmark(CompileSQL_Postgres|RenderDynamicSQL|QueryWrapperBuild|SQLSessionQueryOne(GeneratedRowScanner|TypeHandlerRowScanner|ResultMapTypeHandler)|AppendSQLCondition_GroupedQuery|CountSQLBase_NestedOrderBy|JSONTypeHandler_(ToDB|FromDB))$'
 
 export GOWORK="${GOWORK:-off}"
 
