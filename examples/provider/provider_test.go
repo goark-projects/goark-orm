@@ -22,7 +22,8 @@ func TestProviderSQLBuilderExample_shouldCompileProviderSource(t *testing.T) {
 			return orm.NewSelectSQLBuilder().
 				Select("id", "name", "status").
 				From("sys_user").
-				WhereEq("status", args["status"]).
+				WhereIn("status", args["statuses"]).
+				WhereIsNull("deleted_at").
 				OrderByAsc("id").
 				Limit(args["limit"]).
 				CacheKey("tenant:" + args["tenant"].(string)).
@@ -42,7 +43,7 @@ func TestProviderSQLBuilderExample_shouldCompileProviderSource(t *testing.T) {
 	source, err := descriptor.Provider(
 		context.Background(),
 		orm.StatementMeta{FullName: "example.UserMapper.ListByStatus", Command: orm.StatementCommandSelect},
-		orm.NamedArgs{"status": "ACTIVE", "limit": 20, "tenant": "t01"},
+		orm.NamedArgs{"statuses": []string{"ACTIVE", "LOCKED"}, "limit": 20, "tenant": "t01"},
 	)
 	if err != nil {
 		t.Fatalf("provider failed: %v", err)
@@ -52,11 +53,11 @@ func TestProviderSQLBuilderExample_shouldCompileProviderSource(t *testing.T) {
 		t.Fatalf("compile provider SQL failed: %v", err)
 	}
 
-	expectedSQL := `SELECT "id", "name", "status" FROM "sys_user" WHERE "status" = $1 ORDER BY "id" ASC LIMIT $2`
+	expectedSQL := `SELECT "id", "name", "status" FROM "sys_user" WHERE "status" IN ($1, $2) AND "deleted_at" IS NULL ORDER BY "id" ASC LIMIT $3`
 	if compiled.SQL != expectedSQL {
 		t.Fatalf("unexpected SQL %q", compiled.SQL)
 	}
-	if !reflect.DeepEqual(compiled.Args, []any{"ACTIVE", 20}) {
+	if !reflect.DeepEqual(compiled.Args, []any{"ACTIVE", "LOCKED", 20}) {
 		t.Fatalf("unexpected args %#v", compiled.Args)
 	}
 	if source.CacheKey != "tenant:t01" {

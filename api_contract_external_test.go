@@ -107,8 +107,13 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	source, err := orm.NewSelectSQLBuilder().
 		Select("id", "name").
 		From("sys_user").
+		LeftJoin("sys_role", "sys_role.user_id = sys_user.id", nil).
 		WhereEq("status", "ACTIVE").
+		WhereIn("kind", "admin", "operator").
+		WhereBetween("id", int64(1), int64(9)).
+		WhereIsNotNull("name").
 		OrderByAsc("id").
+		ForUpdate(orm.NewPostgresDialect(), orm.RowLockOptions{}).
 		CacheKey("contract").
 		Build()
 	if err != nil {
@@ -120,10 +125,13 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if _, err := orm.NewInsertSQLBuilder().Into("sys_user").Value("name", "Alice").Build(); err != nil {
 		t.Fatalf("build insert source failed: %v", err)
 	}
-	if _, err := orm.NewUpdateSQLBuilder().Table("sys_user").Set("name", "Alice").WhereEq("id", int64(1)).Build(); err != nil {
+	if _, err := orm.NewInsertSQLBuilder().Into("sys_user").Value("name", "Alice").Returning("id").Build(); err != nil {
+		t.Fatalf("build insert returning source failed: %v", err)
+	}
+	if _, err := orm.NewUpdateSQLBuilder().Table("sys_user").Set("name", "Alice").WhereEq("id", int64(1)).Returning("id").RequireWhere().Build(); err != nil {
 		t.Fatalf("build update source failed: %v", err)
 	}
-	if _, err := orm.NewDeleteSQLBuilder().From("sys_user").WhereEq("id", int64(1)).Build(); err != nil {
+	if _, err := orm.NewDeleteSQLBuilder().From("sys_user").WhereIsNull("deleted_at").Returning("id").RequireWhere().Build(); err != nil {
 		t.Fatalf("build delete source failed: %v", err)
 	}
 	upsert, err := orm.BuildUpsertSQL(orm.NewPostgresDialect(), orm.UpsertSpec{

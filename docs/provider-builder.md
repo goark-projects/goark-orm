@@ -44,14 +44,19 @@ Provider 可以返回 `SQLSource.Args`。这些参数会和 Mapper 入参合并�
 source, err := orm.NewSelectSQLBuilder().
 	Select("id", "name", "status").
 	From("sys_user").
+	LeftJoin("sys_role", "sys_role.user_id = sys_user.id and sys_role.code = #{role}", orm.NamedArgs{"role": "admin"}).
 	WhereEq("status", args["status"]).
+	WhereIn("kind", args["kinds"]).
+	WhereBetween("id", args["beginID"], args["endID"]).
+	WhereIsNull("deleted_at").
 	OrderByAsc("id").
 	Limit(args["limit"]).
+	ForUpdate(orm.NewPostgresDialect(), orm.RowLockOptions{SkipLocked: true}).
 	CacheKey("tenant:" + tenantID).
 	Build()
 ```
 
-Builder 的表名和列名会转成 `${}` 安全标识符 token，最终由方言决定引号风格；值会转成 `#{}` 参数，占位符由方言编译。
+Builder 的表名和列名会转成 `${}` 安全标识符 token，最终由方言决定引号风格；值会转成 `#{}` 参数，占位符由方言编译。写语句 Builder 支持 `Returning`，`UpdateSQLBuilder` 和 `DeleteSQLBuilder` 可以通过 `RequireWhere` 显式拒绝无 WHERE 写语句。
 
 ## 缓存 Key
 

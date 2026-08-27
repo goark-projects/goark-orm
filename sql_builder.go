@@ -11,6 +11,7 @@ const sqlBuilderArgPrefix = "__goark_orm_sqlb_"
 type SelectSQLBuilder struct {
 	selects    []string
 	from       string
+	joins      []sqlBuilderJoin
 	conditions []sqlBuilderCondition
 	groups     []string
 	havings    []rawSQLClause
@@ -19,38 +20,36 @@ type SelectSQLBuilder struct {
 	hasLimit   bool
 	offset     any
 	hasOffset  bool
+	rowLock    *sqlBuilderRowLock
 	lastSQL    string
 	cacheKey   string
 }
 
 // InsertSQLBuilder 构造 Provider 可返回的 INSERT SQLSource。
 type InsertSQLBuilder struct {
-	table    string
-	values   []sqlBuilderAssignment
-	cacheKey string
+	table      string
+	values     []sqlBuilderAssignment
+	returnings []string
+	cacheKey   string
 }
 
 // UpdateSQLBuilder 构造 Provider 可返回的 UPDATE SQLSource。
 type UpdateSQLBuilder struct {
-	table      string
-	sets       []sqlBuilderAssignment
-	conditions []sqlBuilderCondition
-	cacheKey   string
+	table        string
+	sets         []sqlBuilderAssignment
+	conditions   []sqlBuilderCondition
+	returnings   []string
+	requireWhere bool
+	cacheKey     string
 }
 
 // DeleteSQLBuilder 构造 Provider 可返回的 DELETE SQLSource。
 type DeleteSQLBuilder struct {
-	table      string
-	conditions []sqlBuilderCondition
-	cacheKey   string
-}
-
-type sqlBuilderCondition struct {
-	column string
-	op     string
-	value  any
-	sql    string
-	args   NamedArgs
+	table        string
+	conditions   []sqlBuilderCondition
+	returnings   []string
+	requireWhere bool
+	cacheKey     string
 }
 
 type sqlBuilderAssignment struct {
@@ -111,7 +110,7 @@ func (b *SelectSQLBuilder) Where(sqlText string, args NamedArgs) *SelectSQLBuild
 	if b == nil {
 		b = NewSelectSQLBuilder()
 	}
-	b.conditions = append(b.conditions, sqlBuilderCondition{sql: sqlText, args: copyNamedArgs(args)})
+	b.conditions = append(b.conditions, sqlBuilderCondition{kind: sqlBuilderConditionRaw, sql: sqlText, args: copyNamedArgs(args)})
 	return b
 }
 
@@ -214,6 +213,13 @@ func (b *SelectSQLBuilder) Build() (SQLSource, error) {
 	}
 	var parts []string
 	parts = append(parts, "SELECT "+strings.Join(projections, ", "), "FROM "+table)
+	joinSQL, err := state.joinClause(b.joins)
+	if err != nil {
+		return SQLSource{}, err
+	}
+	if joinSQL != "" {
+		parts = append(parts, joinSQL)
+	}
 	whereSQL, err := state.conditions(b.conditions)
 	if err != nil {
 		return SQLSource{}, err
@@ -247,6 +253,13 @@ func (b *SelectSQLBuilder) Build() (SQLSource, error) {
 	}
 	if b.hasOffset {
 		parts = append(parts, "OFFSET "+state.value(b.offset))
+	}
+	if b.rowLock != nil {
+		lockClause, err := RowLockClause(b.rowLock.dialect, b.rowLock.options)
+		if err != nil {
+			return SQLSource{}, err
+		}
+		parts = append(parts, lockClause)
 	}
 	lastSQL, err := sanitizeLastSQL(b.lastSQL)
 	if err != nil {
@@ -309,6 +322,13 @@ func (b *InsertSQLBuilder) Build() (SQLSource, error) {
 		values = append(values, state.value(assignment.value))
 	}
 	sqlText := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(columns, ", "), strings.Join(values, ", "))
+	returningSQL, err := state.identifierClause("RETURNING", b.returnings)
+	if err != nil {
+		return SQLSource{}, err
+	}
+	if returningSQL != "" {
+		sqlText += " " + returningSQL
+	}
 	return state.source(sqlText, b.cacheKey), nil
 }
 
@@ -335,7 +355,7 @@ func (b *UpdateSQLBuilder) Where(sqlText string, args NamedArgs) *UpdateSQLBuild
 	if b == nil {
 		b = NewUpdateSQLBuilder()
 	}
-	b.conditions = append(b.conditions, sqlBuilderCondition{sql: sqlText, args: copyNamedArgs(args)})
+	b.conditions = append(b.conditions, sqlBuilderCondition{kind: sqlBuilderConditionRaw, sql: sqlText, args: copyNamedArgs(args)})
 	return b
 }
 
@@ -385,6 +405,15 @@ func (b *UpdateSQLBuilder) Build() (SQLSource, error) {
 	}
 	if whereSQL != "" {
 		sqlText += " WHERE " + whereSQL
+	} else if b.requireWhere {
+		return SQLSource{}, bindingErrorf("update SQL builder requires WHERE condition")
+	}
+	returningSQL, err := state.identifierClause("RETURNING", b.returnings)
+	if err != nil {
+		return SQLSource{}, err
+	}
+	if returningSQL != "" {
+		sqlText += " " + returningSQL
 	}
 	return state.source(sqlText, b.cacheKey), nil
 }
@@ -403,7 +432,7 @@ func (b *DeleteSQLBuilder) Where(sqlText string, args NamedArgs) *DeleteSQLBuild
 	if b == nil {
 		b = NewDeleteSQLBuilder()
 	}
-	b.conditions = append(b.conditions, sqlBuilderCondition{sql: sqlText, args: copyNamedArgs(args)})
+	b.conditions = append(b.conditions, sqlBuilderCondition{kind: sqlBuilderConditionRaw, sql: sqlText, args: copyNamedArgs(args)})
 	return b
 }
 
@@ -442,6 +471,15 @@ func (b *DeleteSQLBuilder) Build() (SQLSource, error) {
 	}
 	if whereSQL != "" {
 		sqlText += " WHERE " + whereSQL
+	} else if b.requireWhere {
+		return SQLSource{}, bindingErrorf("delete SQL builder requires WHERE condition")
+	}
+	returningSQL, err := state.identifierClause("RETURNING", b.returnings)
+	if err != nil {
+		return SQLSource{}, err
+	}
+	if returningSQL != "" {
+		sqlText += " " + returningSQL
 	}
 	return state.source(sqlText, b.cacheKey), nil
 }
@@ -498,43 +536,6 @@ func (s *sqlBuilderState) value(value any) string {
 	name := s.next()
 	s.args[name] = value
 	return "#{" + name + "}"
-}
-
-func (s *sqlBuilderState) conditions(conditions []sqlBuilderCondition) (string, error) {
-	if len(conditions) == 0 {
-		return "", nil
-	}
-	rendered := make([]string, 0, len(conditions))
-	for _, condition := range conditions {
-		sqlText, err := s.condition(condition)
-		if err != nil {
-			return "", err
-		}
-		if sqlText != "" {
-			rendered = append(rendered, sqlText)
-		}
-	}
-	return strings.Join(rendered, " AND "), nil
-}
-
-func (s *sqlBuilderState) condition(condition sqlBuilderCondition) (string, error) {
-	if strings.TrimSpace(condition.sql) != "" {
-		rendered, next, err := renderRawSQLFragment(condition.sql, condition.args, s.seq, s.args)
-		if err != nil {
-			return "", err
-		}
-		s.seq = next
-		return rendered, nil
-	}
-	column, err := s.identifier(condition.column)
-	if err != nil {
-		return "", err
-	}
-	op := strings.TrimSpace(condition.op)
-	if op == "" {
-		op = "="
-	}
-	return column + " " + op + " " + s.value(condition.value), nil
 }
 
 func (s *sqlBuilderState) rawClauses(prefix string, clauses []rawSQLClause) (string, error) {
