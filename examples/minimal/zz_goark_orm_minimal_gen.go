@@ -44,7 +44,13 @@ func goarkORMScanUserRow(ctx context.Context, columns []string, row orm.RowScann
 	if !ok || user == nil {
 		return &orm.MappingError{Message: "row scanner destination must be *User"}
 	}
-	targets := make([]any, len(columns))
+	var goarkORMTargets [3]any
+	targets := goarkORMTargets[:]
+	if len(columns) > len(targets) {
+		targets = make([]any, len(columns))
+	} else {
+		targets = targets[:len(columns)]
+	}
 	for index, column := range columns {
 		switch goarkORMColumnKey(column) {
 		case "id":
@@ -58,7 +64,10 @@ func goarkORMScanUserRow(ctx context.Context, columns []string, row orm.RowScann
 			targets[index] = &discard
 		}
 	}
-	return row.Scan(targets...)
+	if err := row.Scan(targets...); err != nil {
+		return err
+	}
+	return nil
 }
 
 // NewUserBaseMapper 创建 User 的通用 BaseMapper。
