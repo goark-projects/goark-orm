@@ -120,6 +120,27 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if _, err := orm.NewDeleteSQLBuilder().From("sys_user").WhereEq("id", int64(1)).Build(); err != nil {
 		t.Fatalf("build delete source failed: %v", err)
 	}
+	upsert, err := orm.BuildUpsertSQL(orm.NewPostgresDialect(), orm.UpsertSpec{
+		Table:           "sys_user",
+		InsertColumns:   []string{"id", "name"},
+		ConflictColumns: []string{"id"},
+		UpdateColumns:   []string{"name"},
+		Values:          orm.NamedArgs{"id": int64(1), "name": "Alice"},
+	})
+	if err != nil {
+		t.Fatalf("build upsert source failed: %v", err)
+	}
+	if upsert.SQL == "" || len(upsert.Args) == 0 {
+		t.Fatalf("unexpected upsert source %#v", upsert)
+	}
+	lockClause, err := orm.RowLockClause(orm.NewPostgresDialect(), orm.RowLockOptions{SkipLocked: true})
+	if err != nil || lockClause != "FOR UPDATE SKIP LOCKED" {
+		t.Fatalf("unexpected row lock clause %q err=%v", lockClause, err)
+	}
+	keyPlan, err := orm.NewGeneratedKeyPlan(orm.NewPostgresDialect(), "id")
+	if err != nil || keyPlan.Style != orm.DialectGeneratedKeyReturning {
+		t.Fatalf("unexpected generated key plan %#v err=%v", keyPlan, err)
+	}
 	capabilities, err := orm.NewDialectCapabilities(orm.DbTypePostgres)
 	if err != nil {
 		t.Fatalf("new dialect capabilities failed: %v", err)
