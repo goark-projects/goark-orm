@@ -22,6 +22,21 @@ const (
 	compatibilityCallRoutineSuffix  = "_report"
 )
 
+// SupportedCompatibilityDBTypes 返回标准真实库兼容套件当前承诺支持的数据库类型。
+func SupportedCompatibilityDBTypes() []orm.DbType {
+	return []orm.DbType{orm.DbTypePostgres, orm.DbTypeMySQL}
+}
+
+// IsCompatibilityDBTypeSupported 判断标准真实库兼容套件是否支持指定数据库类型。
+func IsCompatibilityDBTypeSupported(dbType orm.DbType) bool {
+	switch dbType {
+	case orm.DbTypePostgres, orm.DbTypeMySQL:
+		return true
+	default:
+		return false
+	}
+}
+
 // CompatibilityRecord 是标准真实库兼容套件使用的最小实体。
 type CompatibilityRecord struct {
 	ID        int64
@@ -70,6 +85,9 @@ func WithCompatibilityEnvPrefix(prefix string) CompatibilitySuiteOption {
 // NewCompatibilitySuiteConfig 创建覆盖 CRUD、分页、批处理和 TypeHandler 的标准真实库套件。
 func NewCompatibilitySuiteConfig(dbType orm.DbType, options ...CompatibilitySuiteOption) (DatabaseSuiteConfig, error) {
 	opts := normalizeCompatibilitySuiteOptions(options...)
+	if !IsCompatibilityDBTypeSupported(dbType) {
+		return DatabaseSuiteConfig{}, unsupportedCompatibilityDBTypeError(dbType)
+	}
 	dialect, err := orm.NewDialect(dbType)
 	if err != nil {
 		return DatabaseSuiteConfig{}, err
@@ -181,8 +199,12 @@ func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable stri
 			compatibilityMySQLCallRoutineDDL(quotedTable, quotedCallRoutine),
 		}, []string{"DROP PROCEDURE IF EXISTS " + quotedCallRoutine, "DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
 	default:
-		return nil, nil, fmt.Errorf("goark-orm: standard compatibility suite supports only postgres and mysql, got %q", dbType)
+		return nil, nil, unsupportedCompatibilityDBTypeError(dbType)
 	}
+}
+
+func unsupportedCompatibilityDBTypeError(dbType orm.DbType) error {
+	return fmt.Errorf("goark-orm: standard compatibility suite supports only postgres and mysql, got %q", dbType)
 }
 
 func newCompatibilityRegistry(namespace string, table string, callSQL string) (*orm.Registry, error) {

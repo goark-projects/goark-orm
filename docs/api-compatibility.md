@@ -55,7 +55,7 @@ The V1 generator surface includes:
 `ormtest` keeps real database verification reusable without linking concrete drivers into the core module. Its stable surface includes:
 
 - `DatabaseSuiteConfig`, `DatabaseCase`, and `RunDatabaseSuiteFromEnv`.
-- `CompatibilitySuiteConfig`, `CompatibilityCase`, `NewCompatibilitySuiteConfig`, and `RunCompatibilitySuiteFromEnv`.
+- `CompatibilitySuiteConfig`, `CompatibilityCase`, `NewCompatibilitySuiteConfig`, `RunCompatibilitySuiteFromEnv`, `SupportedCompatibilityDBTypes`, and `IsCompatibilityDBTypeSupported`.
 - Environment parsing helpers and SQL list parsing behavior documented in [database-matrix.md](database-matrix.md).
 
 ## Evolution Rules

@@ -38,6 +38,9 @@ func TestV1ORMTestPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if compatibility.DBType != orm.DbTypePostgres || len(compatibility.Cases) == 0 {
 		t.Fatalf("unexpected compatibility config %#v", compatibility)
 	}
+	if !ormtest.IsCompatibilityDBTypeSupported(orm.DbTypePostgres) || len(ormtest.SupportedCompatibilityDBTypes()) != 2 {
+		t.Fatalf("unexpected compatibility support boundary")
+	}
 
 	statement := orm.StatementMeta{
 		ID:        "Find",

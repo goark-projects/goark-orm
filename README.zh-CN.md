@@ -296,7 +296,7 @@ _ = report.Source
 
 ## 真实数据库兼容性
 
-真实库套件只有在调用方提供驱动和 DSN 后才执行。标准套件当前只支持 PostgreSQL 和 MySQL：
+真实库套件只有在调用方提供驱动和 DSN 后才执行。标准套件当前只支持 PostgreSQL 和 MySQL。调用方测试工程可以使用 `ormtest.SupportedCompatibilityDBTypes()` 或 `ormtest.IsCompatibilityDBTypeSupported(dbType)` 判断当前支持边界：
 
 ```go
 package user_test

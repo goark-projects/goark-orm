@@ -296,7 +296,7 @@ _ = report.Source
 
 ## Real Database Compatibility
 
-The reusable database suite is disabled until the caller provides a driver and DSN. The standard suite currently supports PostgreSQL and MySQL only:
+The reusable database suite is disabled until the caller provides a driver and DSN. The standard suite currently supports PostgreSQL and MySQL only. Caller-owned harnesses can check the current boundary with `ormtest.SupportedCompatibilityDBTypes()` or `ormtest.IsCompatibilityDBTypeSupported(dbType)`:
 
 ```go
 package user_test

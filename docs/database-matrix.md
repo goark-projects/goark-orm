@@ -48,6 +48,8 @@ These APIs produce SQL or execution plans only. They do not create tables and do
 
 The standard suite is disabled unless all required environment variables are provided and the caller's test binary imports a concrete driver. It currently supports PostgreSQL and MySQL only; other database engines are intentionally outside the standard real-database support boundary until they get their own verified matrix.
 
+Use `ormtest.SupportedCompatibilityDBTypes()` or `ormtest.IsCompatibilityDBTypeSupported(dbType)` when a caller-owned harness needs to branch on the current standard support boundary. The list is intentionally limited to `postgres` and `mysql`.
+
 ```bash
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
 GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=disable' \

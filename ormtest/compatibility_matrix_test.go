@@ -78,6 +78,20 @@ func TestNewCompatibilitySuiteConfig_whenUnsupportedDBType_shouldReject(t *testi
 	}
 }
 
+func TestSupportedCompatibilityDBTypes_shouldOnlyExposePostgresAndMySQL(t *testing.T) {
+	supported := SupportedCompatibilityDBTypes()
+	if len(supported) != 2 || supported[0] != orm.DbTypePostgres || supported[1] != orm.DbTypeMySQL {
+		t.Fatalf("unexpected supported database types %#v", supported)
+	}
+	supported[0] = orm.DbTypeSQLite
+	if IsCompatibilityDBTypeSupported(orm.DbTypeSQLite) {
+		t.Fatalf("sqlite must stay outside current real database support boundary")
+	}
+	if !IsCompatibilityDBTypeSupported(orm.DbTypePostgres) || !IsCompatibilityDBTypeSupported(orm.DbTypeMySQL) {
+		t.Fatalf("postgres and mysql must be supported")
+	}
+}
+
 func containsDatabaseCase(cases []DatabaseCase, name string) bool {
 	for _, testCase := range cases {
 		if testCase.Name == name {
