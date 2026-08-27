@@ -1,49 +1,49 @@
 # Goark ORM
 
-Goark ORM is a Go-native data mapper for `database/sql`. It keeps mapper metadata explicit, generates stable Go code, and exposes small runtime contracts for sessions, transactions, type handlers, SQL building, result mapping, routing, caching, and testable database access.
+Goark ORM 是面向 `database/sql` 的 Go 原生数据映射模块。它使用显式元数据注册、稳定代码生成和小型运行期契约，提供 Session、事务、类型处理器、SQL 构建、结果映射、路由、缓存和真实数据库验证能力。
 
-Default documentation is written in English. Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md), and the examples guide is available in [docs/examples.md](docs/examples.md) and [docs/examples.zh-CN.md](docs/examples.zh-CN.md).
+默认文档为英文：[README.md](README.md)。案例说明分别在 [docs/examples.md](docs/examples.md) 和 [docs/examples.zh-CN.md](docs/examples.zh-CN.md)。
 
-## Module
+## 模块
 
 ```text
 module goark.dev/orm
 ```
 
-`orm.APIVersion` currently reports `v1`.
+`orm.APIVersion` 当前为 `v1`。
 
-## Design Boundaries
+## 设计边界
 
-- Runtime code uses explicit metadata registration. It does not scan mappers, XML files, or entities at runtime.
-- Generated mapper code depends on the `orm.Session` interface, so auto-commit sessions, transaction sessions, routing sessions, batch sessions, and streaming signatures share the same generated surface.
-- Core packages do not import concrete database drivers. Real database tests are enabled by the caller through explicit driver imports and environment variables.
-- Migration and DDL lifecycle management are intentionally outside this module.
-- Raw SQL substitution through `${}` accepts only explicit `RawSQLToken` values such as `RawIdentifier` and `RawOrderBy`.
-- JSON processing is routed through the internal JSON codec backed by ByteDance Sonic.
+- 运行期只使用显式注册的元数据，不扫描 Mapper、XML 或实体。
+- 生成 Mapper 只依赖 `orm.Session` 接口，自动提交、事务、路由、批处理和流式查询可以复用同一套生成代码。
+- core 不导入具体数据库驱动，真实数据库验证由调用方显式导入驱动并通过环境变量开启。
+- Migration 和 DDL 生命周期不属于本模块。
+- `${}` 只接受显式 `RawSQLToken`，例如 `RawIdentifier` 和 `RawOrderBy`。
+- JSON 处理统一经过内部 JSON codec，底层使用 ByteDance Sonic。
 
-## Features
+## 当前能力
 
-- Entity metadata from `//goark-orm:entity` and strict `goark-orm` struct tags.
-- Mapper metadata from `//goark-orm:mapper`, SQL method annotations, and XML mapper files.
-- Generated metadata registration, entity row scanners, mapper implementations, typed field constants, `BaseMapper` factories, and `Service` factories.
-- Dynamic XML SQL nodes: `sql/include`, `bind`, `if`, `where`, `set`, `trim`, `foreach`, and `choose/when/otherwise`.
-- Safe expression evaluation for dynamic SQL, including boolean logic, comparisons, arithmetic, ternary expressions, collection tests, `empty`, `in/not in`, and whitelisted read-only string or collection helpers.
-- Parameterized SQL compilation with dialect placeholders for PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, and a question-placeholder dialect.
-- Statement options for timeout, fetch size, result set type, ordered result mapping, generated key columns, cache behavior, and interceptor ignore lists.
-- Callable statements with IN, OUT, INOUT parameters, `sql.Out` binding, and ordered multi-result-set scanning.
-- Result maps with constructor arguments, associations, collections, discriminator branches, nested selects, explicit lazy loading, column prefixes, and not-null guards.
-- Type handlers at registry and session level, including JSON, time, decimal, string, bool, and bytes handlers.
-- `BaseMapper`, `Service`, `QueryWrapper`, `UpdateWrapper`, typed fields, pagination, batch writes, logical delete, optimistic locking, key generation, and automatic fill hooks.
-- SQL provider descriptors and fluent SQL builders for select, insert, update, delete, upsert, row locks, generated key plans, and cache key extensions.
-- SQL session middleware and interceptors for statement execution, statement handling, parameter handling, result set handling, pagination, tenant constraints, data permissions, dynamic table names, SQL observation, block-attack protection, illegal SQL rules, read-only sessions, and custom governance rules.
-- Local cache, namespace-level second-level cache, LRU eviction, blocking cache miss coalescing, cache stats, and transaction-aware cache publication.
-- Routing sessions and routing factories for explicit data-source selection, read/write split routing, and statement-based routing.
-- `ormgen` schema introspection, reverse engineering, custom template rendering, schema drift detection, and schema compatibility validation helpers.
-- `ormtest` real database suites for ping, setup/cleanup, query, pagination, writes, batch execution, type handlers, upsert, generated keys, row locks, and callable statements.
+- `//goark-orm:entity` 和严格 `goark-orm` struct tag 实体元数据。
+- `//goark-orm:mapper`、方法级 SQL 注解和 XML Mapper 元数据。
+- 生成元数据注册、实体 RowScanner、Mapper 实现、类型化字段常量、`BaseMapper` 工厂和 `Service` 工厂。
+- XML 动态 SQL：`sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`。
+- 安全表达式执行，覆盖布尔逻辑、比较、算术、三元表达式、集合判断、`empty`、`in/not in` 和白名单只读方法。
+- PostgreSQL、MySQL、MariaDB、SQLite、SQL Server、Oracle 和问号占位符方言。
+- Statement 级 timeout、fetch size、result set type、result ordered、key column、缓存策略和拦截器忽略配置。
+- Callable statement，支持 IN、OUT、INOUT 参数、`sql.Out` 绑定和多结果集扫描。
+- ResultMap constructor、association、collection、discriminator、nested select、显式 Lazy、column prefix 和 not-null guard。
+- Registry / Session 级 TypeHandler，内置 JSON、time、decimal、string、bool、bytes 处理器。
+- `BaseMapper`、`Service`、`QueryWrapper`、`UpdateWrapper`、类型化字段、分页、批处理、逻辑删除、乐观锁、主键生成和自动填充。
+- SQL Provider 描述注册和 select/insert/update/delete SQL Builder。
+- SQLSession middleware 与拦截器，覆盖执行链路、分页、租户、数据权限、动态表、SQL 观察、全表写保护、非法 SQL、只读会话和自定义治理规则。
+- 一级缓存、namespace 二级缓存、LRU、并发 miss 合并、缓存统计和事务提交后发布语义。
+- 多数据源路由 Session 和路由工厂。
+- `ormgen` schema 读取、反向工程、模板渲染、schema drift 和 schema compatibility helper。
+- `ormtest` 真实数据库套件，覆盖 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler、UPSERT、生成主键回读、行锁和 callable。
 
-## Quick Start
+## 快速开始
 
-Declare an entity and mapper:
+声明实体和 Mapper：
 
 ```go
 package user
@@ -71,13 +71,13 @@ type UserMapper interface {
 }
 ```
 
-Generate mapper code:
+生成代码：
 
 ```bash
 GOWORK=off go run ./cmd/goark-orm generate orm --dir internal/user --output internal/user/zz_goark_orm_user_gen.go
 ```
 
-Use generated metadata and a session:
+注册元数据并创建 Session：
 
 ```go
 registry := orm.NewRegistry()
@@ -101,7 +101,7 @@ if err != nil {
 _ = user
 ```
 
-Use generated field constants with the generic mapper:
+使用生成的字段常量和通用 Mapper：
 
 ```go
 baseMapper, err := NewUserBaseMapper(session)
@@ -122,9 +122,9 @@ if err != nil {
 _ = page
 ```
 
-## CLI Configuration
+## CLI 配置
 
-Multi-package generation can be driven by a committed JSON file:
+多包生成可以使用可提交的 JSON 配置：
 
 ```json
 {
@@ -148,11 +148,11 @@ GOWORK=off go run ./cmd/goark-orm generate orm --config goark-orm.json --check
 GOWORK=off go run ./cmd/goark-orm generate orm --config goark-orm.json --diff
 ```
 
-The CLI configuration controls source scanning and file output only. It does not connect to a database and does not generate migration files.
+CLI 配置只负责源码扫描和文件输出，不连接数据库，也不生成迁移文件。
 
-## Runtime Configuration
+## 运行期配置
 
-`Configuration` is the direct runtime model:
+`Configuration` 是直接运行期模型：
 
 ```go
 config := orm.DefaultConfiguration().
@@ -174,7 +174,7 @@ if err != nil {
 }
 ```
 
-The JSON configuration decoder is strict and uses the internal Sonic-backed JSON codec:
+JSON 配置解码是严格模式，并使用内部 Sonic JSON codec：
 
 ```go
 runtimeConfig, err := orm.LoadMyBatisConfig("orm-runtime.json")
@@ -199,7 +199,7 @@ _ = session
 
 ## Provider SQL
 
-Providers are registered explicitly and can use the SQL builder:
+Provider 必须显式注册，可以组合 SQL Builder：
 
 ```go
 err := registry.RegisterSQLProviderDescriptor(orm.NewSQLProviderDescriptor(
@@ -222,7 +222,7 @@ if err != nil {
 }
 ```
 
-## Transactions And Batch
+## 事务与批处理
 
 ```go
 factory, err := orm.NewSQLSessionFactory(registry, db, orm.NewPostgresDialect())
@@ -253,9 +253,9 @@ err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) erro
 })
 ```
 
-## Schema Utilities
+## Schema 工具
 
-`ormgen` can inspect an existing schema through `database/sql`, build a package model, render Go source, and optionally compare the database shape with registered metadata:
+`ormgen` 可以通过 `database/sql` 读取真实 schema，构造生成模型，渲染 Go 源码，并可选对比已注册元数据：
 
 ```go
 report, err := ormgen.ValidateSQLSchemaCompatibility(ctx, ormgen.SQLSchemaCompatibilityConfig{
@@ -272,9 +272,9 @@ if err != nil {
 _ = report.Source
 ```
 
-## Real Database Compatibility
+## 真实数据库兼容性
 
-The reusable database suite is disabled until the caller provides a driver and DSN:
+真实库套件只有在调用方提供驱动和 DSN 后才执行：
 
 ```go
 package user_test
@@ -298,9 +298,9 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-The standard compatibility matrix includes callable statement coverage. Details are documented in [docs/database-matrix.md](docs/database-matrix.md).
+标准兼容矩阵已经包含 callable statement 覆盖，详见 [docs/database-matrix.md](docs/database-matrix.md)。
 
-## Local Verification
+## 本地验证
 
 ```bash
 GOWORK=off go test -count=1 ./...
@@ -308,21 +308,21 @@ GOWORK=off go vet ./...
 git diff --check
 ```
 
-Release maintainers can run the local gate:
+维护者发布前可以执行本地门禁：
 
 ```bash
 GOWORK=off ./scripts/verify-release.sh
 ```
 
-## More Documentation
+## 更多文档
 
-- [Examples Guide](docs/examples.md)
+- [案例说明](docs/examples.zh-CN.md)
 - [API Compatibility](docs/api-compatibility.md)
 - [Database Matrix](docs/database-matrix.md)
 - [Provider And SQL Builder](docs/provider-builder.md)
 - [Architecture Notes](docs/goark-orm-v1-design.md)
 - [Release Gates](docs/release-gates.md)
 
-## License
+## 许可证
 
-Apache License 2.0.
+Apache License 2.0。

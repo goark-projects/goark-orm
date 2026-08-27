@@ -3,7 +3,7 @@ package orm
 import "context"
 
 const (
-	// DefaultBatchSize 是批量写入默认 flush 大小，对齐 MyBatis-Plus 常用默认值。
+	// DefaultBatchSize 是批量写入默认 flush 大小。
 	DefaultBatchSize = 1000
 )
 

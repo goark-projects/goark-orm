@@ -2,7 +2,7 @@ package orm
 
 import "context"
 
-// Db 是 MyBatis-Plus Db Kit 的 Go 化门面，不持有全局会话。
+// Db 是显式绑定 Session 的快捷操作门面，不持有全局会话。
 type Db struct {
 	session Session
 }

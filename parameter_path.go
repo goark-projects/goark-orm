@@ -46,7 +46,7 @@ func (p parameterPath) String() string {
 	return builder.String()
 }
 
-// resolveNamedArg 按 MyBatis 参数路径语义解析命名参数，禁止方法调用等不可控行为。
+// resolveNamedArg 按确定性参数路径语义解析命名参数，禁止方法调用等不可控行为。
 func resolveNamedArg(args NamedArgs, raw string) (any, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

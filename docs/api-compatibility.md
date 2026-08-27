@@ -1,42 +1,83 @@
-# Goark ORM V1 公共 API 兼容策略
+# Goark ORM V1 API Compatibility
 
-## 状态
+## Status
 
-`goark.dev/orm` 当前公共 API 主版本为 `v1`，运行时通过 `orm.APIVersion` 暴露。
+`goark.dev/orm` exposes the current public API version through `orm.APIVersion`. The current value is `v1`.
 
-## 稳定范围
+## Stable Surface
 
-以下内容进入 V1 兼容范围：
+The V1 compatibility surface includes:
 
-- `goark.dev/orm` module path。
-- `goark.dev/orm/ormtest` 真实数据库测试辅助包；该包仅依赖 `database/sql` 和 core ORM，不引入具体数据库驱动。
-- `Session`、`ManagedSession`、`StatementSession`、`CallSession`、`StatementCallSession`、`SQLSession`、`SQLSessionFactory`、`TxSession`、`BatchSession`、`BaseMapper`、`Service`、`QueryWrapper`、`UpdateWrapper`、`Page`、`Lazy`、`Cache`、`TypeHandler`、`RowScanner`、`StatementInterceptor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler`、`IdentifierGenerator`、`MetaObjectHandler`、`DialectCapabilities`、`SQLProviderDescriptor`、`SelectSQLBuilder`、`InsertSQLBuilder`、`UpdateSQLBuilder`、`DeleteSQLBuilder`、`UpsertSpec`、`RowLockOptions`、`GeneratedKeyPlan`、`ValidateRegistry` 等导出运行时接口和类型。
-- `CallResult`、`ResultSetRows`、`RowScannerRow`、`RowScannerFunc`、`SQLSource`、`EntityMeta`、`ColumnMeta`、`MapperMeta`、`StatementMeta`、`StatementOptions`、`StatementType`、`ResultSetType`、`ParameterMode`、`ParameterMeta`、`ResultSetMeta`、`ResultMapMeta`、`DynamicSQLNode` 等导出运行时和元数据结构。
-- `ormgen.GenerateSpec`、`ormgen.PackageModel`、`ormgen.EntityModel`、`ormgen.MapperModel`、`ormgen.StatementModel`、`ormgen.SchemaIntrospector`、`ormgen.SchemaNamingStrategy`、`ormgen.SchemaColumnFilter`、`ormgen.SchemaColumnOverride`、`ormgen.SQLSchemaIntrospector`、`ormgen.SQLSchemaDialect`、`ormgen.TemplateRenderer`、`ormgen.ReverseEngineerWithRenderer` 和 `goark-orm generate orm` 主命令。
-- `//goark-orm:entity`、`//goark-orm:mapper`、`//goark-orm:select`、`//goark-orm:insert`、`//goark-orm:update`、`//goark-orm:delete`、`//goark-orm:call` 注解前缀和 `goark-orm` struct tag key。
+- Module path: `goark.dev/orm`.
+- Runtime packages under `goark.dev/orm`.
+- Generator package: `goark.dev/orm/ormgen`.
+- Test helper package: `goark.dev/orm/ormtest`.
+- CLI entrypoint: `goark-orm generate orm`.
+- Annotation prefixes: `//goark-orm:entity`, `//goark-orm:mapper`, `//goark-orm:select`, `//goark-orm:insert`, `//goark-orm:update`, `//goark-orm:delete`, and `//goark-orm:call`.
+- Struct tag key: `goark-orm`.
 
-## 演进规则
+## Runtime Contracts
 
-- 只做向后兼容扩展：新增导出类型、方法、可选字段、可选配置和新适配层。
-- 不删除 V1 已导出标识符。
-- 不改变 V1 已有函数签名、接口方法签名和错误分类语义。
-- 不改变已生成代码的主要入口名称，包括 `RegisterGoarkORMMetadata`、`New<Entity>Mapper`、`New<Entity>BaseMapper` 和 `New<Entity>Service`。
-- 不把 Goark core、boot、CLI 或具体数据库驱动加入 `goark.dev/orm` core 的强依赖。
+The following exported runtime concepts are covered by the V1 compatibility policy:
 
-## 允许变化
+- `Session`, `ManagedSession`, `StatementSession`, `CallSession`, `StatementCallSession`.
+- `SQLSession`, `SQLSessionFactory`, `TxSession`, `BatchSession`, `RoutingSession`, and `RoutingSessionFactory`.
+- `Configuration`, `GlobalConfig`, `DbConfig`, `MyBatisConfig`, `MyBatisConfigFile`, `MyBatisAssembly`, and `MyBatisAssemblyResult`.
+- `BaseMapper`, `Service`, `QueryChain`, `UpdateChain`, `QueryWrapper`, `UpdateWrapper`, `Page`, `PageRequest`, `Cursor`, `Lazy`, and `LazySlice`.
+- `Dialect`, `DialectCapabilities`, `DbType`, `UpsertSpec`, `RowLockOptions`, and `GeneratedKeyPlan`.
+- `TypeHandler`, `RowScanner`, `IdentifierGenerator`, `MetaObjectHandler`, and `EnumValuer`.
+- `StatementInterceptor`, `StatementHandler`, `ParameterHandler`, `ResultSetHandler`, and their middleware types.
+- `Cache`, `CacheStatsProvider`, `SQLProvider`, `SQLProviderDescriptor`, and the SQL builder types.
+- Structured error values and context types such as `ErrConfiguration`, `ErrRegistry`, `ErrBinding`, `ErrMapping`, and `ErrExecutor`.
 
-- 新增 struct 字段，但必须保持零值安全。
-- 新增可选配置，但默认值必须保持既有行为。
-- 新增错误上下文字段，但 `errors.Is` 和 `errors.As` 分类语义不能破坏。
-- 新增生成代码内容，但已存在入口和语义保持兼容。
+## Metadata Contracts
 
-## 兼容门禁
+The stable metadata model includes:
 
-- `api_contract_external_test.go` 从外部包视角编译运行时公共 API，覆盖缓存 SPI、Wrapper 类型安全 helper、SQL token、拦截器、中间件、BaseMapper、Service、事务和配置解析入口。
-- `ormgen/api_contract_external_test.go` 从外部包视角编译生成器公共 API，覆盖模型、反向工程、schema drift、模板渲染和 schema SQL 方言入口。
-- `ormtest/api_contract_external_test.go` 从外部包视角编译真实数据库兼容套件 API，覆盖环境变量加载、SQL 列表解析、标准兼容矩阵和可复用 DatabaseCase 构造器。
-- `scripts/verify-release.sh` 本地发布门禁执行 Go 格式检查、示例生成一致性检查、`go test -count=1 ./...`、`go vet ./...`、`git diff --check` 和固定 `-benchtime=100x` 的核心 benchmark smoke，保证公共 API、示例和 benchmark 持续可编译和可运行。
+- `EntityMeta`, `ColumnMeta`, `MapperMeta`, `StatementMeta`, and `StatementOptions`.
+- `ParameterMeta`, `ResultSetMeta`, `ResultMapMeta`, constructor mapping, association mapping, collection mapping, discriminator mapping, cache metadata, and dynamic SQL nodes.
+- Statement command, source, type, cache policy, parameter mode, result set type, field strategy, field fill, and ID type enums.
 
-## 非兼容变化处理
+## Generator Contracts
 
-确实需要破坏 V1 契约时，必须进入新的主版本或新增并行 API，不能直接修改 V1 行为。
+The V1 generator surface includes:
+
+- `GenerateSpec`, `PackageModel`, `EntityModel`, `MapperModel`, `StatementModel`, and rendering entrypoints.
+- Schema introspection contracts: `SchemaIntrospector`, `SQLSchemaIntrospector`, `SQLSchemaDialect`, `SchemaQueryer`, and `SQLQueryer`.
+- Reverse engineering contracts: `ReverseEngineerSpec`, `ReverseEngineer`, `BuildPackageModelFromSchema`, `TemplateRenderer`, and `ReverseEngineerWithRenderer`.
+- Drift and compatibility helpers: `DetectSchemaDrift`, `ValidateSchemaDrift`, `CompareSchemaDrift`, `ValidateSQLSchemaCompatibility`, `SQLSchemaCompatibilityConfig`, and `SQLSchemaCompatibilityReport`.
+
+## Test Helper Contracts
+
+`ormtest` keeps real database verification reusable without linking concrete drivers into the core module. Its stable surface includes:
+
+- `DatabaseSuiteConfig`, `DatabaseCase`, and `RunDatabaseSuiteFromEnv`.
+- `CompatibilitySuiteConfig`, `CompatibilityCase`, `NewCompatibilitySuiteConfig`, and `RunCompatibilitySuiteFromEnv`.
+- Environment parsing helpers and SQL list parsing behavior documented in [database-matrix.md](database-matrix.md).
+
+## Evolution Rules
+
+- Additive changes are allowed when zero values keep existing behavior.
+- Existing exported identifiers, function signatures, interface method sets, and error classification semantics are preserved within V1.
+- Generated entry names remain stable, including `RegisterGoarkORMMetadata`, `New<Entity>Mapper`, `New<Entity>BaseMapper`, and `New<Entity>Service`.
+- Core packages must not add concrete database driver imports.
+- Core packages must not add dependencies on Goark core, boot, or CLI packages.
+- Runtime mapper scanning, runtime XML scanning, runtime entity modeling, and migration generation remain outside the V1 core boundary.
+
+## Compatibility Gates
+
+The repository keeps external-package API contract tests:
+
+- `api_contract_external_test.go` covers runtime APIs.
+- `ormgen/api_contract_external_test.go` covers generator APIs.
+- `ormtest/api_contract_external_test.go` covers real database test helper APIs.
+
+Local verification:
+
+```bash
+GOWORK=off go test -count=1 ./...
+GOWORK=off go vet ./...
+git diff --check
+```
+
+The release gate is documented in [release-gates.md](release-gates.md).

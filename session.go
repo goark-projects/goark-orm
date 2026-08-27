@@ -18,7 +18,7 @@ type Session interface {
 	Exec(ctx context.Context, statement string, args NamedArgs) (Result, error)
 }
 
-// ManagedSession 描述具备 MyBatis 风格生命周期的 Session。
+// ManagedSession 描述具备提交、回滚和关闭生命周期的 Session。
 type ManagedSession interface {
 	Session
 	Commit() error

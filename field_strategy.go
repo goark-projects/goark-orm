@@ -23,7 +23,7 @@ const (
 	FieldStrategyNever FieldStrategy = "NEVER"
 )
 
-// ParseFieldStrategy 解析 MyBatis-Plus 风格字段策略。
+// ParseFieldStrategy 解析字段策略，兼容下划线和短横线写法。
 func ParseFieldStrategy(value string) (FieldStrategy, error) {
 	normalized := strings.ToUpper(strings.TrimSpace(value))
 	normalized = strings.ReplaceAll(normalized, "-", "_")

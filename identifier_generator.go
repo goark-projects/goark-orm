@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// IDType 表示 MyBatis-Plus 风格主键生成策略。
+// IDType 表示主键生成策略。
 type IDType string
 
 const (

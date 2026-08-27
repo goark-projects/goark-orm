@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// Service 提供 MyBatis-Plus IService 风格的实体服务层。
+// Service 提供基于 BaseMapper 的实体服务层。
 type Service[T any, ID any] struct {
 	mapper *BaseMapper[T, ID]
 }
@@ -103,7 +103,7 @@ func (s *Service[T, ID]) RemoveByIDs(ctx context.Context, ids []ID) (int64, erro
 	return mapper.DeleteBatchIDs(ctx, ids)
 }
 
-// RemoveBatchByIDs 是 RemoveByIDs 的 MyBatis-Plus 命名别名。
+// RemoveBatchByIDs 是 RemoveByIDs 的兼容命名别名。
 func (s *Service[T, ID]) RemoveBatchByIDs(ctx context.Context, ids []ID) (int64, error) {
 	return s.RemoveByIDs(ctx, ids)
 }
@@ -377,7 +377,7 @@ func (s *Service[T, ID]) requireMapper() (*BaseMapper[T, ID], error) {
 	return s.mapper, nil
 }
 
-// QueryChain 提供 MyBatis-Plus QueryChainWrapper 风格的查询链。
+// QueryChain 提供实体查询链。
 type QueryChain[T any, ID any] struct {
 	service *Service[T, ID]
 	wrapper *QueryWrapper[T]
@@ -497,7 +497,7 @@ func (c *QueryChain[T, ID]) Page(ctx context.Context, page PageRequest) (Page[T]
 	return c.service.Page(ctx, page, c.wrapper)
 }
 
-// UpdateChain 提供 MyBatis-Plus UpdateChainWrapper 风格的更新链。
+// UpdateChain 提供实体更新链。
 type UpdateChain[T any, ID any] struct {
 	service *Service[T, ID]
 	wrapper *UpdateWrapper[T]

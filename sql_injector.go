@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// SQLInjector 对齐 MyBatis-Plus SQL Injector，用于为实体生成通用方法语句。
+// SQLInjector 为实体生成可显式注册的通用方法语句。
 type SQLInjector interface {
 	Inspect(entity EntityMeta, dialect Dialect, global GlobalConfig) ([]StatementMeta, error)
 }

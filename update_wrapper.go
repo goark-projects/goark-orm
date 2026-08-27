@@ -23,7 +23,7 @@ const (
 	updateAssignmentDecrBy updateAssignmentOperator = "decr"
 )
 
-// UpdateWrapper 是 MyBatis-Plus UpdateWrapper 的 Go 化更新构造器。
+// UpdateWrapper 是实体更新构造器。
 type UpdateWrapper[T any] struct {
 	assignments []updateAssignment[T]
 	conditions  []queryCondition[T]

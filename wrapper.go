@@ -94,7 +94,7 @@ type rawSQLClause struct {
 	Args NamedArgs
 }
 
-// QueryWrapper 是 MyBatis-Plus Wrapper 的 Go 化条件构造器。
+// QueryWrapper 是实体查询条件构造器。
 type QueryWrapper[T any] struct {
 	conditions []queryCondition[T]
 	orders     []queryOrder[T]

@@ -17,7 +17,7 @@ const (
 	ResultSetTypeScrollSensitive ResultSetType = "SCROLL_SENSITIVE"
 )
 
-// StatementOptions 描述 MyBatis 风格的语句级执行选项。
+// StatementOptions 描述语句级执行选项。
 type StatementOptions struct {
 	Timeout       time.Duration
 	FetchSize     int
@@ -26,7 +26,7 @@ type StatementOptions struct {
 	KeyColumn     string
 }
 
-// ParseResultSetType 解析 MyBatis resultSetType 配置值。
+// ParseResultSetType 解析 resultSetType 配置值。
 func ParseResultSetType(value string) (ResultSetType, error) {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case "":

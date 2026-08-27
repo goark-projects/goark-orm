@@ -27,7 +27,7 @@ const (
 	ExecutorTypeBatch ExecutorType = "BATCH"
 )
 
-// Configuration 描述 MyBatis 风格的 ORM 运行期配置。
+// Configuration 描述 ORM 运行期配置。
 type Configuration struct {
 	Dialect                  Dialect
 	DatabaseID               string
@@ -57,7 +57,7 @@ func DefaultConfiguration() Configuration {
 	}
 }
 
-// WithGlobalConfig 返回设置 MyBatis-Plus 风格全局配置后的配置副本。
+// WithGlobalConfig 返回设置全局配置后的配置副本。
 func (c Configuration) WithGlobalConfig(global GlobalConfig) Configuration {
 	c.GlobalConfig = global
 	return c

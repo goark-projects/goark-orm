@@ -2,7 +2,7 @@ package orm
 
 import "context"
 
-// EnumValuer 对齐 MyBatis-Plus IEnum/@EnumValue 的 Go 化枚举值接口。
+// EnumValuer 描述可显式暴露数据库入库值的枚举接口。
 type EnumValuer interface {
 	EnumValue() any
 }

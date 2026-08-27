@@ -1,44 +1,53 @@
-# Provider 与 SQL Builder
+# Provider And SQL Builder
 
-## 目标
+## Purpose
 
-Provider 用于承载运行期复杂 SQL 组织逻辑。`goark-orm` 保持 Go 原生路线：Provider 必须显式注册，不做运行期扫描、不做代理、不做字符串魔法。
+Providers hold runtime SQL construction logic that is too complex or too contextual for static SQL. Providers are registered explicitly in `Registry`; runtime scanning and proxy-based discovery are not part of the core design.
 
-## Provider 描述
+## Provider Registration
 
-业务可以继续使用函数式注册：
+Function registration:
 
 ```go
 err := registry.RegisterSQLProvider("UserSQL.List", provider)
 ```
 
-需要更强约束时使用描述式注册：
+Descriptor registration adds command and statement constraints:
 
 ```go
 err := registry.RegisterSQLProviderDescriptor(orm.NewSQLProviderDescriptor(
 	"UserSQL.List",
 	provider,
 	orm.WithSQLProviderCommands(orm.StatementCommandSelect),
-	orm.WithSQLProviderStatements("system.user.UserMapper.List"),
+	orm.WithSQLProviderStatements("example.user.UserMapper.List"),
 ))
 ```
 
-描述式注册会在执行前校验 Provider 是否允许服务当前 Statement，错误进入 `ErrBinding` 分类。应用启动完成元数据注册后，可以调用 `registry.Validate()` 或 `orm.ValidateRegistry(registry)` 提前校验 Provider、ResultMap、TypeHandler、cache-ref、selectKey 和 nested select 引用，避免首次 SQL 请求才暴露装配错误。
+Descriptor validation rejects a provider when it is invoked by an unsupported statement or command. The error is classified as `ErrBinding`.
 
-## SQLSource 参数
+After generated metadata and provider registrations are complete, call:
 
-Provider 可以返回 `SQLSource.Args`。这些参数会和 Mapper 入参合并，再进入 TypeHandler、`${}` 安全 token 渲染和 `#{}` 占位符编译。
+```go
+if err := registry.Validate(); err != nil {
+	return err
+}
+```
 
-合并规则：
+`Registry.Validate` verifies provider references, result maps, type handlers, cache refs, select-key metadata, and nested select references before the first SQL request.
 
-- 参数名会去除首尾空白。
-- 空参数名会拒绝。
-- 和 Mapper 入参同名且值不同会拒绝，避免 Provider 静默覆盖业务参数。
-- SQL 最终仍只通过 `#{}` 绑定值，通过 `${}` 绑定 `RawSQLToken`。
+## Provider Arguments
 
-## SQL Builder
+A provider may return `SQLSource.Args`. Provider arguments are merged with mapper arguments before type handling, raw token rendering, and placeholder compilation.
 
-`NewSelectSQLBuilder`、`NewInsertSQLBuilder`、`NewUpdateSQLBuilder` 和 `NewDeleteSQLBuilder` 会返回可直接用于 Provider 的 `SQLSource`。
+Merge rules:
+
+- Argument names are trimmed.
+- Empty names are rejected.
+- A provider cannot silently overwrite a mapper argument with a different value.
+- Values still use `#{}` for parameter binding.
+- `${}` accepts only `RawSQLToken` values.
+
+## Select Builder
 
 ```go
 source, err := orm.NewSelectSQLBuilder().
@@ -56,18 +65,49 @@ source, err := orm.NewSelectSQLBuilder().
 	Build()
 ```
 
-Builder 的表名和列名会转成 `${}` 安全标识符 token，最终由方言决定引号风格；值会转成 `#{}` 参数，占位符由方言编译。写语句 Builder 支持 `Returning`，`UpdateSQLBuilder` 和 `DeleteSQLBuilder` 可以通过 `RequireWhere` 显式拒绝无 WHERE 写语句。
+Table and column names are converted to safe raw identifier tokens. Values become named parameters and are compiled by the selected dialect.
 
-## 缓存 Key
+## Write Builders
 
-`SQLSource.CacheKey` 是 Provider 额外缓存维度。一级缓存和二级缓存仍会包含最终 SQL 与最终参数；当 SQL 和参数相同但业务上下文不同，例如租户、数据域、动态表策略时，可以设置 `CacheKey` 避免缓存串用。
+`NewInsertSQLBuilder`, `NewUpdateSQLBuilder`, and `NewDeleteSQLBuilder` return `SQLSource` values that can be used from providers. `UpdateSQLBuilder` and `DeleteSQLBuilder` can call `RequireWhere` to reject write statements without a WHERE clause.
 
-## 方言 SQL 辅助
+```go
+source, err := orm.NewUpdateSQLBuilder().
+	Table("sys_user").
+	Set("status", "LOCKED").
+	WhereEq("id", int64(7)).
+	RequireWhere().
+	Build()
+```
 
-方言能力矩阵已提供可调用 API：
+## Cache Key
 
-- `BuildUpsertSQL`：按方言生成 PostgreSQL/SQLite `ON CONFLICT` 或 MySQL/MariaDB `ON DUPLICATE KEY UPDATE`。
-- `RowLockClause`：按方言生成 `FOR UPDATE`、`SKIP LOCKED`、`NOWAIT` 或 SQL Server 锁提示。
-- `NewGeneratedKeyPlan`：返回当前方言的主键回读计划。
+`SQLSource.CacheKey` adds a business-specific cache dimension. Local and second-level caches already include final SQL and final arguments. Use a custom cache key when the same SQL and arguments can produce different results because of tenant, data-domain, or dynamic-table context.
 
-这些 API 只生成 SQL 或执行计划，不负责建表、迁移、DDL 生命周期，也不引入具体数据库驱动。
+## Dialect Helpers
+
+```go
+source, err := orm.BuildUpsertSQL(orm.NewPostgresDialect(), orm.UpsertSpec{
+	Table:           "sys_user",
+	InsertColumns:   []string{"id", "name", "status"},
+	ConflictColumns: []string{"id"},
+	UpdateColumns:   []string{"name", "status"},
+	Values: orm.NamedArgs{
+		"id":     int64(7),
+		"name":   "Alice",
+		"status": "ACTIVE",
+	},
+})
+if err != nil {
+	return err
+}
+_ = source
+
+lockClause, err := orm.RowLockClause(orm.NewPostgresDialect(), orm.RowLockOptions{SkipLocked: true})
+if err != nil {
+	return err
+}
+_ = lockClause
+```
+
+These helpers generate SQL or execution plans only. They do not create schemas, run migrations, or import database drivers.

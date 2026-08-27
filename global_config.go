@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-// GlobalConfig 描述 MyBatis-Plus 风格全局配置。
+// GlobalConfig 描述 ORM 全局配置。
 type GlobalConfig struct {
 	DbConfig            DbConfig
 	IdentifierGenerator IdentifierGenerator

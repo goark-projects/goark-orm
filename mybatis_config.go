@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// MyBatisSettings 描述 MyBatis settings 的 Go 化配置子集。
+// MyBatisSettings 描述运行期 settings 配置子集。
 type MyBatisSettings struct {
 	CacheEnabled             *bool
 	LocalCacheEnabled        *bool
@@ -44,7 +44,7 @@ type MapperRef struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// MyBatisConfig 是 MyBatis 配置文件的 Go 化声明模型。
+// MyBatisConfig 是运行期配置声明模型。
 type MyBatisConfig struct {
 	Settings     MyBatisSettings
 	Environment  MyBatisEnvironment
@@ -61,7 +61,7 @@ func DefaultMyBatisConfig() MyBatisConfig {
 	}
 }
 
-// ParseLocalCacheScope 解析 MyBatis localCacheScope 配置值。
+// ParseLocalCacheScope 解析 localCacheScope 配置值。
 func ParseLocalCacheScope(value string) (LocalCacheScope, error) {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case "", string(LocalCacheScopeSession):
@@ -73,7 +73,7 @@ func ParseLocalCacheScope(value string) (LocalCacheScope, error) {
 	}
 }
 
-// ParseExecutorType 解析 MyBatis defaultExecutorType 配置值。
+// ParseExecutorType 解析 defaultExecutorType 配置值。
 func ParseExecutorType(value string) (ExecutorType, error) {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case "", string(ExecutorTypeSimple):

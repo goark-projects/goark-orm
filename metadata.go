@@ -69,7 +69,7 @@ const (
 type StatementCachePolicy string
 
 const (
-	// StatementCacheDefault 表示使用 MyBatis 风格默认缓存策略。
+	// StatementCacheDefault 表示使用语句命令对应的默认缓存策略。
 	StatementCacheDefault StatementCachePolicy = ""
 	// StatementCacheEnabled 表示显式启用缓存行为。
 	StatementCacheEnabled StatementCachePolicy = "enabled"
@@ -87,7 +87,7 @@ const (
 	SelectKeyOrderAfter SelectKeyOrder = "AFTER"
 )
 
-// FieldFill 描述 MyBatis-Plus 风格字段自动填充时机。
+// FieldFill 描述字段自动填充时机。
 type FieldFill string
 
 const (
@@ -198,7 +198,7 @@ type ResultMapMeta struct {
 	Discriminator ResultDiscriminatorMeta
 }
 
-// ResultDiscriminatorMeta 描述 MyBatis resultMap discriminator。
+// ResultDiscriminatorMeta 描述 resultMap discriminator。
 type ResultDiscriminatorMeta struct {
 	Column      string
 	TypeName    string
@@ -265,7 +265,7 @@ type DynamicSQLNode struct {
 	Children        []DynamicSQLNode
 }
 
-// SelectKeyMeta 描述 MyBatis 风格 selectKey 主键生成语句。
+// SelectKeyMeta 描述 selectKey 主键生成语句。
 type SelectKeyMeta struct {
 	Enabled     bool
 	KeyProperty string

@@ -88,7 +88,7 @@ func WithBaseMapperGlobalConfig(global GlobalConfig) BaseMapperOption {
 	}
 }
 
-// BaseMapper 提供 MyBatis-Plus 风格的实体通用 CRUD。
+// BaseMapper 提供实体通用 CRUD。
 type BaseMapper[T any, ID any] struct {
 	session             StatementSession
 	entity              EntityMeta
@@ -378,7 +378,7 @@ func (m *BaseMapper[T, ID]) Count(ctx context.Context, wrapper *QueryWrapper[T])
 	return total, nil
 }
 
-// SelectCount 是 Count 的 MyBatis-Plus 命名别名。
+// SelectCount 是 Count 的兼容命名别名。
 func (m *BaseMapper[T, ID]) SelectCount(ctx context.Context, wrapper *QueryWrapper[T]) (int64, error) {
 	return m.Count(ctx, wrapper)
 }

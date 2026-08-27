@@ -62,7 +62,7 @@ func DecodeMyBatisConfig(reader io.Reader) (MyBatisConfig, error) {
 	}
 	var file MyBatisConfigFile
 	if err := jsoncodec.DecodeStrict(reader, &file); err != nil {
-		return MyBatisConfig{}, fmt.Errorf("goark-orm: decode MyBatis config failed: %w", err)
+		return MyBatisConfig{}, fmt.Errorf("goark-orm: decode runtime config failed: %w", err)
 	}
 	return file.Build()
 }

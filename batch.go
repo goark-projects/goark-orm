@@ -50,7 +50,7 @@ type batchItem struct {
 	args      NamedArgs
 }
 
-// BatchSession 提供 MyBatis BatchExecutor 风格的批处理 Session。
+// BatchSession 提供按顺序缓冲写语句的批处理 Session。
 type BatchSession struct {
 	session          Session
 	statementSession StatementSession

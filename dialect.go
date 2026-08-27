@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// DbType 对齐 MyBatis-Plus 的数据库类型枚举，并保持 Go 字符串常量形式。
+// DbType 描述内置数据库方言类型，并保持 Go 字符串常量形式。
 type DbType string
 
 const (
