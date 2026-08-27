@@ -101,6 +101,25 @@ func TestORMDatabaseCompatibility(t *testing.T) {
 
 Use `ormtest.WithCompatibilityTable("schema.table_name")` when multiple suites need isolated table names in one database. Table names are parsed as identifier segments to keep test configuration from injecting arbitrary SQL into DDL.
 
+## Local PostgreSQL/MySQL Matrix Verification
+
+Use `scripts/verify-real-db.ps1` to run the standard PostgreSQL and MySQL suites from an isolated temporary module. The script imports concrete drivers only inside the temporary module, keeps `goark.dev/orm` dependency-light, and removes the temporary module after the run.
+
+```powershell
+$env:GOARK_ORM_POSTGRES_DSN = 'postgres://user:pass@127.0.0.1:5432/goark-orm-test?sslmode=disable'
+$env:GOARK_ORM_MYSQL_DSN = 'user:pass@tcp(127.0.0.1:3306)/goark-orm-test?parseTime=true'
+powershell -ExecutionPolicy Bypass -File scripts/verify-real-db.ps1
+```
+
+Optional variables:
+
+| Environment variable | Default | Description |
+| --- | --- | --- |
+| `GOARK_ORM_POSTGRES_DRIVER` | `pgx` | Registered PostgreSQL `database/sql` driver name |
+| `GOARK_ORM_POSTGRES_DSN` | none | PostgreSQL DSN; empty value skips PostgreSQL |
+| `GOARK_ORM_MYSQL_DRIVER` | `mysql` | Registered MySQL `database/sql` driver name |
+| `GOARK_ORM_MYSQL_DSN` | none | MySQL DSN; empty value skips MySQL |
+
 ## Callable Statement Notes
 
 The core test suite covers `sql.Out`, INOUT writeback, and multi-result-set scanning with fake drivers. Real database callable syntax and driver support still need a driver-specific smoke test.
