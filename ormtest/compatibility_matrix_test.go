@@ -69,6 +69,15 @@ func TestNewCompatibilitySuiteConfig_whenMySQL_shouldUseUTF8MB4DDL(t *testing.T)
 	}
 }
 
+func TestNewCompatibilitySuiteConfig_whenUnsupportedDBType_shouldReject(t *testing.T) {
+	for _, dbType := range []orm.DbType{orm.DbTypeMariaDB, orm.DbTypeSQLite, orm.DbTypeQuestion, orm.DbTypeSQLServer, orm.DbTypeOracle} {
+		_, err := NewCompatibilitySuiteConfig(dbType)
+		if err == nil || !strings.Contains(err.Error(), "supports only postgres and mysql") {
+			t.Fatalf("expected %s to be rejected, got %v", dbType, err)
+		}
+	}
+}
+
 func containsDatabaseCase(cases []DatabaseCase, name string) bool {
 	for _, testCase := range cases {
 		if testCase.Name == name {

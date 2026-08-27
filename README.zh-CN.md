@@ -274,7 +274,7 @@ _ = report.Source
 
 ## 真实数据库兼容性
 
-真实库套件只有在调用方提供驱动和 DSN 后才执行：
+真实库套件只有在调用方提供驱动和 DSN 后才执行。标准套件当前只支持 PostgreSQL 和 MySQL：
 
 ```go
 package user_test
@@ -298,7 +298,7 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-标准兼容矩阵已经包含 callable statement 覆盖，详见 [docs/database-matrix.md](docs/database-matrix.md)。
+标准 PostgreSQL/MySQL 兼容矩阵已经包含 callable statement 覆盖，详见 [docs/database-matrix.md](docs/database-matrix.md)。
 
 ## 本地验证
 

@@ -385,7 +385,7 @@ _ = report.Source
 
 ## 真实数据库测试 Harness
 
-驱动导入和凭据保留在调用方测试包：
+驱动导入和凭据保留在调用方测试包。标准复用套件当前只支持 PostgreSQL 和 MySQL：
 
 ```go
 package user_test

@@ -171,7 +171,7 @@ func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable stri
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
 			compatibilityPostgresCallRoutineDDL(quotedTable, quotedCallRoutine),
 		}, []string{"DROP FUNCTION IF EXISTS " + quotedCallRoutine + "(INTEGER)", "DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
-	case orm.DbTypeMySQL, orm.DbTypeMariaDB:
+	case orm.DbTypeMySQL:
 		return []string{
 			"DROP PROCEDURE IF EXISTS " + quotedCallRoutine,
 			"DROP TABLE IF EXISTS " + quotedKeyTable,
@@ -180,22 +180,8 @@ func compatibilityDDL(dbType orm.DbType, quotedTable string, quotedKeyTable stri
 			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 			compatibilityMySQLCallRoutineDDL(quotedTable, quotedCallRoutine),
 		}, []string{"DROP PROCEDURE IF EXISTS " + quotedCallRoutine, "DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
-	case orm.DbTypeSQLite:
-		return []string{
-			"DROP TABLE IF EXISTS " + quotedKeyTable,
-			"DROP TABLE IF EXISTS " + quotedTable,
-			"CREATE TABLE " + quotedKeyTable + " (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(64) NOT NULL)",
-			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
-		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
-	case orm.DbTypeQuestion:
-		return []string{
-			"DROP TABLE IF EXISTS " + quotedKeyTable,
-			"DROP TABLE IF EXISTS " + quotedTable,
-			"CREATE TABLE " + quotedKeyTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL)",
-			"CREATE TABLE " + quotedTable + " (id BIGINT PRIMARY KEY, name VARCHAR(64) NOT NULL, age INTEGER NOT NULL, profile TEXT NOT NULL, created_at VARCHAR(40) NOT NULL)",
-		}, []string{"DROP TABLE IF EXISTS " + quotedKeyTable, "DROP TABLE IF EXISTS " + quotedTable}, nil
 	default:
-		return nil, nil, fmt.Errorf("goark-orm: compatibility suite does not support db type %q", dbType)
+		return nil, nil, fmt.Errorf("goark-orm: standard compatibility suite supports only postgres and mysql, got %q", dbType)
 	}
 }
 

@@ -385,7 +385,7 @@ _ = report.Source
 
 ## Real Database Test Harness
 
-Keep driver imports and credentials in the caller's test harness:
+Keep driver imports and credentials in the caller's test harness. The standard reusable suite currently supports PostgreSQL and MySQL only:
 
 ```go
 package user_test

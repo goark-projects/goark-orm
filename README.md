@@ -274,7 +274,7 @@ _ = report.Source
 
 ## Real Database Compatibility
 
-The reusable database suite is disabled until the caller provides a driver and DSN:
+The reusable database suite is disabled until the caller provides a driver and DSN. The standard suite currently supports PostgreSQL and MySQL only:
 
 ```go
 package user_test
@@ -298,7 +298,7 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-The standard compatibility matrix includes callable statement coverage. Details are documented in [docs/database-matrix.md](docs/database-matrix.md).
+The standard PostgreSQL/MySQL compatibility matrix includes callable statement coverage. Details are documented in [docs/database-matrix.md](docs/database-matrix.md).
 
 ## Local Verification
 

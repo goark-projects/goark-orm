@@ -42,7 +42,7 @@ These APIs produce SQL or execution plans only. They do not create tables and do
 
 ## Real Database Suite
 
-The suite is disabled unless all required environment variables are provided and the caller's test binary imports a concrete driver.
+The standard suite is disabled unless all required environment variables are provided and the caller's test binary imports a concrete driver. It currently supports PostgreSQL and MySQL only; other database engines are intentionally outside the standard real-database support boundary until they get their own verified matrix.
 
 ```bash
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
@@ -55,7 +55,7 @@ GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 | --- | --- |
 | `GOARK_ORM_INTEGRATION_DRIVER` | Registered `database/sql` driver name |
 | `GOARK_ORM_INTEGRATION_DSN` | Real database DSN |
-| `GOARK_ORM_INTEGRATION_DBTYPE` | Optional dialect type: `postgres`, `mysql`, `mariadb`, `sqlite`, `sqlserver`, or `oracle` |
+| `GOARK_ORM_INTEGRATION_DBTYPE` | Required standard-suite database type: `postgres` or `mysql` |
 | `GOARK_ORM_INTEGRATION_SETUP_SQL` | Optional setup SQL as a JSON string array or separated text |
 | `GOARK_ORM_INTEGRATION_CLEANUP_SQL` | Optional cleanup SQL as a JSON string array or separated text |
 | `GOARK_ORM_INTEGRATION_SQL_SEPARATOR` | Optional multi-statement separator; default is `-- goark-orm statement --` as a standalone segment |
@@ -76,7 +76,7 @@ GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 - row-lock smoke paths
 - callable statements
 
-Current standard DDL support covers `postgres`, `mysql`, `mariadb`, `sqlite`, and `question`. PostgreSQL and MySQL are the primary real database verification targets.
+Current standard DDL support covers only `postgres` and `mysql`. The generic dialect APIs may still compile SQL for other dialects, but the reusable real database suite does not claim support for them.
 
 ```go
 package user_test

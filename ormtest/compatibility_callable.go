@@ -14,10 +14,10 @@ func compatibilityCallSQL(dbType orm.DbType, quotedTable string, quotedRoutine s
 	switch dbType {
 	case orm.DbTypePostgres:
 		return "select id, name, age, profile, created_at from " + quotedRoutine + "(#{minAge})"
-	case orm.DbTypeMySQL, orm.DbTypeMariaDB:
+	case orm.DbTypeMySQL:
 		return "call " + quotedRoutine + "(#{minAge})"
 	default:
-		return "select id, name, age, profile, created_at from " + quotedTable + " where age >= #{minAge} order by id"
+		return ""
 	}
 }
 
@@ -31,7 +31,7 @@ func compatibilityPostgresCallRoutineDDL(quotedTable string, quotedRoutine strin
 	}, " ")
 }
 
-// compatibilityMySQLCallRoutineDDL 创建 MySQL/MariaDB 结果集过程。
+// compatibilityMySQLCallRoutineDDL 创建 MySQL 结果集过程。
 func compatibilityMySQLCallRoutineDDL(quotedTable string, quotedRoutine string) string {
 	return strings.Join([]string{
 		"CREATE PROCEDURE " + quotedRoutine + "(IN in_min_age INTEGER)",
