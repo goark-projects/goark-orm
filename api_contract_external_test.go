@@ -50,6 +50,20 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if err := registry.RegisterCache("contract.UserMapper", blockingCache); err != nil {
 		t.Fatalf("register cache failed: %v", err)
 	}
+	provider := func(context.Context, orm.StatementMeta, orm.NamedArgs) (orm.SQLSource, error) {
+		return orm.SQLSource{SQL: "select id from sys_user"}, nil
+	}
+	if err := registry.RegisterSQLProviderDescriptor(orm.NewSQLProviderDescriptor(
+		"contract.UserSQL.List",
+		provider,
+		orm.WithSQLProviderCommands(orm.StatementCommandSelect),
+		orm.WithSQLProviderStatements("contract.UserMapper.List"),
+	)); err != nil {
+		t.Fatalf("register provider descriptor failed: %v", err)
+	}
+	if descriptor, ok := registry.SQLProviderDescriptor("contract.UserSQL.List"); !ok || descriptor.Provider == nil {
+		t.Fatalf("expected provider descriptor")
+	}
 
 	idField := orm.NewTypedField[contractUser, int64]("id")
 	nameField := orm.NewTypedField[contractUser, string]("name")

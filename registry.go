@@ -14,7 +14,7 @@ type Registry struct {
 	caches      map[string]Cache
 	cacheRefs   map[string]string
 	handlers    map[string]TypeHandler
-	providers   map[string]SQLProvider
+	providers   map[string]SQLProviderDescriptor
 	rowScanners map[string]RowScanner
 }
 
@@ -27,7 +27,7 @@ func NewRegistry() *Registry {
 		caches:      make(map[string]Cache),
 		cacheRefs:   make(map[string]string),
 		handlers:    defaultTypeHandlers(),
-		providers:   make(map[string]SQLProvider),
+		providers:   make(map[string]SQLProviderDescriptor),
 		rowScanners: make(map[string]RowScanner),
 	}
 }
@@ -154,19 +154,21 @@ func (r *Registry) TypeHandlers() map[string]TypeHandler {
 
 // RegisterSQLProvider 注册或替换全局 SQL Provider。
 func (r *Registry) RegisterSQLProvider(name string, provider SQLProvider) error {
+	return r.RegisterSQLProviderDescriptor(NewSQLProviderDescriptor(name, provider))
+}
+
+// RegisterSQLProviderDescriptor 注册或替换带约束的全局 SQL Provider。
+func (r *Registry) RegisterSQLProviderDescriptor(descriptor SQLProviderDescriptor) error {
 	if r == nil {
 		return registryErrorf("registry", "", "registry is nil")
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return registryErrorf("SQL provider", "", "SQL provider name is required")
-	}
-	if provider == nil {
-		return registryErrorf("SQL provider", name, "SQL provider %q is nil", name)
+	normalized, err := normalizeSQLProviderDescriptor(descriptor)
+	if err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.providers[name] = provider
+	r.providers[normalized.Name] = copySQLProviderDescriptor(normalized)
 	return nil
 }
 
@@ -177,8 +179,22 @@ func (r *Registry) SQLProvider(name string) (SQLProvider, bool) {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	provider, ok := r.providers[strings.TrimSpace(name)]
-	return provider, ok
+	descriptor, ok := r.providers[strings.TrimSpace(name)]
+	return descriptor.Provider, ok
+}
+
+// SQLProviderDescriptor 按名称读取全局 SQL Provider 描述。
+func (r *Registry) SQLProviderDescriptor(name string) (SQLProviderDescriptor, bool) {
+	if r == nil {
+		return SQLProviderDescriptor{}, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	descriptor, ok := r.providers[strings.TrimSpace(name)]
+	if !ok {
+		return SQLProviderDescriptor{}, false
+	}
+	return copySQLProviderDescriptor(descriptor), true
 }
 
 // RegisterRowScanner 注册或替换指定实体类型的生成式行扫描器。

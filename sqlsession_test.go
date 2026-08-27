@@ -1798,6 +1798,39 @@ func TestSQLSession_Query_whenStatementUsesMissingProvider_shouldReturnError(t *
 	}
 }
 
+func TestSQLSession_Query_whenProviderDescriptorRejectsStatement_shouldReturnBindingError(t *testing.T) {
+	state := openTestSQLState(t)
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "ListByStatus",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.ListByStatus",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		Provider:  "UserSQL.ListByStatus",
+	})
+	err := registry.RegisterSQLProviderDescriptor(NewSQLProviderDescriptor(
+		"UserSQL.ListByStatus",
+		func(context.Context, StatementMeta, NamedArgs) (SQLSource, error) {
+			t.Fatal("provider should not be invoked after descriptor validation failure")
+			return SQLSource{}, nil
+		},
+		WithSQLProviderStatements("system.user.UserMapper.ListOther"),
+	))
+	if err != nil {
+		t.Fatalf("register provider descriptor failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var users []sqlSessionUser
+	err = session.Query(context.Background(), "system.user.UserMapper.ListByStatus", NamedArgs{"status": "ACTIVE"}, &users)
+	if err == nil || !errors.Is(err, ErrBinding) || !strings.Contains(err.Error(), "is not allowed for statement") {
+		t.Fatalf("expected provider descriptor binding error, got %v", err)
+	}
+}
+
 func TestSQLSession_QueryPage_whenPageRequested_shouldCountAndQueryRecords(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryResults = []testRowsData{

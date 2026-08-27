@@ -103,3 +103,63 @@ func TestRegistry_whenRegisterRowScannerInvalid_shouldReject(t *testing.T) {
 		t.Fatal("expected nil scanner function error")
 	}
 }
+
+func TestRegistry_whenRegisterSQLProviderDescriptor_shouldExposeValidatedDescriptor(t *testing.T) {
+	registry := NewRegistry()
+	provider := func(context.Context, StatementMeta, NamedArgs) (SQLSource, error) {
+		return SQLSource{SQL: "select id from sys_user"}, nil
+	}
+
+	err := registry.RegisterSQLProviderDescriptor(NewSQLProviderDescriptor(
+		"UserSQL.List",
+		provider,
+		WithSQLProviderCommands(StatementCommandSelect),
+		WithSQLProviderStatements("system.user.UserMapper.List"),
+	))
+	if err != nil {
+		t.Fatalf("register provider descriptor failed: %v", err)
+	}
+
+	descriptor, ok := registry.SQLProviderDescriptor("UserSQL.List")
+	if !ok {
+		t.Fatal("expected provider descriptor")
+	}
+	if descriptor.Name != "UserSQL.List" || descriptor.Provider == nil {
+		t.Fatalf("unexpected provider descriptor %#v", descriptor)
+	}
+	if len(descriptor.Commands) != 1 || descriptor.Commands[0] != StatementCommandSelect {
+		t.Fatalf("unexpected provider commands %#v", descriptor.Commands)
+	}
+	if len(descriptor.Statements) != 1 || descriptor.Statements[0] != "system.user.UserMapper.List" {
+		t.Fatalf("unexpected provider statements %#v", descriptor.Statements)
+	}
+
+	descriptor.Commands[0] = StatementCommandDelete
+	actual, ok := registry.SQLProviderDescriptor("UserSQL.List")
+	if !ok {
+		t.Fatal("expected provider descriptor")
+	}
+	if actual.Commands[0] != StatementCommandSelect {
+		t.Fatalf("registry returned mutable provider descriptor %#v", actual.Commands)
+	}
+}
+
+func TestRegistry_whenRegisterSQLProviderDescriptorInvalid_shouldReject(t *testing.T) {
+	registry := NewRegistry()
+	provider := func(context.Context, StatementMeta, NamedArgs) (SQLSource, error) {
+		return SQLSource{SQL: "select id from sys_user"}, nil
+	}
+
+	if err := registry.RegisterSQLProviderDescriptor(NewSQLProviderDescriptor("", provider)); err == nil {
+		t.Fatal("expected empty provider name error")
+	}
+	if err := registry.RegisterSQLProviderDescriptor(NewSQLProviderDescriptor("UserSQL.List", nil)); err == nil {
+		t.Fatal("expected nil provider error")
+	}
+	if err := registry.RegisterSQLProviderDescriptor(NewSQLProviderDescriptor("UserSQL.List", provider, WithSQLProviderCommands(""))); err == nil {
+		t.Fatal("expected empty provider command error")
+	}
+	if err := registry.RegisterSQLProviderDescriptor(NewSQLProviderDescriptor("UserSQL.List", provider, WithSQLProviderStatements(""))); err == nil {
+		t.Fatal("expected empty provider statement error")
+	}
+}

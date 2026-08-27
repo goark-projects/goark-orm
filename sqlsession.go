@@ -315,11 +315,14 @@ func (s *SQLSession) applyMetaObjectFill(ctx context.Context, runtime *Statement
 
 func (s *SQLSession) invokeSQLProvider(ctx context.Context, meta StatementMeta, args NamedArgs) (SQLSource, error) {
 	name := strings.TrimSpace(meta.Provider)
-	provider, ok := s.registry.SQLProvider(name)
+	descriptor, ok := s.registry.SQLProviderDescriptor(name)
 	if !ok {
 		return SQLSource{}, statementNotFoundErrorf(name, "SQL provider %q is not registered", name)
 	}
-	source, err := provider(ctx, meta, copyNamedArgs(args))
+	if err := descriptor.ValidateStatement(meta); err != nil {
+		return SQLSource{}, err
+	}
+	source, err := descriptor.Provider(ctx, meta, copyNamedArgs(args))
 	if err != nil {
 		return SQLSource{}, &ExecutorError{
 			Statement: meta.FullName,
