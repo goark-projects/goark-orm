@@ -11,6 +11,7 @@ type MyBatisAssembly struct {
 	Registry       *Registry
 	DB             *sql.DB
 	TypeHandlers   map[string]TypeHandler
+	Plugins        PluginRegistry
 	SessionOptions []SQLSessionOption
 }
 
@@ -22,6 +23,7 @@ type MyBatisAssemblyResult struct {
 	TypeAliases    map[string]string
 	TypeHandlers   []string
 	Mappers        []MapperRef
+	Plugins        []PluginRef
 }
 
 // AssembleMyBatisConfig 显式装配配置、注册表和可选 SessionFactory。
@@ -60,6 +62,11 @@ func AssembleMyBatisConfig(assembly MyBatisAssembly) (MyBatisAssemblyResult, err
 	}
 	options := append([]SQLSessionOption(nil), assembly.SessionOptions...)
 	options = append(options, WithConfiguration(configuration))
+	pluginOptions, err := assembly.Config.SessionOptions(assembly.Plugins)
+	if err != nil {
+		return MyBatisAssemblyResult{}, err
+	}
+	options = append(options, pluginOptions...)
 	var factory *SQLSessionFactory
 	if assembly.DB != nil {
 		factory, err = NewSQLSessionFactory(assembly.Registry, assembly.DB, configuration.Dialect, options...)
@@ -74,6 +81,7 @@ func AssembleMyBatisConfig(assembly MyBatisAssembly) (MyBatisAssemblyResult, err
 		TypeAliases:    aliases,
 		TypeHandlers:   append([]string(nil), typeHandlerNames...),
 		Mappers:        copyMapperRefs(assembly.Config.Mappers),
+		Plugins:        copyPluginRefs(assembly.Config.Plugins),
 	}, nil
 }
 
@@ -105,5 +113,23 @@ func copyMapperRefs(mappers []MapperRef) []MapperRef {
 	}
 	out := make([]MapperRef, len(mappers))
 	copy(out, mappers)
+	return out
+}
+
+func copyPluginRefs(plugins []PluginRef) []PluginRef {
+	if len(plugins) == 0 {
+		return nil
+	}
+	out := make([]PluginRef, len(plugins))
+	for index, plugin := range plugins {
+		out[index] = plugin
+		out[index].Enabled = cloneBoolPointer(plugin.Enabled)
+		if len(plugin.Options) > 0 {
+			out[index].Options = make(map[string]string, len(plugin.Options))
+			for key, value := range plugin.Options {
+				out[index].Options[key] = value
+			}
+		}
+	}
 	return out
 }

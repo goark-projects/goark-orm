@@ -13,11 +13,14 @@ import (
 
 // MyBatisConfigFile 描述可提交的 ORM 运行期 JSON 配置文件。
 type MyBatisConfigFile struct {
-	Settings     MyBatisSettingsFile    `json:"settings,omitempty"`
-	Environment  MyBatisEnvironmentFile `json:"environment,omitempty"`
-	TypeAliases  []TypeAlias            `json:"typeAliases,omitempty"`
-	TypeHandlers []TypeHandlerRef       `json:"typeHandlers,omitempty"`
-	Mappers      []MapperRef            `json:"mappers,omitempty"`
+	Properties         ConfigProperties       `json:"properties,omitempty"`
+	Settings           MyBatisSettingsFile    `json:"settings,omitempty"`
+	Environment        MyBatisEnvironmentFile `json:"environment,omitempty"`
+	DatabaseIDProvider DatabaseIDProviderFile `json:"databaseIdProvider,omitempty"`
+	TypeAliases        []TypeAlias            `json:"typeAliases,omitempty"`
+	TypeHandlers       []TypeHandlerRef       `json:"typeHandlers,omitempty"`
+	Mappers            []MapperRef            `json:"mappers,omitempty"`
+	Plugins            []PluginRef            `json:"plugins,omitempty"`
 }
 
 // MyBatisSettingsFile 使用字符串承载需要解析的枚举和时间配置。
@@ -39,6 +42,13 @@ type MyBatisEnvironmentFile struct {
 	ID         string `json:"id,omitempty"`
 	DbType     string `json:"dbType,omitempty"`
 	DatabaseID string `json:"databaseId,omitempty"`
+}
+
+// DatabaseIDProviderFile 描述 JSON 中的 databaseIdProvider。
+type DatabaseIDProviderFile struct {
+	Type       string           `json:"type,omitempty"`
+	Properties ConfigProperties `json:"properties,omitempty"`
+	DefaultID  string           `json:"defaultId,omitempty"`
 }
 
 // LoadMyBatisConfig 从 JSON 文件读取运行期配置声明。
@@ -69,21 +79,36 @@ func DecodeMyBatisConfig(reader io.Reader) (MyBatisConfig, error) {
 
 // Build 将 JSON 文档模型转换为运行期声明模型。
 func (f MyBatisConfigFile) Build() (MyBatisConfig, error) {
-	settings, err := f.Settings.Build()
+	resolver, err := newConfigPropertyResolver(f.Properties)
 	if err != nil {
 		return MyBatisConfig{}, err
 	}
-	environment, err := f.Environment.Build()
+	resolved, err := f.resolveProperties(resolver)
+	if err != nil {
+		return MyBatisConfig{}, err
+	}
+	settings, err := resolved.Settings.Build()
+	if err != nil {
+		return MyBatisConfig{}, err
+	}
+	environment, err := resolved.Environment.Build()
+	if err != nil {
+		return MyBatisConfig{}, err
+	}
+	provider, err := resolved.DatabaseIDProvider.Build()
 	if err != nil {
 		return MyBatisConfig{}, err
 	}
 	config := MyBatisConfig{
-		Settings:     settings,
-		Environment:  environment,
-		TypeAliases:  append([]TypeAlias(nil), f.TypeAliases...),
-		TypeHandlers: append([]TypeHandlerRef(nil), f.TypeHandlers...),
-		Mappers:      append([]MapperRef(nil), f.Mappers...),
-		Global:       DefaultGlobalConfig(),
+		Properties:         copyConfigProperties(resolved.Properties),
+		Settings:           settings,
+		Environment:        environment,
+		DatabaseIDProvider: provider,
+		TypeAliases:        append([]TypeAlias(nil), resolved.TypeAliases...),
+		TypeHandlers:       append([]TypeHandlerRef(nil), resolved.TypeHandlers...),
+		Mappers:            append([]MapperRef(nil), resolved.Mappers...),
+		Plugins:            append([]PluginRef(nil), resolved.Plugins...),
+		Global:             DefaultGlobalConfig(),
 	}
 	if err := config.Validate(); err != nil {
 		return MyBatisConfig{}, err
@@ -141,6 +166,19 @@ func (f MyBatisEnvironmentFile) Build() (MyBatisEnvironment, error) {
 		DbType:     dbType,
 		DatabaseID: strings.TrimSpace(f.DatabaseID),
 	}, nil
+}
+
+// Build 转换 databaseIdProvider 子配置。
+func (f DatabaseIDProviderFile) Build() (DatabaseIDProvider, error) {
+	provider := DatabaseIDProvider{
+		Type:       strings.TrimSpace(f.Type),
+		Properties: copyConfigProperties(f.Properties),
+		DefaultID:  strings.TrimSpace(f.DefaultID),
+	}
+	if err := provider.validate(); err != nil {
+		return DatabaseIDProvider{}, err
+	}
+	return provider, nil
 }
 
 func parseConfigDuration(value string) (time.Duration, error) {

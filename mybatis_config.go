@@ -46,12 +46,15 @@ type MapperRef struct {
 
 // MyBatisConfig 是运行期配置声明模型。
 type MyBatisConfig struct {
-	Settings     MyBatisSettings
-	Environment  MyBatisEnvironment
-	TypeAliases  []TypeAlias
-	TypeHandlers []TypeHandlerRef
-	Mappers      []MapperRef
-	Global       GlobalConfig
+	Properties         ConfigProperties
+	Settings           MyBatisSettings
+	Environment        MyBatisEnvironment
+	DatabaseIDProvider DatabaseIDProvider
+	TypeAliases        []TypeAlias
+	TypeHandlers       []TypeHandlerRef
+	Mappers            []MapperRef
+	Plugins            []PluginRef
+	Global             GlobalConfig
 }
 
 // DefaultMyBatisConfig 返回可直接构建运行期配置的默认声明模型。
@@ -103,7 +106,11 @@ func (c MyBatisConfig) BuildConfiguration() (Configuration, error) {
 		}
 		out.Dialect = dialect
 	}
-	out.DatabaseID = firstNonBlank(c.Settings.DatabaseID, c.Environment.DatabaseID)
+	databaseID, err := c.resolvedDatabaseID()
+	if err != nil {
+		return Configuration{}, err
+	}
+	out.DatabaseID = databaseID
 	out.CacheEnabled = cloneBoolPointer(c.Settings.CacheEnabled)
 	out.LocalCacheEnabled = cloneBoolPointer(c.Settings.LocalCacheEnabled)
 	if c.Settings.LocalCacheScope != "" {
@@ -147,6 +154,12 @@ func (c MyBatisConfig) Validate() error {
 		return err
 	}
 	if _, err := c.TypeHandlerNames(); err != nil {
+		return err
+	}
+	if err := c.DatabaseIDProvider.validate(); err != nil {
+		return err
+	}
+	if err := validatePluginRefs(c.Plugins); err != nil {
 		return err
 	}
 	return validateMapperRefs(c.Mappers)
@@ -208,6 +221,14 @@ func validateMapperRefs(mappers []MapperRef) error {
 		namespaces[namespace] = struct{}{}
 	}
 	return nil
+}
+
+func (c MyBatisConfig) resolvedDatabaseID() (string, error) {
+	providerID, err := c.DatabaseIDProvider.resolve(c.Environment)
+	if err != nil {
+		return "", err
+	}
+	return firstNonBlank(c.Settings.DatabaseID, c.Environment.DatabaseID, providerID), nil
 }
 
 func cloneBoolPointer(value *bool) *bool {
