@@ -10,6 +10,7 @@ The V1 compatibility surface includes:
 
 - Module path: `goark.dev/orm`.
 - Runtime packages under `goark.dev/orm`.
+- Optional audit package: `goark.dev/orm/audit`.
 - Boot-style adapter package: `goark.dev/orm/ormboot`.
 - Generator package: `goark.dev/orm/ormgen`.
 - Test helper package: `goark.dev/orm/ormtest`.
@@ -23,7 +24,7 @@ The following exported runtime concepts are covered by the V1 compatibility poli
 
 - `Session`, `ManagedSession`, `StatementSession`, `CallSession`, `StatementCallSession`.
 - `SQLSession`, `SQLSessionFactory`, `TxSession`, `BatchSession`, `RoutingSession`, and `RoutingSessionFactory`.
-- `Configuration`, `GlobalConfig`, `DbConfig`, `MyBatisConfig`, `MyBatisConfigFile`, `MyBatisGlobalConfigFile`, `MyBatisDbConfigFile`, `MyBatisAssembly`, and `MyBatisAssemblyResult`.
+- `Configuration`, `GlobalConfig`, `DbConfig`, `MyBatisSettings`, `MyBatisConfig`, `MyBatisConfigFile`, `MyBatisGlobalConfigFile`, `MyBatisDbConfigFile`, `MyBatisAssembly`, and `MyBatisAssemblyResult`.
 - `ormboot.Config`, `ormboot.Assembler`, `ormboot.Runtime`, `ormboot.MetadataRegistrar`, `ormboot.BeanNames`, and `ormboot.BeanRegistration`.
 - `BaseMapper`, `Service`, `QueryChain`, `UpdateChain`, `QueryWrapper`, `UpdateWrapper`, `Page`, `PageRequest`, `Cursor`, `Lazy`, and `LazySlice`.
 - `SQLInjector`, `SQLInjectorFunc`, `DefaultSQLInjector`, `InjectOption`, `InjectNamespaceResolver`, `RegisterInjectedStatements`, and `RegisterDefaultInjectedStatementsForRegistry`.
@@ -31,7 +32,9 @@ The following exported runtime concepts are covered by the V1 compatibility poli
 - `TypeHandler`, `RowScanner`, `IdentifierGenerator`, `MetaObjectHandler`, and `EnumValuer`.
 - `StatementInterceptor`, `StatementHandler`, `ParameterHandler`, `ResultSetHandler`, and their middleware types.
 - `Cache`, `CacheStatsProvider`, `SQLProvider`, `SQLProviderDescriptor`, and the SQL builder types.
+- `ResultSetType`, `ParseResultSetType`, `AutoMappingBehavior`, `ParseAutoMappingBehavior`, `AutoMappingUnknownColumnBehavior`, and `ParseAutoMappingUnknownColumnBehavior`.
 - Structured error values and context types such as `ErrConfiguration`, `ErrRegistry`, `ErrBinding`, `ErrMapping`, and `ErrExecutor`.
+- Audit contracts in `goark.dev/orm/audit`: `Event`, `Operation`, `Recorder`, `RecorderFunc`, `NewMiddleware`, `Option`, `WithQueryEvents`, `WithErrorEvents`, `WithIgnoreRecorderError`, and `WithSkipFunc`.
 
 ## Metadata Contracts
 
@@ -39,6 +42,10 @@ The stable metadata model includes:
 
 - `EntityMeta`, `ColumnMeta`, `MapperMeta`, `StatementMeta`, and `StatementOptions`.
 - `ParameterMeta`, `ResultSetMeta`, `ResultMapMeta`, constructor mapping, association mapping, collection mapping, discriminator mapping, cache metadata, and dynamic SQL nodes.
+- `StatementMeta.AffectData` for select-style statements that modify data and must use write-like cache/audit defaults.
+- `StatementOptions.ResultSetType`, `StatementOptions.ResultOrdered`, and `StatementOptions.KeyColumn`.
+- `ResultAssociationMeta.ResultSet`, `ResultAssociationMeta.ForeignColumn`, `ResultCollectionMeta.ResultSet`, and `ResultCollectionMeta.ForeignColumn` for named multi-result-set nested object mapping.
+- Configuration and file settings for safe MyBatis parity: `DefaultResultSetType`, `UseColumnLabel`, `NullableOnForEach`, `ShrinkWhitespacesInSQL`, `JDBCTypeForNull`, `AutoMappingBehavior`, and `AutoMappingUnknownColumnBehavior`.
 - Statement command, source, type, cache policy, parameter mode, result set type, field strategy, field fill, and ID type enums.
 
 ## Generator Contracts
@@ -54,8 +61,10 @@ The V1 generator surface includes:
 
 `ormtest` keeps real database verification reusable without linking concrete drivers into the core module. Its stable surface includes:
 
-- `DatabaseSuiteConfig`, `DatabaseCase`, and `RunDatabaseSuiteFromEnv`.
-- `CompatibilitySuiteConfig`, `CompatibilityCase`, `NewCompatibilitySuiteConfig`, `RunCompatibilitySuiteFromEnv`, `SupportedCompatibilityDBTypes`, and `IsCompatibilityDBTypeSupported`.
+- Base suite contracts: `DatabaseSuiteConfig`, `DatabaseCase`, `EnvSuiteOption`, `WithEnvPrefix`, `WithEnvRegistry`, `WithEnvCases`, `WithEnvSessionOptions`, `RunDatabaseSuite`, `RunDatabaseSuiteFromEnv`, `LoadDatabaseSuiteConfigFromEnv`, and `ParseSQLList`.
+- Reusable cases: `PingCase`, `QueryStatementCase`, `QueryOneStatementCase`, `ExecStatementCase`, `PageStatementCase`, and `CallStatementCase`.
+- Standard compatibility matrix contracts: `DefaultCompatibilityTable`, `CompatibilityRecord`, `CompatibilityProfile`, `CompatibilitySuiteOption`, `WithCompatibilityTable`, `WithCompatibilityNamespace`, `WithCompatibilityEnvPrefix`, `NewCompatibilitySuiteConfig`, `RunCompatibilitySuiteFromEnv`, `SupportedCompatibilityDBTypes`, and `IsCompatibilityDBTypeSupported`.
+- `NewCompatibilitySuiteConfig` returns `DatabaseSuiteConfig`; compatibility cases are ordinary `DatabaseCase` values.
 - Environment parsing helpers and SQL list parsing behavior documented in [database-matrix.md](database-matrix.md).
 
 ## Evolution Rules
@@ -72,6 +81,7 @@ The V1 generator surface includes:
 The repository keeps external-package API contract tests:
 
 - `api_contract_external_test.go` covers runtime APIs.
+- `audit/middleware_test.go` covers the optional audit middleware API and behavior.
 - `ormgen/api_contract_external_test.go` covers generator APIs.
 - `ormtest/api_contract_external_test.go` covers real database test helper APIs.
 

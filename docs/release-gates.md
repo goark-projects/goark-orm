@@ -41,8 +41,12 @@ The threshold file is [../scripts/benchmark-thresholds.json](../scripts/benchmar
 powershell -ExecutionPolicy Bypass -File scripts/verify-bench.ps1 -EnforceTime
 ```
 
+The current threshold set includes explicit allocation budgets for dynamic SQL rendering and SQLSession scan paths, including generated row scanners and TypeHandler-backed result mapping.
+
 ## Real Database Verification
 
-Real database verification is not part of the default gate. Use `scripts/verify-real-db.ps1` to create a temporary driver harness and run the PostgreSQL/MySQL compatibility matrix without importing concrete drivers into core packages.
+Real database verification is not part of the default gate. Use `scripts/verify-real-db.ps1` to create a temporary driver harness and run the PostgreSQL, MySQL, MariaDB, and SQLite compatibility matrix without importing concrete drivers into core packages.
+
+PostgreSQL and MySQL are part of the standard local matrix when their DSNs are configured. MariaDB uses the MySQL-compatible driver path by default. SQLite is optional and requires both `GOARK_ORM_SQLITE_DSN` and `GOARK_ORM_SQLITE_IMPORT`; its standard suite skips callable statements because Go `database/sql` SQLite drivers do not expose a portable stored-procedure model.
 
 The standard matrix and environment variables are documented in [database-matrix.md](database-matrix.md).

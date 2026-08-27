@@ -28,18 +28,18 @@ module goark.dev/orm
 - 生成元数据注册、实体 RowScanner、Mapper 实现、类型化字段常量、`BaseMapper` 工厂和 `Service` 工厂。
 - XML 动态 SQL：`sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`。
 - 安全表达式执行，覆盖布尔逻辑、比较、算术、三元表达式、集合判断、`empty`、`in/not in` 和白名单只读方法。
-- PostgreSQL 和 MySQL 是当前真实支持数据库；MariaDB、SQLite、SQL Server、Oracle 和问号占位符仅保留 SQL 生成方言能力。
-- Statement 级 timeout、fetch size、result set type、result ordered、key column、缓存策略和拦截器忽略配置。
+- PostgreSQL、MySQL、MariaDB 和 SQLite 是当前标准真实数据库目标；SQL Server、Oracle 和问号占位符仍只承诺 SQL 生成方言能力。
+- Statement 级 timeout、fetch size、result set type、result ordered、key column、`affectData` select、缓存策略和拦截器忽略配置。
 - Callable statement，支持 IN、OUT、INOUT 参数、`sql.Out` 绑定和多结果集扫描。
-- ResultMap constructor、association、collection、discriminator、nested select、显式 Lazy、column prefix 和 not-null guard。
+- ResultMap constructor、association、collection、discriminator、nested select、命名 resultSets 嵌套对象映射、显式 Lazy、column prefix 和 not-null guard。
 - Registry / Session 级 TypeHandler，内置 JSON、time、decimal、string、bool、bytes 处理器。
 - `BaseMapper`、`Service`、`QueryWrapper`、`UpdateWrapper`、类型化字段、分页、批处理、逻辑删除、乐观锁、主键生成和自动填充。
 - SQL Provider 描述注册和 select/insert/update/delete SQL Builder。
-- SQLSession middleware 与拦截器，覆盖执行链路、分页、租户、数据权限、动态表、SQL 观察、全表写保护、非法 SQL、只读会话和自定义治理规则。
+- SQLSession middleware 与拦截器，覆盖执行链路、可选审计记录、分页、租户、数据权限、动态表、SQL 观察、全表写保护、非法 SQL、只读会话和自定义治理规则。
 - 一级缓存、namespace 二级缓存、LRU、并发 miss 合并、缓存统计和事务提交后发布语义。
 - 多数据源路由 Session 和路由工厂。
 - `ormgen` schema 读取、反向工程、模板渲染、schema drift 和 schema compatibility helper。
-- `ormtest` 真实数据库套件，覆盖 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler、UPSERT、生成主键回读、行锁和 callable。
+- `ormtest` 真实数据库套件，覆盖 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler、UPSERT、生成主键回读、行锁，以及数据库和驱动支持的 callable。
 
 ## 快速开始
 
@@ -159,11 +159,14 @@ CLI 配置只负责源码扫描和文件输出，不连接数据库，也不生�
 config := orm.DefaultConfiguration().
 	WithLocalCache(true).
 	WithSecondLevelCache(true).
-	WithMapUnderscoreToCamelCase(true)
+	WithMapUnderscoreToCamelCase(true).
+	WithDefaultResultSetType(orm.ResultSetTypeForwardOnly).
+	WithNullableOnForEach(true)
 
 config.Dialect = orm.NewPostgresDialect()
 config.LocalCacheScope = orm.LocalCacheScopeSession
 config.DefaultExecutorType = orm.ExecutorTypeReuse
+config.ShrinkWhitespacesInSQL = true
 config.GlobalConfig.DbConfig.IDType = orm.IDTypeAssignID
 config.GlobalConfig.DbConfig.TablePrefix = "sys_"
 config.GlobalConfig.DbConfig.InsertStrategy = orm.FieldStrategyNotEmpty
@@ -173,6 +176,30 @@ session, err := orm.NewSQLSession(registry, db, nil, orm.WithConfiguration(confi
 if err != nil {
 	return err
 }
+```
+
+## 审计中间件
+
+`goark.dev/orm/audit` 提供可选的 `StatementExecutorMiddleware`。默认记录写语句和 `affectData` 查询；普通读查询事件需要显式开启。
+
+```go
+recorder := audit.RecorderFunc(func(ctx context.Context, event audit.Event) error {
+	if !event.Success() {
+		return logAuditFailure(ctx, event)
+	}
+	return writeAuditEvent(ctx, event)
+})
+
+session, err := orm.NewSQLSession(
+	registry,
+	db,
+	orm.NewPostgresDialect(),
+	orm.WithStatementExecutorMiddleware(audit.NewMiddleware(recorder)),
+)
+if err != nil {
+	return err
+}
+_ = session
 ```
 
 JSON 配置解码是严格模式，并使用内部 Sonic JSON codec。`LoadAndAssembleMyBatisConfig` 可以一站式读取配置并装配运行期对象：
@@ -296,7 +323,7 @@ _ = report.Source
 
 ## 真实数据库兼容性
 
-真实库套件只有在调用方提供驱动和 DSN 后才执行。标准套件当前只支持 PostgreSQL 和 MySQL。调用方测试工程可以使用 `ormtest.SupportedCompatibilityDBTypes()` 或 `ormtest.IsCompatibilityDBTypeSupported(dbType)` 判断当前支持边界：
+真实库套件只有在调用方提供驱动和 DSN 后才执行。标准套件当前支持 PostgreSQL、MySQL、MariaDB 和 SQLite。调用方测试工程可以使用 `ormtest.SupportedCompatibilityDBTypes()` 或 `ormtest.IsCompatibilityDBTypeSupported(dbType)` 判断当前支持边界：
 
 ```go
 package user_test
@@ -320,13 +347,15 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-标准 PostgreSQL/MySQL 兼容矩阵已经包含 callable statement 覆盖，详见 [docs/database-matrix.md](docs/database-matrix.md)。
+PostgreSQL、MySQL 和 MariaDB 兼容矩阵已经包含 callable statement 覆盖。SQLite 覆盖相同的 CRUD、分页、批处理、TypeHandler、UPSERT 和生成主键回读路径，但跳过 callable。详见 [docs/database-matrix.md](docs/database-matrix.md)。
 
 ## 本地验证
 
 ```bash
 GOWORK=off go test -count=1 ./...
 GOWORK=off go vet ./...
+powershell -ExecutionPolicy Bypass -File scripts/verify-bench.ps1 -EnforceTime
+powershell -ExecutionPolicy Bypass -File scripts/verify-real-db.ps1
 git diff --check
 ```
 

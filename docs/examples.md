@@ -92,6 +92,35 @@ type UserMapper interface {
 </mapper>
 ```
 
+Use `affectData="true"` for select-style statements that modify data, such as database-specific `RETURNING` workflows. The runtime treats them as data-affecting statements for cache flushing and audit middleware defaults.
+
+```xml
+<select id="ArchiveReturning" resultMap="UserResult" affectData="true" flushCache="true" useCache="false">
+  update sys_user
+  set status = 'ARCHIVED'
+  where id = #{id}
+  returning id, name, status
+</select>
+```
+
+Named `resultSets` can map nested objects without Java-style runtime proxies:
+
+```xml
+<resultMap id="UserWithRoles" type="User">
+  <id property="ID" column="id"/>
+  <result property="Name" column="name"/>
+  <collection property="Roles" ofType="Role" resultSet="roles" column="id" foreignColumn="user_id">
+    <id property="ID" column="id"/>
+    <result property="Name" column="name"/>
+  </collection>
+</resultMap>
+
+<select id="FindWithRoles" resultMap="UserWithRoles" resultSets="users,roles">
+  select id, name from sys_user where id = #{id};
+  select id, user_id, name from sys_role where user_id = #{id};
+</select>
+```
+
 ## BaseMapper And Service
 
 Generated single-primary-key entities receive `New<Entity>BaseMapper` and `New<Entity>Service` factories.
@@ -310,6 +339,27 @@ mapper := NewUserMapper(routing)
 _ = mapper
 ```
 
+## Audit Middleware
+
+The audit package is optional and lives outside the root package. It records write operations and `affectData` selects by default.
+
+```go
+recorder := audit.RecorderFunc(func(ctx context.Context, event audit.Event) error {
+	return writeAuditEvent(ctx, event)
+})
+
+session, err := orm.NewSQLSession(
+	registry,
+	db,
+	orm.NewPostgresDialect(),
+	orm.WithStatementExecutorMiddleware(audit.NewMiddleware(recorder, audit.WithQueryEvents(false))),
+)
+if err != nil {
+	return err
+}
+_ = session
+```
+
 ## Runtime JSON Configuration
 
 ```json
@@ -320,6 +370,12 @@ _ = mapper
     "mapUnderscoreToCamelCase": true,
     "defaultExecutorType": "REUSE",
     "defaultStatementTimeout": "2s",
+    "defaultResultSetType": "FORWARD_ONLY",
+    "nullableOnForEach": true,
+    "shrinkWhitespacesInSql": true,
+    "jdbcTypeForNull": "OTHER",
+    "autoMappingBehavior": "FULL",
+    "autoMappingUnknownColumnBehavior": "NONE",
     "databaseId": "postgres"
   },
   "environment": {
@@ -393,7 +449,7 @@ _ = report.Source
 
 ## Real Database Test Harness
 
-Keep driver imports and credentials in the caller's test harness. The standard reusable suite currently supports PostgreSQL and MySQL only:
+Keep driver imports and credentials in the caller's test harness. The standard reusable suite currently supports PostgreSQL, MySQL, MariaDB, and SQLite:
 
 ```go
 package user_test
@@ -416,3 +472,5 @@ GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=dis
 GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
+
+Use `scripts/verify-real-db.ps1` for the local matrix. PostgreSQL and MySQL drivers are imported only in the temporary harness; SQLite additionally requires `GOARK_ORM_SQLITE_IMPORT` when `GOARK_ORM_SQLITE_DSN` is set.

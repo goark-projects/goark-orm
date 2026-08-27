@@ -92,6 +92,35 @@ type UserMapper interface {
 </mapper>
 ```
 
+对会修改数据的 select 风格语句使用 `affectData="true"`，例如数据库特定的 `RETURNING` 工作流。运行期会按数据变更语句处理缓存刷新和审计中间件默认记录。
+
+```xml
+<select id="ArchiveReturning" resultMap="UserResult" affectData="true" flushCache="true" useCache="false">
+  update sys_user
+  set status = 'ARCHIVED'
+  where id = #{id}
+  returning id, name, status
+</select>
+```
+
+命名 `resultSets` 可以把多个结果集映射为嵌套对象，不需要 Java 风格运行期代理：
+
+```xml
+<resultMap id="UserWithRoles" type="User">
+  <id property="ID" column="id"/>
+  <result property="Name" column="name"/>
+  <collection property="Roles" ofType="Role" resultSet="roles" column="id" foreignColumn="user_id">
+    <id property="ID" column="id"/>
+    <result property="Name" column="name"/>
+  </collection>
+</resultMap>
+
+<select id="FindWithRoles" resultMap="UserWithRoles" resultSets="users,roles">
+  select id, name from sys_user where id = #{id};
+  select id, user_id, name from sys_role where user_id = #{id};
+</select>
+```
+
 ## BaseMapper 与 Service
 
 单主键实体生成 `New<Entity>BaseMapper` 和 `New<Entity>Service` 工厂。
@@ -310,6 +339,27 @@ mapper := NewUserMapper(routing)
 _ = mapper
 ```
 
+## 审计中间件
+
+审计包是可选子包，不进入根包。默认记录写操作和 `affectData` 查询。
+
+```go
+recorder := audit.RecorderFunc(func(ctx context.Context, event audit.Event) error {
+	return writeAuditEvent(ctx, event)
+})
+
+session, err := orm.NewSQLSession(
+	registry,
+	db,
+	orm.NewPostgresDialect(),
+	orm.WithStatementExecutorMiddleware(audit.NewMiddleware(recorder, audit.WithQueryEvents(false))),
+)
+if err != nil {
+	return err
+}
+_ = session
+```
+
 ## 运行期 JSON 配置
 
 ```json
@@ -320,6 +370,12 @@ _ = mapper
     "mapUnderscoreToCamelCase": true,
     "defaultExecutorType": "REUSE",
     "defaultStatementTimeout": "2s",
+    "defaultResultSetType": "FORWARD_ONLY",
+    "nullableOnForEach": true,
+    "shrinkWhitespacesInSql": true,
+    "jdbcTypeForNull": "OTHER",
+    "autoMappingBehavior": "FULL",
+    "autoMappingUnknownColumnBehavior": "NONE",
     "databaseId": "postgres"
   },
   "environment": {
@@ -393,7 +449,7 @@ _ = report.Source
 
 ## 真实数据库测试 Harness
 
-驱动导入和凭据保留在调用方测试包。标准复用套件当前只支持 PostgreSQL 和 MySQL：
+驱动导入和凭据保留在调用方测试包。标准复用套件当前支持 PostgreSQL、MySQL、MariaDB 和 SQLite：
 
 ```go
 package user_test
@@ -416,3 +472,5 @@ GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=dis
 GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
+
+本地矩阵可以使用 `scripts/verify-real-db.ps1`。PostgreSQL 和 MySQL 驱动只在临时 harness 中导入；设置 `GOARK_ORM_SQLITE_DSN` 时还需要同时设置 `GOARK_ORM_SQLITE_IMPORT`。
