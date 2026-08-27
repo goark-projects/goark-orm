@@ -193,6 +193,32 @@ defer session.Close()
 _ = session
 ```
 
+## Goark Boot 风格装配
+
+`goark.dev/orm/ormboot` 提供一个很小的 Goark 风格启动适配边界，但不会把 Goark 核心包导入 ORM 运行时。应用传入 `*sql.DB`、MyBatis 风格运行期配置和生成器元数据注册函数，再把返回的 Bean 实例注册到自己的容器中：
+
+```go
+assembler, err := ormboot.New(ormboot.Config{
+	DB:            db,
+	MyBatisConfig: config,
+	MetadataRegistrars: []ormboot.MetadataRegistrar{
+		RegisterGoarkORMMetadata,
+	},
+})
+if err != nil {
+	return err
+}
+runtime, err := assembler.Assemble(ctx)
+if err != nil {
+	return err
+}
+defer runtime.Close()
+factory := runtime.SessionFactory()
+_ = factory
+```
+
+适配器只管理自己创建的 ORM Session。驱动导入、`*sql.DB` 生命周期和真实事务管理器集成仍由调用方负责。
+
 ## Provider SQL
 
 Provider 必须显式注册，可以组合 SQL Builder：

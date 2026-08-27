@@ -193,6 +193,32 @@ defer session.Close()
 _ = session
 ```
 
+## Goark Boot-Style Assembly
+
+`goark.dev/orm/ormboot` provides a small adapter boundary for Goark-style application bootstrapping without importing Goark core packages into the ORM runtime. Applications pass a `*sql.DB`, MyBatis-style runtime config, and generated metadata registrars, then register the returned bean instances in their own container:
+
+```go
+assembler, err := ormboot.New(ormboot.Config{
+	DB:            db,
+	MyBatisConfig: config,
+	MetadataRegistrars: []ormboot.MetadataRegistrar{
+		RegisterGoarkORMMetadata,
+	},
+})
+if err != nil {
+	return err
+}
+runtime, err := assembler.Assemble(ctx)
+if err != nil {
+	return err
+}
+defer runtime.Close()
+factory := runtime.SessionFactory()
+_ = factory
+```
+
+The adapter owns only ORM sessions it creates. The caller still owns driver imports, `*sql.DB` lifecycle, and real transaction manager integration.
+
 ## Provider SQL
 
 Providers are registered explicitly and can use the SQL builder:

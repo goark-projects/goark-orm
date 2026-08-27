@@ -10,6 +10,7 @@ The V1 compatibility surface includes:
 
 - Module path: `goark.dev/orm`.
 - Runtime packages under `goark.dev/orm`.
+- Boot-style adapter package: `goark.dev/orm/ormboot`.
 - Generator package: `goark.dev/orm/ormgen`.
 - Test helper package: `goark.dev/orm/ormtest`.
 - CLI entrypoint: `goark-orm generate orm`.
@@ -23,6 +24,7 @@ The following exported runtime concepts are covered by the V1 compatibility poli
 - `Session`, `ManagedSession`, `StatementSession`, `CallSession`, `StatementCallSession`.
 - `SQLSession`, `SQLSessionFactory`, `TxSession`, `BatchSession`, `RoutingSession`, and `RoutingSessionFactory`.
 - `Configuration`, `GlobalConfig`, `DbConfig`, `MyBatisConfig`, `MyBatisConfigFile`, `MyBatisGlobalConfigFile`, `MyBatisDbConfigFile`, `MyBatisAssembly`, and `MyBatisAssemblyResult`.
+- `ormboot.Config`, `ormboot.Assembler`, `ormboot.Runtime`, `ormboot.MetadataRegistrar`, `ormboot.BeanNames`, and `ormboot.BeanRegistration`.
 - `BaseMapper`, `Service`, `QueryChain`, `UpdateChain`, `QueryWrapper`, `UpdateWrapper`, `Page`, `PageRequest`, `Cursor`, `Lazy`, and `LazySlice`.
 - `SQLInjector`, `SQLInjectorFunc`, `DefaultSQLInjector`, `InjectOption`, `InjectNamespaceResolver`, `RegisterInjectedStatements`, and `RegisterDefaultInjectedStatementsForRegistry`.
 - `Dialect`, `DialectCapabilities`, `DbType`, `UpsertSpec`, `RowLockOptions`, and `GeneratedKeyPlan`.
