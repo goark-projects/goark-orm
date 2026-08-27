@@ -33,6 +33,11 @@ func ScanPackage(spec GenerateSpec) (*PackageModel, error) {
 	if spec.Dir == "" {
 		spec.Dir = "."
 	}
+	naming, err := normalizeNamingConfig(spec.Naming)
+	if err != nil {
+		return nil, fmt.Errorf("goark-orm: naming %w", err)
+	}
+	spec.Naming = naming
 	fset := token.NewFileSet()
 	packages, err := parser.ParseDir(fset, spec.Dir, func(info os.FileInfo) bool {
 		name := info.Name()
@@ -160,6 +165,9 @@ func buildEntity(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 	entityAnnotation, _ := findAnnotation(annotations, "entity")
 	table := strings.TrimSpace(entityAnnotation.Args["table"])
 	if table == "" {
+		table = deriveTableName(typeSpec.Name.Name, spec.Naming)
+	}
+	if table == "" {
 		return EntityModel{}, fmt.Errorf("goark-orm: entity %s missing required table", typeSpec.Name.Name)
 	}
 	structType, ok := typeSpec.Type.(*ast.StructType)
@@ -167,8 +175,9 @@ func buildEntity(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 		return EntityModel{}, fmt.Errorf("goark-orm: entity %s requires struct type", typeSpec.Name.Name)
 	}
 	entity := EntityModel{
-		TypeName: typeSpec.Name.Name,
-		Table:    table,
+		TypeName:    typeSpec.Name.Name,
+		Table:       table,
+		KeySequence: firstAnnotationValue(entityAnnotation.Args, "keySequence", "key-sequence"),
 	}
 	for _, field := range structType.Fields.List {
 		if len(field.Names) == 0 {
@@ -189,7 +198,7 @@ func buildEntity(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 			}
 		}
 		for _, name := range field.Names {
-			column, err := buildColumn(entity.TypeName, name.Name, exprString(fset, field.Type), tag)
+			column, err := buildColumn(entity.TypeName, name.Name, exprString(fset, field.Type), tag, spec.Naming)
 			if err != nil {
 				return EntityModel{}, err
 			}
@@ -204,7 +213,7 @@ func buildEntity(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 	return entity, nil
 }
 
-func buildColumn(entityName string, fieldName string, fieldType string, tag fieldTag) (ColumnModel, error) {
+func buildColumn(entityName string, fieldName string, fieldType string, tag fieldTag, naming NamingConfig) (ColumnModel, error) {
 	column := ColumnModel{FieldName: fieldName, FieldType: fieldType}
 	if transient, _, err := tagBool(tag, "transient"); err != nil {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
@@ -216,6 +225,9 @@ func buildColumn(entityName string, fieldName string, fieldType string, tag fiel
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
 	} else if ok {
 		column.ColumnName = value
+	}
+	if column.ColumnName == "" {
+		column.ColumnName = deriveColumnName(fieldName, naming)
 	}
 	if column.ColumnName == "" {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s missing column", entityName, fieldName)
@@ -268,10 +280,33 @@ func buildColumn(entityName string, fieldName string, fieldType string, tag fiel
 	} else if ok {
 		column.Nullable = &value
 	}
+	if value, ok, err := tagString(tag, "update"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else if ok {
+		column.UpdateExpression = value
+	}
+	if value, ok, err := tagString(tag, "update-expression"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else if ok {
+		if column.UpdateExpression != "" {
+			return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s declares both update and update-expression", entityName, fieldName)
+		}
+		column.UpdateExpression = value
+	}
 	if value, ok, err := tagBool(tag, "select"); err != nil {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
 	} else if ok {
 		column.SelectDisabled = !value
+	}
+	if value, _, err := tagBool(tag, "order-by"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else {
+		column.OrderBy = value
+	}
+	if value, _, err := tagBool(tag, "order-desc"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else {
+		column.OrderDesc = value
 	}
 	if value, ok, err := tagInt(tag, "size"); err != nil {
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
@@ -282,6 +317,11 @@ func buildColumn(entityName string, fieldName string, fieldType string, tag fiel
 		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
 	} else if ok {
 		column.NumericScale = &value
+	}
+	if value, ok, err := tagInt(tag, "order-priority"); err != nil {
+		return ColumnModel{}, fmt.Errorf("goark-orm: field %s.%s %w", entityName, fieldName, err)
+	} else if ok {
+		column.OrderPriority = value
 	}
 	stringAttrs := map[string]*string{
 		"type":         &column.DBType,

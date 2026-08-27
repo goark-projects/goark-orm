@@ -14,11 +14,13 @@ func TestGenerateConfig_Resolve_whenPackagesProvided_shouldApplyDefaultsAndResol
 	if err := os.WriteFile(configPath, []byte(`{
   "databaseId": "postgres",
   "typeHandlers": ["json"],
+  "naming": {"table": "snake_case", "column": "snake_case"},
   "packages": [
     {
       "dir": "internal/user",
       "output": "internal/user/zz_goark_orm_user_gen.go",
-      "typeHandlers": ["decimal", "json"]
+      "typeHandlers": ["decimal", "json"],
+      "naming": {"tablePrefix": "sys_"}
     }
   ]
 }`), 0o644); err != nil {
@@ -49,6 +51,9 @@ func TestGenerateConfig_Resolve_whenPackagesProvided_shouldApplyDefaultsAndResol
 	}
 	if !reflect.DeepEqual(item.Spec.TypeHandlers, []string{"json", "decimal"}) {
 		t.Fatalf("unexpected type handlers %#v", item.Spec.TypeHandlers)
+	}
+	if item.Spec.Naming.Table != NamingStrategySnakeCase || item.Spec.Naming.Column != NamingStrategySnakeCase || item.Spec.Naming.TablePrefix != "sys_" {
+		t.Fatalf("unexpected naming config %#v", item.Spec.Naming)
 	}
 }
 

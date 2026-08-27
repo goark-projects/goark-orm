@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,6 +29,13 @@ type baseMapperFillUser struct {
 	Name      string
 	CreatedBy string
 	UpdatedBy string
+}
+
+type baseMapperMetricUser struct {
+	ID         int64
+	Name       string
+	LoginCount int64
+	CreatedAt  time.Time
 }
 
 var (
@@ -317,6 +325,59 @@ func TestBaseMapper_SelectList_whenWrapperSelectProvided_shouldUseProjection(t *
 	}
 	if state.query != `SELECT "name", "status" FROM "sys_user" WHERE "status" = $1` {
 		t.Fatalf("unexpected query %q", state.query)
+	}
+}
+
+func TestBaseMapper_SelectList_whenDefaultOrderDeclared_shouldApplyMetadataOrder(t *testing.T) {
+	state := openTestSQLState(t)
+	createdAt := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name", "login_count", "created_at"},
+		values:  [][]driver.Value{{int64(7), "Alice", int64(3), createdAt}},
+	}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperMetricUser, int64](session, baseMapperMetricUserEntity(""))
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	records, err := mapper.SelectList(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("select list failed: %v", err)
+	}
+
+	if len(records) != 1 || records[0].ID != 7 {
+		t.Fatalf("unexpected records %#v", records)
+	}
+	expected := `SELECT "id", "name", "login_count", "created_at" FROM "sys_metric_user" ORDER BY "created_at" ASC, "id" DESC`
+	if state.query != expected {
+		t.Fatalf("unexpected default order SQL %q", state.query)
+	}
+}
+
+func TestBaseMapper_SelectList_whenWrapperOrderDeclared_shouldOverrideDefaultOrder(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{columns: []string{"id", "name", "login_count", "created_at"}}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperMetricUser, int64](session, baseMapperMetricUserEntity(""))
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	_, err = mapper.SelectList(context.Background(), NewQueryWrapper[baseMapperMetricUser]().OrderByDesc(NewField[baseMapperMetricUser]("name")))
+	if err != nil {
+		t.Fatalf("select list failed: %v", err)
+	}
+
+	expected := `SELECT "id", "name", "login_count", "created_at" FROM "sys_metric_user" ORDER BY "name" DESC`
+	if state.query != expected {
+		t.Fatalf("unexpected explicit order SQL %q", state.query)
 	}
 }
 
@@ -933,6 +994,91 @@ func TestBaseMapper_SaveOrUpdate_whenPrimaryKeyPresent_shouldUpdateByID(t *testi
 	}
 }
 
+func TestBaseMapper_Insert_whenKeySequenceOnPostgres_shouldAssignIDBeforeInsert(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"nextval"},
+		values:  [][]driver.Value{{int64(9001)}},
+	}
+	state.execResult = testResult{rowsAffected: 1}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperMetricUser, int64](session, baseMapperMetricUserEntity("sys_metric_user_id_seq"))
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+	user := &baseMapperMetricUser{Name: "Alice", LoginCount: 3}
+
+	result, err := mapper.Insert(context.Background(), user)
+	if err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+
+	if user.ID != 9001 || result.RowsAffected != 1 {
+		t.Fatalf("unexpected insert result user=%#v result=%#v", user, result)
+	}
+	if state.query != `SELECT nextval($1::regclass)` {
+		t.Fatalf("unexpected sequence SQL %q", state.query)
+	}
+	expectedExec := `INSERT INTO "sys_metric_user" ("id", "name", "login_count", "created_at") VALUES ($1, $2, $3, $4)`
+	if state.exec != expectedExec {
+		t.Fatalf("unexpected insert SQL %q", state.exec)
+	}
+	expectedArgs := []driver.NamedValue{{Ordinal: 1, Value: int64(9001)}, {Ordinal: 2, Value: "Alice"}, {Ordinal: 3, Value: int64(3)}, {Ordinal: 4, Value: time.Time{}}}
+	if !reflect.DeepEqual(state.execArgs, expectedArgs) {
+		t.Fatalf("unexpected insert args %#v", state.execArgs)
+	}
+}
+
+func TestBaseMapper_Insert_whenKeySequenceOnMySQL_shouldRejectBeforeInsert(t *testing.T) {
+	state := openTestSQLState(t)
+	session, err := NewSQLSession(NewRegistry(), state.db, NewMySQLDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperMetricUser, int64](session, baseMapperMetricUserEntity("sys_metric_user_id_seq"))
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	_, err = mapper.Insert(context.Background(), &baseMapperMetricUser{Name: "Alice"})
+
+	if err == nil || !strings.Contains(err.Error(), "does not support key sequence") {
+		t.Fatalf("expected key sequence error, got %v", err)
+	}
+	if state.exec != "" {
+		t.Fatalf("insert should not execute SQL, got %q", state.exec)
+	}
+}
+
+func TestBaseMapper_UpdateByID_whenUpdateExpressionDeclared_shouldUseExpression(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperMetricUser, int64](session, baseMapperMetricUserEntity(""))
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	rows, err := mapper.UpdateByID(context.Background(), &baseMapperMetricUser{ID: 7, Name: "Alice", LoginCount: 1})
+	if err != nil {
+		t.Fatalf("update by id failed: %v", err)
+	}
+
+	if rows != 1 {
+		t.Fatalf("unexpected rows affected %d", rows)
+	}
+	expected := `UPDATE "sys_metric_user" SET "name" = $1, "login_count" = "login_count" + 1, "created_at" = $2 WHERE "id" = $3`
+	if state.exec != expected {
+		t.Fatalf("unexpected update SQL %q", state.exec)
+	}
+}
+
 func TestBaseMapper_DeleteByID_whenPrimaryKeyProvided_shouldDeleteOneRecord(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResult = testResult{rowsAffected: 1}
@@ -1071,6 +1217,20 @@ func baseMapperFillUserEntity() EntityMeta {
 			{FieldName: "Name", FieldType: "string", ColumnName: "name"},
 			{FieldName: "CreatedBy", FieldType: "string", ColumnName: "created_by", Fill: FieldFillInsert},
 			{FieldName: "UpdatedBy", FieldType: "string", ColumnName: "updated_by", Fill: FieldFillInsertUpdate},
+		},
+	}
+}
+
+func baseMapperMetricUserEntity(sequence string) EntityMeta {
+	return EntityMeta{
+		TypeName:    "baseMapperMetricUser",
+		Table:       "sys_metric_user",
+		KeySequence: sequence,
+		Columns: []ColumnMeta{
+			{FieldName: "ID", FieldType: "int64", ColumnName: "id", PrimaryKey: true, IDType: IDTypeInput, OrderBy: true, OrderDesc: true, OrderPriority: 2},
+			{FieldName: "Name", FieldType: "string", ColumnName: "name"},
+			{FieldName: "LoginCount", FieldType: "int64", ColumnName: "login_count", UpdateExpression: "{column} + 1"},
+			{FieldName: "CreatedAt", FieldType: "time.Time", ColumnName: "created_at", OrderBy: true, OrderPriority: 1},
 		},
 	}
 }

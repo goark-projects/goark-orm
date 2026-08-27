@@ -103,36 +103,41 @@ const (
 
 // ColumnMeta 描述实体字段与数据库列的静态映射。
 type ColumnMeta struct {
-	FieldName      string
-	FieldType      string
-	ColumnName     string
-	KeyColumn      string
-	PrimaryKey     bool
-	AutoIncrement  bool
-	IDType         IDType
-	Nullable       *bool
-	Size           *int
-	NumericScale   *int
-	DBType         string
-	DefaultValue   string
-	TypeHandler    string
-	Condition      string
-	SelectDisabled bool
-	InsertStrategy FieldStrategy
-	UpdateStrategy FieldStrategy
-	WhereStrategy  FieldStrategy
-	Version        bool
-	SoftDelete     bool
-	CreatedAt      bool
-	UpdatedAt      bool
-	Fill           FieldFill
+	FieldName        string
+	FieldType        string
+	ColumnName       string
+	KeyColumn        string
+	UpdateExpression string
+	PrimaryKey       bool
+	AutoIncrement    bool
+	IDType           IDType
+	Nullable         *bool
+	Size             *int
+	NumericScale     *int
+	DBType           string
+	DefaultValue     string
+	TypeHandler      string
+	Condition        string
+	SelectDisabled   bool
+	InsertStrategy   FieldStrategy
+	UpdateStrategy   FieldStrategy
+	WhereStrategy    FieldStrategy
+	OrderBy          bool
+	OrderDesc        bool
+	OrderPriority    int
+	Version          bool
+	SoftDelete       bool
+	CreatedAt        bool
+	UpdatedAt        bool
+	Fill             FieldFill
 }
 
 // EntityMeta 描述一个实体类型的 ORM 映射。
 type EntityMeta struct {
-	TypeName string
-	Table    string
-	Columns  []ColumnMeta
+	TypeName    string
+	Table       string
+	KeySequence string
+	Columns     []ColumnMeta
 }
 
 // ResultFieldMeta 描述 XML resultMap 中的一项结果映射。

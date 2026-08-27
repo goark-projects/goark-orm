@@ -116,6 +116,10 @@ func (postgresDialect) LimitOffsetSQL(query string, limitPlaceholder string, off
 	return query + " LIMIT " + limitPlaceholder + " OFFSET " + offsetPlaceholder
 }
 
+func (postgresDialect) SequenceNextValueSQL(sequencePlaceholder string) (string, bool) {
+	return "SELECT nextval(" + sequencePlaceholder + "::regclass)", true
+}
+
 type mysqlDialect struct {
 	name string
 }

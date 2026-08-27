@@ -174,3 +174,12 @@ func mergeAnnotations(left []annotation, right []annotation) []annotation {
 	out = append(out, right...)
 	return out
 }
+
+func firstAnnotationValue(args map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(args[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}

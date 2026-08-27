@@ -10,6 +10,7 @@ import (
 
 const (
 	baseMapperPrimaryKeyArg       = "__goark_orm_pk"
+	baseMapperSequenceArg         = "__goark_orm_sequence"
 	baseMapperVersionOldArg       = "__goark_orm_version_old"
 	baseMapperSoftDeleteLiveArg   = "__goark_orm_soft_delete_live"
 	baseMapperSoftDeleteDeleteArg = "__goark_orm_soft_delete_deleted"
@@ -36,6 +37,10 @@ type metaObjectHandlerProvider interface {
 
 type globalConfigProvider interface {
 	GlobalConfig() GlobalConfig
+}
+
+type sequenceDialect interface {
+	SequenceNextValueSQL(sequencePlaceholder string) (string, bool)
 }
 
 type baseMapperOptions struct {
@@ -420,7 +425,8 @@ func (m *BaseMapper[T, ID]) Insert(ctx context.Context, entity *T) (Result, erro
 
 func (m *BaseMapper[T, ID]) assignInsertID(ctx context.Context, entity reflect.Value) error {
 	idType := m.effectiveColumnIDType(m.primary)
-	if idType != IDTypeAssignID && idType != IDTypeAssignUUID {
+	sequence := strings.TrimSpace(m.entity.KeySequence)
+	if idType != IDTypeAssignID && idType != IDTypeAssignUUID && !(idType == IDTypeInput && sequence != "") {
 		return nil
 	}
 	field := entity.FieldByName(m.primary.FieldName)
@@ -432,6 +438,13 @@ func (m *BaseMapper[T, ID]) assignInsertID(ctx context.Context, entity reflect.V
 	}
 	if !field.IsZero() {
 		return nil
+	}
+	if sequence != "" {
+		id, err := m.nextSequenceID(ctx, sequence)
+		if err != nil {
+			return err
+		}
+		return setReflectField(field, id)
 	}
 	if m.identifierGenerator == nil {
 		return fmt.Errorf("goark-orm: identifier generator is nil")
@@ -452,6 +465,25 @@ func (m *BaseMapper[T, ID]) assignInsertID(ctx context.Context, entity reflect.V
 	default:
 		return nil
 	}
+}
+
+func (m *BaseMapper[T, ID]) nextSequenceID(ctx context.Context, sequence string) (any, error) {
+	dialect, ok := m.dialect.(sequenceDialect)
+	if !ok {
+		return nil, fmt.Errorf("goark-orm: dialect %s does not support key sequence", m.dialect.Name())
+	}
+	sequenceSQL, ok := dialect.SequenceNextValueSQL("#{" + baseMapperSequenceArg + "}")
+	if !ok {
+		return nil, fmt.Errorf("goark-orm: dialect %s does not support key sequence", m.dialect.Name())
+	}
+	statement := m.statement("SelectKeySequence", StatementCommandSelect, sequenceSQL)
+	statement.ResultType = m.primary.FieldType
+	args := NamedArgs{baseMapperSequenceArg: sequence}
+	dest := selectKeyDestination(m.primary.FieldType)
+	if err := m.session.QueryOneStatement(ctx, statement, args, dest); err != nil {
+		return nil, err
+	}
+	return reflect.Indirect(reflect.ValueOf(dest)).Interface(), nil
 }
 
 // SaveOrUpdate 根据主键零值判断插入或按主键更新。
@@ -739,6 +771,14 @@ func (m *BaseMapper[T, ID]) selectProjectionSQL(projection string, wrapper *Quer
 	}
 	if includeOrder && rendered.OrderSQL != "" {
 		sqlText += " " + rendered.OrderSQL
+	} else if includeOrder {
+		orderSQL, err := m.defaultOrderSQL()
+		if err != nil {
+			return "", nil, start, err
+		}
+		if orderSQL != "" {
+			sqlText += " " + orderSQL
+		}
 	}
 	if includeOrder && rendered.LastSQL != "" {
 		sqlText += " " + rendered.LastSQL
@@ -775,6 +815,26 @@ func (m *BaseMapper[T, ID]) selectProjection(columns []ColumnMeta) (string, erro
 		return "", fmt.Errorf("goark-orm: entity %s has no selectable columns", m.entity.TypeName)
 	}
 	return strings.Join(quotedColumns, ", "), nil
+}
+
+func (m *BaseMapper[T, ID]) defaultOrderSQL() (string, error) {
+	orders := defaultOrderColumns(m.entity.Columns)
+	if len(orders) == 0 {
+		return "", nil
+	}
+	parts := make([]string, 0, len(orders))
+	for _, column := range orders {
+		quoted, err := quoteIdentifierPath(m.dialect, column.ColumnName)
+		if err != nil {
+			return "", err
+		}
+		direction := "ASC"
+		if column.OrderDesc {
+			direction = "DESC"
+		}
+		parts = append(parts, quoted+" "+direction)
+	}
+	return "ORDER BY " + strings.Join(parts, ", "), nil
 }
 
 func (m *BaseMapper[T, ID]) selectFieldsProjection(fields []Field[T]) (string, error) {
@@ -861,7 +921,11 @@ func (m *BaseMapper[T, ID]) updateSetColumns(entity reflect.Value, incrementVers
 		if err != nil {
 			return nil, nil, err
 		}
-		sets = append(sets, quoted+" = #{"+column.FieldName+"}")
+		setSQL, err := m.updateAssignmentSQL(column, quoted)
+		if err != nil {
+			return nil, nil, err
+		}
+		sets = append(sets, setSQL)
 		fields = append(fields, column)
 	}
 	if incrementVersion && m.hasVersion {
@@ -875,6 +939,29 @@ func (m *BaseMapper[T, ID]) updateSetColumns(entity reflect.Value, incrementVers
 		return nil, nil, fmt.Errorf("goark-orm: entity %s has no updatable columns", m.entity.TypeName)
 	}
 	return sets, fields, nil
+}
+
+func (m *BaseMapper[T, ID]) updateAssignmentSQL(column ColumnMeta, quotedColumn string) (string, error) {
+	expression := strings.TrimSpace(column.UpdateExpression)
+	if expression == "" {
+		return quotedColumn + " = #{" + column.FieldName + "}", nil
+	}
+	argPlaceholder := "#{" + column.FieldName + "}"
+	sqlText := strings.ReplaceAll(expression, "{column}", quotedColumn)
+	sqlText = strings.ReplaceAll(sqlText, "{value}", argPlaceholder)
+	switch strings.Count(sqlText, "%s") {
+	case 0:
+	case 1:
+		sqlText = fmt.Sprintf(sqlText, quotedColumn)
+	case 2:
+		sqlText = fmt.Sprintf(sqlText, quotedColumn, column.FieldName)
+	default:
+		return "", fmt.Errorf("goark-orm: update expression for field %s has too many %%s placeholders", column.FieldName)
+	}
+	if err := validateRawSQLFragment(sqlText); err != nil {
+		return "", err
+	}
+	return quotedColumn + " = " + sqlText, nil
 }
 
 func (m *BaseMapper[T, ID]) entityArgs(value reflect.Value, columns []ColumnMeta) (NamedArgs, error) {

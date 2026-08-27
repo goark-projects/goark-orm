@@ -16,6 +16,10 @@ func writeDeclaredEntityStruct(builder *bytes.Buffer, entity EntityModel) error 
 	}
 	builder.WriteString("//goark-orm:entity(table=")
 	builder.WriteString(strconv.Quote(entity.Table))
+	if entity.KeySequence != "" {
+		builder.WriteString(", keySequence=")
+		builder.WriteString(strconv.Quote(entity.KeySequence))
+	}
 	builder.WriteString(")\n")
 	builder.WriteString("type ")
 	builder.WriteString(entity.TypeName)
@@ -69,6 +73,7 @@ func columnStructTag(column ColumnModel) (string, error) {
 		{key: "default", value: column.DefaultValue},
 		{key: "type-handler", value: column.TypeHandler},
 		{key: "key-column", value: column.KeyColumn},
+		{key: "update", value: column.UpdateExpression},
 		{key: "condition", value: column.Condition},
 	} {
 		if err := appendReverseTagString(&items, item.key, item.value); err != nil {
@@ -92,6 +97,15 @@ func columnStructTag(column ColumnModel) (string, error) {
 		if err := appendReverseTagString(&items, "where-strategy", reverseFieldStrategyTagValue(column.WhereStrategy)); err != nil {
 			return "", err
 		}
+	}
+	if column.OrderBy {
+		appendReverseTagBool(&items, "order-by", true)
+	}
+	if column.OrderDesc {
+		appendReverseTagBool(&items, "order-desc", true)
+	}
+	if column.OrderPriority != 0 {
+		appendReverseTagInt(&items, "order-priority", column.OrderPriority)
 	}
 	if column.Version {
 		appendReverseTagBool(&items, "version", true)

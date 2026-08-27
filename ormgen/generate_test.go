@@ -1012,6 +1012,91 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenEntityDeclaresMPMetadata_shouldRenderEntityAndColumnMetadata(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user", keySequence="sys_user_id_seq")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true;id-type='input';order-by=true;order-desc=true;order-priority=2"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name';update='{value}'"`+"`"+`
+	LoginCount int64 `+"`"+`goark-orm:"column='login_count';update='%s + 1';order-by=true;order-priority=1"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper")
+type UserMapper interface {
+	//goark-orm:select(sql="select id, name, login_count from sys_user where id = #{id}")
+	FindByID(ctx context.Context, id int64) (*User, error)
+}
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := strings.Join(strings.Fields(string(source)), " ")
+	expected := []string{
+		`KeySequence: "sys_user_id_seq"`,
+		`IDType: orm.IDTypeInput`,
+		`OrderBy: true`,
+		`OrderDesc: true`,
+		`OrderPriority: 2`,
+		`UpdateExpression: "{value}"`,
+		`UpdateExpression: "%s + 1"`,
+		`OrderPriority: 1`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, source)
+		}
+	}
+}
+
+func TestGenerate_whenNamingStrategyProvided_shouldDeriveTableAndColumns(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity
+type AuditLog struct {
+	ID int64 `+"`"+`goark-orm:"primary-key=true"`+"`"+`
+	URLValue string `+"`"+`goark-orm:"size=128"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.audit.AuditLogMapper")
+type AuditLogMapper interface {
+	//goark-orm:select(sql="select id, url_value from sys_audit_log where id = #{id}")
+	FindByID(ctx context.Context, id int64) (*AuditLog, error)
+}
+`)
+
+	source, err := Generate(GenerateSpec{
+		Dir: dir,
+		Naming: NamingConfig{
+			Table:       NamingStrategySnakeCase,
+			Column:      NamingStrategySnakeCase,
+			TablePrefix: "sys_",
+		},
+	})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := string(source)
+	expected := []string{
+		`Table: "sys_audit_log"`,
+		`ColumnName: "id"`,
+		`ColumnName: "url_value"`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, source)
+		}
+	}
+}
+
 func TestGenerate_whenAnnotationDeclaresInterceptorIgnore_shouldRenderStatementMetadata(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

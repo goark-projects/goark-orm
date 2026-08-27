@@ -8,6 +8,7 @@ type GenerateSpec struct {
 	PackageName  string
 	DatabaseID   string
 	TypeHandlers []string
+	Naming       NamingConfig
 }
 
 // PackageModel 是扫描后的包级 ORM 模型。
@@ -22,36 +23,41 @@ type PackageModel struct {
 type EntityModel struct {
 	TypeName      string
 	Table         string
+	KeySequence   string
 	Columns       []ColumnModel
 	DeclareStruct bool
 }
 
 // ColumnModel 描述实体字段映射。
 type ColumnModel struct {
-	FieldName      string
-	FieldType      string
-	ColumnName     string
-	KeyColumn      string
-	PrimaryKey     bool
-	AutoIncrement  bool
-	IDType         orm.IDType
-	Nullable       *bool
-	Size           *int
-	NumericScale   *int
-	DBType         string
-	DefaultValue   string
-	TypeHandler    string
-	Condition      string
-	SelectDisabled bool
-	InsertStrategy orm.FieldStrategy
-	UpdateStrategy orm.FieldStrategy
-	WhereStrategy  orm.FieldStrategy
-	Version        bool
-	SoftDelete     bool
-	CreatedAt      bool
-	UpdatedAt      bool
-	Fill           orm.FieldFill
-	Transient      bool
+	FieldName        string
+	FieldType        string
+	ColumnName       string
+	KeyColumn        string
+	UpdateExpression string
+	PrimaryKey       bool
+	AutoIncrement    bool
+	IDType           orm.IDType
+	Nullable         *bool
+	Size             *int
+	NumericScale     *int
+	DBType           string
+	DefaultValue     string
+	TypeHandler      string
+	Condition        string
+	SelectDisabled   bool
+	InsertStrategy   orm.FieldStrategy
+	UpdateStrategy   orm.FieldStrategy
+	WhereStrategy    orm.FieldStrategy
+	OrderBy          bool
+	OrderDesc        bool
+	OrderPriority    int
+	Version          bool
+	SoftDelete       bool
+	CreatedAt        bool
+	UpdatedAt        bool
+	Fill             orm.FieldFill
+	Transient        bool
 }
 
 // MapperModel 描述 Mapper 接口和语句。

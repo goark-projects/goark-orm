@@ -3,7 +3,7 @@ package ormgen
 import "testing"
 
 func TestParseFieldTag_whenValid_shouldParseTypedAttributes(t *testing.T) {
-	tag, err := ParseFieldTag("column='id';primary-key=true;auto-increment=true;size=64;fill='insert_update'")
+	tag, err := ParseFieldTag("column='id';primary-key=true;auto-increment=true;size=64;fill='insert_update';update='%s + 1';order-by=true;order-desc=true;order-priority=2")
 	if err != nil {
 		t.Fatalf("parse tag failed: %v", err)
 	}
@@ -34,6 +34,27 @@ func TestParseFieldTag_whenValid_shouldParseTypedAttributes(t *testing.T) {
 	}
 	if !ok || fill != "insert_update" {
 		t.Fatalf("unexpected fill: ok=%v value=%q", ok, fill)
+	}
+	update, ok, err := tagString(tag, "update")
+	if err != nil {
+		t.Fatalf("read update failed: %v", err)
+	}
+	if !ok || update != "%s + 1" {
+		t.Fatalf("unexpected update: ok=%v value=%q", ok, update)
+	}
+	order, ok, err := tagBool(tag, "order-by")
+	if err != nil {
+		t.Fatalf("read order-by failed: %v", err)
+	}
+	if !ok || !order {
+		t.Fatalf("unexpected order-by: ok=%v value=%v", ok, order)
+	}
+	priority, ok, err := tagInt(tag, "order-priority")
+	if err != nil {
+		t.Fatalf("read order-priority failed: %v", err)
+	}
+	if !ok || priority != 2 {
+		t.Fatalf("unexpected order-priority: ok=%v value=%d", ok, priority)
 	}
 }
 

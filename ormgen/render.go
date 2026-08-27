@@ -129,6 +129,10 @@ func writeEntityMeta(builder *bytes.Buffer, entity EntityModel) {
 	builder.WriteString(strconv.Quote(entity.TypeName))
 	builder.WriteString(",Table:")
 	builder.WriteString(strconv.Quote(entity.Table))
+	if entity.KeySequence != "" {
+		builder.WriteString(",KeySequence:")
+		builder.WriteString(strconv.Quote(entity.KeySequence))
+	}
 	builder.WriteString(",Columns:[]orm.ColumnMeta{")
 	for _, column := range entity.Columns {
 		writeColumnMeta(builder, column)
@@ -307,6 +311,7 @@ func writeColumnMeta(builder *bytes.Buffer, column ColumnModel) {
 	writeStringField(builder, "FieldType", column.FieldType)
 	writeStringField(builder, "ColumnName", column.ColumnName)
 	writeStringField(builder, "KeyColumn", column.KeyColumn)
+	writeStringField(builder, "UpdateExpression", column.UpdateExpression)
 	writeBoolField(builder, "PrimaryKey", column.PrimaryKey)
 	writeBoolField(builder, "AutoIncrement", column.AutoIncrement)
 	writeIDTypeField(builder, column.IDType)
@@ -333,6 +338,9 @@ func writeColumnMeta(builder *bytes.Buffer, column ColumnModel) {
 	writeFieldStrategyField(builder, "InsertStrategy", column.InsertStrategy)
 	writeFieldStrategyField(builder, "UpdateStrategy", column.UpdateStrategy)
 	writeFieldStrategyField(builder, "WhereStrategy", column.WhereStrategy)
+	writeBoolField(builder, "OrderBy", column.OrderBy)
+	writeBoolField(builder, "OrderDesc", column.OrderDesc)
+	writeIntField(builder, "OrderPriority", column.OrderPriority)
 	writeBoolField(builder, "Version", column.Version)
 	writeBoolField(builder, "SoftDelete", column.SoftDelete)
 	writeBoolField(builder, "CreatedAt", column.CreatedAt)

@@ -16,16 +16,18 @@ type GenerateConfig struct {
 	Output       string                `json:"output,omitempty"`
 	DatabaseID   string                `json:"databaseId,omitempty"`
 	TypeHandlers []string              `json:"typeHandlers,omitempty"`
+	Naming       NamingConfig          `json:"naming,omitempty"`
 	Packages     []GeneratePackageSpec `json:"packages,omitempty"`
 }
 
 // GeneratePackageSpec 描述配置文件中的单个 package 生成目标。
 type GeneratePackageSpec struct {
-	Dir          string   `json:"dir,omitempty"`
-	PackageName  string   `json:"package,omitempty"`
-	Output       string   `json:"output,omitempty"`
-	DatabaseID   string   `json:"databaseId,omitempty"`
-	TypeHandlers []string `json:"typeHandlers,omitempty"`
+	Dir          string       `json:"dir,omitempty"`
+	PackageName  string       `json:"package,omitempty"`
+	Output       string       `json:"output,omitempty"`
+	DatabaseID   string       `json:"databaseId,omitempty"`
+	TypeHandlers []string     `json:"typeHandlers,omitempty"`
+	Naming       NamingConfig `json:"naming,omitempty"`
 }
 
 // ConfiguredGenerateSpec 表示已经完成默认值和路径解析的生成目标。
@@ -74,11 +76,16 @@ func (c GenerateConfig) Resolve(baseDir string) ([]ConfiguredGenerateSpec, error
 
 	out := make([]ConfiguredGenerateSpec, 0, len(packages))
 	for _, item := range packages {
+		naming, err := mergeNamingConfig(c.Naming, item.Naming)
+		if err != nil {
+			return nil, err
+		}
 		spec := GenerateSpec{
 			Dir:          configFirstNonEmpty(item.Dir, c.Dir, "."),
 			PackageName:  configFirstNonEmpty(item.PackageName, c.PackageName),
 			DatabaseID:   configFirstNonEmpty(item.DatabaseID, c.DatabaseID),
 			TypeHandlers: uniqueConfigStrings(append(append([]string(nil), c.TypeHandlers...), item.TypeHandlers...)),
+			Naming:       naming,
 		}
 		output := strings.TrimSpace(item.Output)
 		if output == "" && len(packages) == 1 {
@@ -89,6 +96,20 @@ func (c GenerateConfig) Resolve(baseDir string) ([]ConfiguredGenerateSpec, error
 		out = append(out, ConfiguredGenerateSpec{Spec: spec, Output: output})
 	}
 	return out, nil
+}
+
+func mergeNamingConfig(global NamingConfig, local NamingConfig) (NamingConfig, error) {
+	merged := global
+	if local.Table != "" {
+		merged.Table = local.Table
+	}
+	if local.Column != "" {
+		merged.Column = local.Column
+	}
+	if strings.TrimSpace(local.TablePrefix) != "" {
+		merged.TablePrefix = local.TablePrefix
+	}
+	return normalizeNamingConfig(merged)
 }
 
 func configFirstNonEmpty(values ...string) string {
