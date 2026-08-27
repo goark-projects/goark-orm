@@ -951,6 +951,114 @@ func TestSQLSession_Query_whenResultMapUsesCollection_shouldNotUseComposedFastPa
 	}
 }
 
+func TestSQLSession_Query_whenResultMapUsesNamedResultSets_shouldAttachChildren(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"order_id", "user_id", "order_name"},
+		values: [][]driver.Value{
+			{int64(100), int64(7), "Order-100"},
+			{int64(101), int64(8), "Order-101"},
+		},
+		resultSets: []testRowsData{
+			{
+				columns: []string{"user_id", "user_name"},
+				values: [][]driver.Value{
+					{int64(7), "Alice"},
+					{int64(8), "Bob"},
+				},
+			},
+			{
+				columns: []string{"order_id", "item_id", "item_sku"},
+				values: [][]driver.Value{
+					{int64(100), int64(501), "SKU-1"},
+					{int64(100), int64(502), "SKU-2"},
+					{int64(101), int64(503), "SKU-3"},
+				},
+			},
+		},
+	}
+	registry := NewRegistry()
+	err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: "system.order.OrderMapper",
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "OrderResult",
+				TypeName: "sqlSessionOrder",
+				Fields: []ResultFieldMeta{
+					{Property: "ID", Column: "order_id", ID: true},
+					{Property: "UserID", Column: "user_id"},
+					{Property: "Name", Column: "order_name"},
+				},
+				Associations: []ResultAssociationMeta{
+					{
+						Property:      "User",
+						TypeName:      "sqlSessionUser",
+						Column:        "user_id",
+						ResultSet:     "users",
+						ForeignColumn: "user_id",
+						Fields: []ResultFieldMeta{
+							{Property: "ID", Column: "user_id", ID: true},
+							{Property: "Name", Column: "user_name"},
+						},
+					},
+				},
+				Collections: []ResultCollectionMeta{
+					{
+						Property:      "Items",
+						TypeName:      "sqlSessionOrderItem",
+						Column:        "order_id",
+						ResultSet:     "items",
+						ForeignColumn: "order_id",
+						Fields: []ResultFieldMeta{
+							{Property: "ID", Column: "item_id", ID: true},
+							{Property: "SKU", Column: "item_sku"},
+						},
+					},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:        "LoadReport",
+				Namespace: "system.order.OrderMapper",
+				FullName:  "system.order.OrderMapper.LoadReport",
+				Command:   StatementCommandSelect,
+				Source:    StatementSourceXML,
+				SQL:       "select order_id, user_id, order_name from orders",
+				ResultMap: "OrderResult",
+				ResultSets: []ResultSetMeta{
+					{Name: "orders"},
+					{Name: "users"},
+					{Name: "items"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register mapper failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var orders []sqlSessionOrder
+	if err := session.Query(context.Background(), "system.order.OrderMapper.LoadReport", nil, &orders); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(orders) != 2 {
+		t.Fatalf("expected two orders, got %#v", orders)
+	}
+	if orders[0].User.Name != "Alice" || orders[1].User.Name != "Bob" {
+		t.Fatalf("unexpected result-set associations %#v", orders)
+	}
+	if len(orders[0].Items) != 2 || orders[0].Items[1].SKU != "SKU-2" || len(orders[1].Items) != 1 || orders[1].Items[0].ID != 503 {
+		t.Fatalf("unexpected result-set collections %#v", orders)
+	}
+}
+
 type recordingOrderRowScanner struct {
 	calls   int
 	columns []string
@@ -3651,10 +3759,10 @@ func (r *testRows) NextResultSet() error {
 		return io.EOF
 	}
 	next := r.resultSets[0]
-	r.resultSets = r.resultSets[1:]
+	remaining := append([]testRowsData(nil), r.resultSets[1:]...)
 	r.columns = append([]string(nil), next.columns...)
 	r.values = append([][]driver.Value(nil), next.values...)
-	r.resultSets = append([]testRowsData(nil), next.resultSets...)
+	r.resultSets = append(append([]testRowsData(nil), next.resultSets...), remaining...)
 	r.index = 0
 	return nil
 }

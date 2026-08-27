@@ -175,6 +175,55 @@ func TestRegistryValidate_whenReferencesMissing_shouldReportRegistryErrors(t *te
 	}
 }
 
+func TestRegistryValidate_whenResultSetMappingInvalid_shouldReportRegistryErrors(t *testing.T) {
+	registry := NewRegistry()
+	namespace := "system.order.OrderMapper"
+	if err := registry.RegisterMapper(MapperMeta{
+		TypeName:  "OrderMapper",
+		Namespace: namespace,
+		ResultMaps: []ResultMapMeta{
+			{
+				ID:       "OrderResult",
+				TypeName: "Order",
+				Fields:   []ResultFieldMeta{{Property: "ID", Column: "order_id", ID: true}},
+				Associations: []ResultAssociationMeta{
+					{Property: "User", TypeName: "User", Column: "user_id", ResultSet: "missingUsers"},
+				},
+				Collections: []ResultCollectionMeta{
+					{Property: "Items", TypeName: "OrderItem", Column: "order_id", ResultSet: "items", ForeignColumn: "order_id"},
+				},
+			},
+		},
+		Statements: []StatementMeta{
+			{
+				ID:        "LoadReport",
+				Namespace: namespace,
+				FullName:  namespace + ".LoadReport",
+				Command:   StatementCommandSelect,
+				SQL:       "select order_id from orders",
+				ResultMap: "OrderResult",
+				ResultSets: []ResultSetMeta{
+					{Name: "orders"},
+					{Name: "items"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("register mapper failed: %v", err)
+	}
+
+	err := registry.Validate()
+	if !errors.Is(err, ErrRegistry) {
+		t.Fatalf("expected registry error, got %v", err)
+	}
+	message := err.Error()
+	for _, expected := range []string{"missingUsers", "foreignColumn"} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("expected validation error to contain %q, got %v", expected, err)
+		}
+	}
+}
+
 func TestRegistryValidate_whenProviderDisallowsStatement_shouldExposeBindingCause(t *testing.T) {
 	registry := NewRegistry()
 	provider := func(context.Context, StatementMeta, NamedArgs) (SQLSource, error) {

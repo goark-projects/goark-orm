@@ -62,6 +62,8 @@ type xmlResultObjectModel struct {
 	Property       string
 	TypeName       string
 	Column         string
+	ResultSet      string
+	ForeignColumn  string
 	ColumnPrefix   string
 	NotNullColumns []string
 	Select         string
@@ -453,6 +455,8 @@ func parseXMLResultObject(decoder *xml.Decoder, start xml.StartElement, collecti
 		Property:       attrValue(start, "property"),
 		TypeName:       typeName,
 		Column:         attrValue(start, "column"),
+		ResultSet:      attrValue(start, "resultSet"),
+		ForeignColumn:  attrValue(start, "foreignColumn"),
 		ColumnPrefix:   attrValue(start, "columnPrefix"),
 		NotNullColumns: splitXMLColumnList(attrValue(start, "notNullColumn")),
 		Select:         attrValue(start, "select"),
@@ -538,6 +542,11 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 	if err != nil {
 		return xmlStatementModel{}, err
 	}
+	resultSets, err := parseXMLResultSetsAttribute(attrValue(start, "resultSets"))
+	if err != nil {
+		return xmlStatementModel{}, err
+	}
+	resultSets = append(resultSets, body.resultSets...)
 	statement := xmlStatementModel{
 		ID:                 attrValue(start, "id"),
 		ResultMap:          attrValue(start, "resultMap"),
@@ -553,7 +562,7 @@ func parseXMLStatement(decoder *xml.Decoder, start xml.StartElement) (xmlStateme
 		FlushCache:         flushCache,
 		StatementType:      parseXMLStatementType(start, start.Name.Local),
 		Parameters:         body.parameters,
-		ResultSets:         body.resultSets,
+		ResultSets:         resultSets,
 		DynamicSQL:         body.nodes,
 		InterceptorIgnores: parseInterceptorIgnores(attrValue(start, "interceptorIgnore")),
 	}
@@ -1206,6 +1215,8 @@ func xmlResultAssociation(item xmlResultObjectModel) orm.ResultAssociationMeta {
 		Property:       strings.TrimSpace(item.Property),
 		TypeName:       strings.TrimSpace(item.TypeName),
 		Column:         strings.TrimSpace(item.Column),
+		ResultSet:      strings.TrimSpace(item.ResultSet),
+		ForeignColumn:  strings.TrimSpace(item.ForeignColumn),
 		ColumnPrefix:   strings.TrimSpace(item.ColumnPrefix),
 		NotNullColumns: trimmedStrings(item.NotNullColumns),
 		Select:         strings.TrimSpace(item.Select),
@@ -1226,6 +1237,8 @@ func xmlResultCollection(item xmlResultObjectModel) orm.ResultCollectionMeta {
 		Property:       strings.TrimSpace(item.Property),
 		TypeName:       strings.TrimSpace(item.TypeName),
 		Column:         strings.TrimSpace(item.Column),
+		ResultSet:      strings.TrimSpace(item.ResultSet),
+		ForeignColumn:  strings.TrimSpace(item.ForeignColumn),
 		ColumnPrefix:   strings.TrimSpace(item.ColumnPrefix),
 		NotNullColumns: trimmedStrings(item.NotNullColumns),
 		Select:         strings.TrimSpace(item.Select),

@@ -1376,6 +1376,75 @@ type OrderMapper interface {
 	}
 }
 
+func TestGenerate_whenXMLResultMapUsesNamedResultSets_shouldRenderMultiResultSetMetadata(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="orders")
+type Order struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	UserID int64 `+"`"+`goark-orm:"column='user_id'"`+"`"+`
+	User User `+"`"+`goark-orm:"transient=true"`+"`"+`
+	Items []OrderItem `+"`"+`goark-orm:"transient=true"`+"`"+`
+}
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Name string `+"`"+`goark-orm:"column='name'"`+"`"+`
+}
+
+//goark-orm:entity(table="order_item")
+type OrderItem struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	SKU string `+"`"+`goark-orm:"column='sku'"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.order.OrderMapper", xml="mapper/order_mapper.xml")
+type OrderMapper interface {
+	LoadReport(ctx context.Context) ([]Order, error)
+}
+`)
+	mustWriteFile(t, filepath.Join(dir, "mapper", "order_mapper.xml"), `<mapper namespace="system.order.OrderMapper">
+  <resultMap id="OrderResult" type="Order">
+    <id property="ID" column="order_id"/>
+    <result property="UserID" column="user_id"/>
+    <association property="User" type="User" column="user_id" resultSet="users" foreignColumn="user_id">
+      <id property="ID" column="user_id"/>
+      <result property="Name" column="user_name"/>
+    </association>
+    <collection property="Items" ofType="OrderItem" column="order_id" resultSet="items" foreignColumn="order_id">
+      <id property="ID" column="item_id"/>
+      <result property="SKU" column="item_sku"/>
+    </collection>
+  </resultMap>
+  <select id="LoadReport" resultMap="OrderResult" resultSets="orders,users,items">
+    select 1
+  </select>
+</mapper>
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := strings.Join(strings.Fields(string(source)), " ")
+	expected := []string{
+		`ResultSets: []orm.ResultSetMeta{{Name: "orders"}, {Name: "users"}, {Name: "items"}}`,
+		`ResultSet: "users"`,
+		`ForeignColumn: "user_id"`,
+		`ResultSet: "items"`,
+		`ForeignColumn: "order_id"`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, source)
+		}
+	}
+}
+
 func TestGenerate_whenXMLResultMapUsesExtendsAutoMappingAndDiscriminator_shouldRenderAdvancedMetadata(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

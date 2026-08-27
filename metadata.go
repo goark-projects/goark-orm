@@ -167,6 +167,8 @@ type ResultAssociationMeta struct {
 	Property       string
 	TypeName       string
 	Column         string
+	ResultSet      string
+	ForeignColumn  string
 	ColumnPrefix   string
 	NotNullColumns []string
 	Select         string
@@ -181,6 +183,8 @@ type ResultCollectionMeta struct {
 	Property       string
 	TypeName       string
 	Column         string
+	ResultSet      string
+	ForeignColumn  string
 	ColumnPrefix   string
 	NotNullColumns []string
 	Select         string

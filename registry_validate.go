@@ -185,6 +185,7 @@ func (v *registryValidator) validateStatement(mapper MapperMeta, resultMaps map[
 	}
 	if strings.TrimSpace(statement.ResultMap) != "" {
 		v.validateResultMapReference(mapper.Namespace, resultMaps, statement.ResultMap, "statement", fullName)
+		v.validateStatementResultSetMappings(mapper.Namespace, resultMaps, statement, fullName)
 	}
 	for _, resultSet := range statement.ResultSets {
 		if strings.TrimSpace(resultSet.ResultMap) != "" {

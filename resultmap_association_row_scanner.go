@@ -25,7 +25,8 @@ func resultMapAssociationRowScannerSupported(resultMap ResultMapMeta) bool {
 
 func resultAssociationsRowScannerSupported(associations []ResultAssociationMeta) bool {
 	for _, association := range associations {
-		if strings.TrimSpace(association.TypeName) == "" || strings.TrimSpace(association.Select) != "" || len(association.Collections) > 0 {
+		if strings.TrimSpace(association.TypeName) == "" || strings.TrimSpace(association.Select) != "" ||
+			strings.TrimSpace(association.ResultSet) != "" || len(association.Collections) > 0 {
 			return false
 		}
 		if resultFieldsHaveTypeHandler(association.Fields) {

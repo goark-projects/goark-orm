@@ -99,6 +99,9 @@ func (s *SQLSession) scanRowsWithCollections(ctx context.Context, rows Rows, col
 func resultCollectionPlans(rootType reflect.Type, collections []ResultCollectionMeta, inheritedPrefix string) []resultCollectionPlan {
 	plans := make([]resultCollectionPlan, 0, len(collections))
 	for _, collection := range collections {
+		if strings.TrimSpace(collection.ResultSet) != "" {
+			continue
+		}
 		field, ok := rootType.FieldByName(collection.Property)
 		if !ok || field.PkgPath != "" || field.Type.Kind() != reflect.Slice {
 			continue

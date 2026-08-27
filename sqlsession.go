@@ -621,6 +621,9 @@ func (s *SQLSession) scanRows(ctx context.Context, rows Rows, statement Statemen
 		target.Set(reflect.MakeSlice(target.Type(), 0, 0))
 	}
 	if resultMap, ok := s.resultMap(statement); ok {
+		if resultMapHasResultSetMappings(resultMap) {
+			return mappingFailure(statement, s.scanRowsWithResultSetMappings(ctx, rows, columns, statement, resultMap, target))
+		}
 		if len(resultMap.Collections) > 0 {
 			return mappingFailure(statement, s.scanRowsWithCollections(ctx, rows, columns, statement, resultMap, target))
 		}
@@ -675,6 +678,9 @@ func (s *SQLSession) scanOne(ctx context.Context, rows Rows, statement Statement
 		return &ExecutorError{Statement: statement.FullName, Operation: "read columns", Err: err}
 	}
 	if resultMap, ok := s.resultMap(statement); ok {
+		if resultMapHasResultSetMappings(resultMap) {
+			return mappingFailure(statement, s.scanOneWithResultSetMappings(ctx, rows, columns, statement, resultMap, target))
+		}
 		if len(resultMap.Collections) > 0 {
 			slice := reflect.New(reflect.SliceOf(target.Type())).Elem()
 			if err := s.scanRowsWithCollections(ctx, rows, columns, statement, resultMap, slice); err != nil {
@@ -1024,6 +1030,9 @@ func addDirectFieldBinding(bindings map[string]columnBinding, typ reflect.Type, 
 }
 
 func addAssociationBindings(bindings map[string]columnBinding, typ reflect.Type, path []int, association ResultAssociationMeta, inheritedPrefix string) {
+	if strings.TrimSpace(association.ResultSet) != "" {
+		return
+	}
 	field, ok := typ.FieldByName(association.Property)
 	if !ok || field.PkgPath != "" {
 		return
