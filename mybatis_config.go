@@ -29,23 +29,29 @@ type MyBatisEnvironment struct {
 
 // TypeAlias 描述 Go 类型别名。运行时不扫描包，别名由生成器或业务显式注册。
 type TypeAlias struct {
-	Alias    string
-	TypeName string
+	Alias    string `json:"alias"`
+	TypeName string `json:"typeName"`
+}
+
+// TypeHandlerRef 描述配置中声明的 TypeHandler 名称。
+type TypeHandlerRef struct {
+	Name string `json:"name"`
 }
 
 // MapperRef 描述 Mapper 声明引用。Resource 供生成器使用，Namespace 供运行期校验。
 type MapperRef struct {
-	Resource  string
-	Namespace string
+	Resource  string `json:"resource,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // MyBatisConfig 是 MyBatis 配置文件的 Go 化声明模型。
 type MyBatisConfig struct {
-	Settings    MyBatisSettings
-	Environment MyBatisEnvironment
-	TypeAliases []TypeAlias
-	Mappers     []MapperRef
-	Global      GlobalConfig
+	Settings     MyBatisSettings
+	Environment  MyBatisEnvironment
+	TypeAliases  []TypeAlias
+	TypeHandlers []TypeHandlerRef
+	Mappers      []MapperRef
+	Global       GlobalConfig
 }
 
 // DefaultMyBatisConfig 返回可直接构建运行期配置的默认声明模型。
@@ -140,6 +146,9 @@ func (c MyBatisConfig) Validate() error {
 	if _, err := c.TypeAliasMap(); err != nil {
 		return err
 	}
+	if _, err := c.TypeHandlerNames(); err != nil {
+		return err
+	}
 	return validateMapperRefs(c.Mappers)
 }
 
@@ -160,6 +169,24 @@ func (c MyBatisConfig) TypeAliasMap() (map[string]string, error) {
 			return nil, configurationErrorf("duplicate typeAlias %q", alias)
 		}
 		out[key] = typeName
+	}
+	return out, nil
+}
+
+// TypeHandlerNames 返回规范化后的 TypeHandler 名称，并拒绝重复声明。
+func (c MyBatisConfig) TypeHandlerNames() ([]string, error) {
+	out := make([]string, 0, len(c.TypeHandlers))
+	seen := make(map[string]struct{}, len(c.TypeHandlers))
+	for _, item := range c.TypeHandlers {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return nil, configurationErrorf("typeHandler name is required")
+		}
+		if _, exists := seen[name]; exists {
+			return nil, configurationErrorf("duplicate typeHandler %q", name)
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
 	}
 	return out, nil
 }

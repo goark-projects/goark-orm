@@ -3,6 +3,7 @@ package orm_test
 import (
 	"context"
 	"database/sql"
+	"io"
 	"testing"
 	"time"
 
@@ -188,6 +189,8 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ func(*orm.Registry, orm.SQLExecutor, orm.Dialect, ...orm.SQLSessionOption) (*orm.SQLSession, error) = orm.NewSQLSession
 	var _ func(*orm.Registry, *sql.DB, orm.Dialect, ...orm.SQLSessionOption) (*orm.SQLSessionFactory, error) = orm.NewSQLSessionFactory
 	var _ func(orm.Session) (*orm.BatchSession, error) = orm.NewBatchSession
+	var _ func(io.Reader) (orm.MyBatisConfig, error) = orm.DecodeMyBatisConfig
+	var _ func(string) (orm.MyBatisConfig, error) = orm.LoadMyBatisConfig
 	var _ func(orm.StatementSession, orm.EntityMeta, ...orm.BaseMapperOption) (*orm.BaseMapper[contractUser, int64], error) = orm.NewBaseMapper[contractUser, int64]
 	var _ func(*orm.BaseMapper[contractUser, int64]) (*orm.Service[contractUser, int64], error) = orm.NewService[contractUser, int64]
 	var _ func(*orm.Registry) error = orm.ValidateRegistry
@@ -206,5 +209,19 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	}
 	if _, err := orm.ParseResultSetType("FORWARD_ONLY"); err != nil {
 		t.Fatalf("parse result set type failed: %v", err)
+	}
+
+	_, err = orm.AssembleMyBatisConfig(orm.MyBatisAssembly{
+		Config: orm.MyBatisConfig{
+			Settings:     orm.MyBatisSettings{DatabaseID: "postgres"},
+			Environment:  orm.MyBatisEnvironment{DbType: orm.DbTypePostgres},
+			TypeAliases:  []orm.TypeAlias{{Alias: "User", TypeName: "contract.User"}},
+			TypeHandlers: []orm.TypeHandlerRef{{Name: "json"}},
+			Mappers:      []orm.MapperRef{{Namespace: "contract.UserMapper"}},
+		},
+		Registry: registry,
+	})
+	if err == nil {
+		t.Fatalf("expected missing mapper validation error")
 	}
 }
