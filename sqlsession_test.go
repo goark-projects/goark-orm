@@ -772,6 +772,72 @@ func TestSQLSession_Query_whenResultMapDiscriminatorUsesInlineCase_shouldScanCas
 	}
 }
 
+func TestSQLSession_Query_whenDiscriminatorEffectiveResultMapHasRowScanner_shouldUseFastPath(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "kind", "name", "admin_level"},
+		values:  [][]driver.Value{{int64(7), "admin", "Alice", int64(9)}},
+	}
+	registry := newDiscriminatorAccountRegistry(t)
+	scanner := &recordingAccountRowScanner{}
+	if err := registry.RegisterRowScanner("sqlSessionAccount", scanner); err != nil {
+		t.Fatalf("register row scanner failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, nil)
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var accounts []sqlSessionAccount
+	err = session.Query(context.Background(), "system.account.AccountMapper.List", nil, &accounts)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(accounts) != 1 || accounts[0].ID != 7 || accounts[0].Level != 9 {
+		t.Fatalf("unexpected accounts %#v", accounts)
+	}
+	if scanner.calls != 1 {
+		t.Fatalf("expected discriminator effective resultMap to use row scanner, got %d calls", scanner.calls)
+	}
+	if strings.Join(scanner.columns, ",") != "ID,Kind,Name,Level" {
+		t.Fatalf("unexpected scanner columns %#v", scanner.columns)
+	}
+}
+
+type recordingAccountRowScanner struct {
+	calls   int
+	columns []string
+}
+
+func (s *recordingAccountRowScanner) ScanRow(_ context.Context, columns []string, row RowScannerRow, dest any) error {
+	s.calls++
+	s.columns = append([]string(nil), columns...)
+	account, ok := dest.(*sqlSessionAccount)
+	if !ok || account == nil {
+		return fmt.Errorf("destination must be *sqlSessionAccount")
+	}
+	targets := make([]any, len(columns))
+	for index, column := range columns {
+		switch column {
+		case "ID":
+			targets[index] = &account.ID
+		case "Kind":
+			targets[index] = &account.Kind
+		case "Name":
+			targets[index] = &account.Name
+		case "Level":
+			targets[index] = &account.Level
+		case "Phone":
+			targets[index] = &account.Phone
+		default:
+			var discard any
+			targets[index] = &discard
+		}
+	}
+	return row.Scan(targets...)
+}
+
 func TestSQLSession_Query_whenResultMapDiscriminatorUsesReferencedResultMap_shouldScanReferencedFields(t *testing.T) {
 	state := openTestSQLState(t)
 	state.queryRows = testRowsData{

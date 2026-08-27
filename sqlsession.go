@@ -809,6 +809,9 @@ func (s *SQLSession) scanValueWithResultMap(ctx context.Context, scanner interfa
 		}
 		effective = selected
 	}
+	if err, ok := s.scanWithRegisteredResultMapRowScanner(ctx, resultMapValueRow{values: values}, columns, statement, effective, target); ok {
+		return err
+	}
 	bindings := s.columnBindingsForResultMap(statement, target.Type(), effective)
 	return mappingFailure(statement, s.applyBindings(ctx, target, bindings, columns, values))
 }
