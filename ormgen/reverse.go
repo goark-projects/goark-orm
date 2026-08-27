@@ -209,9 +209,20 @@ func schemaColumnToModel(table SchemaTable, column SchemaColumn, mapper SchemaTy
 		Size:          cloneIntPointer(column.Size),
 		NumericScale:  cloneIntPointer(column.NumericScale),
 		DBType:        strings.TrimSpace(column.DBType),
-		DefaultValue:  strings.TrimSpace(column.DefaultValue),
+		DefaultValue:  schemaColumnDefaultValue(column),
 		TypeHandler:   schemaColumnTypeHandler(column),
 	}, nil
+}
+
+func schemaColumnDefaultValue(column SchemaColumn) string {
+	value := strings.TrimSpace(column.DefaultValue)
+	if value == "" || column.AutoIncrement {
+		return ""
+	}
+	if strings.ContainsAny(value, "';\n\r\t") {
+		return ""
+	}
+	return value
 }
 
 func defaultSchemaGoType(column SchemaColumn) (string, error) {

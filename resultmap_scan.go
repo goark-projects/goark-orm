@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type resultCollectionPlan struct {
@@ -392,15 +394,79 @@ func resultObjectKey(fields []ResultFieldMeta, columns map[string]int, values []
 		value := values[index]
 		builder.WriteString(field.Column)
 		builder.WriteByte('=')
-		_, _ = fmt.Fprintf(&builder, "%T:%#v", value, value)
+		writeResultKeyValue(&builder, value)
 		builder.WriteByte(';')
 	}
 	if builder.Len() == 0 {
 		for index, value := range values {
-			_, _ = fmt.Fprintf(&builder, "%d:%T:%#v;", index, value, value)
+			builder.WriteString(strconv.Itoa(index))
+			builder.WriteByte('=')
+			writeResultKeyValue(&builder, value)
+			builder.WriteByte(';')
 		}
 	}
 	return builder.String()
+}
+
+func writeResultKeyValue(builder *strings.Builder, value any) {
+	switch typed := value.(type) {
+	case nil:
+		builder.WriteString("<nil>")
+	case int:
+		builder.WriteString("int:")
+		builder.WriteString(strconv.Itoa(typed))
+	case int8:
+		builder.WriteString("int8:")
+		builder.WriteString(strconv.FormatInt(int64(typed), 10))
+	case int16:
+		builder.WriteString("int16:")
+		builder.WriteString(strconv.FormatInt(int64(typed), 10))
+	case int32:
+		builder.WriteString("int32:")
+		builder.WriteString(strconv.FormatInt(int64(typed), 10))
+	case int64:
+		builder.WriteString("int64:")
+		builder.WriteString(strconv.FormatInt(typed, 10))
+	case uint:
+		builder.WriteString("uint:")
+		builder.WriteString(strconv.FormatUint(uint64(typed), 10))
+	case uint8:
+		builder.WriteString("uint8:")
+		builder.WriteString(strconv.FormatUint(uint64(typed), 10))
+	case uint16:
+		builder.WriteString("uint16:")
+		builder.WriteString(strconv.FormatUint(uint64(typed), 10))
+	case uint32:
+		builder.WriteString("uint32:")
+		builder.WriteString(strconv.FormatUint(uint64(typed), 10))
+	case uint64:
+		builder.WriteString("uint64:")
+		builder.WriteString(strconv.FormatUint(typed, 10))
+	case float32:
+		builder.WriteString("float32:")
+		builder.WriteString(strconv.FormatFloat(float64(typed), 'g', -1, 32))
+	case float64:
+		builder.WriteString("float64:")
+		builder.WriteString(strconv.FormatFloat(typed, 'g', -1, 64))
+	case bool:
+		builder.WriteString("bool:")
+		builder.WriteString(strconv.FormatBool(typed))
+	case string:
+		builder.WriteString("string:")
+		builder.WriteString(strconv.Itoa(len(typed)))
+		builder.WriteByte(':')
+		builder.WriteString(typed)
+	case []byte:
+		builder.WriteString("bytes:")
+		builder.WriteString(strconv.Itoa(len(typed)))
+		builder.WriteByte(':')
+		builder.Write(typed)
+	case time.Time:
+		builder.WriteString("time:")
+		builder.WriteString(typed.Format(time.RFC3339Nano))
+	default:
+		_, _ = fmt.Fprintf(builder, "%T:%#v", value, value)
+	}
 }
 
 func isZeroDatabaseValue(value any) bool {

@@ -97,6 +97,48 @@ func TestNewSQLSchemaDialect_whenDbTypeProvided_shouldReturnDialect(t *testing.T
 	}
 }
 
+func TestValidateSQLSchemaCompatibility_whenSchemaMatchesRegistry_shouldRenderAndReportNoDrift(t *testing.T) {
+	queryer := &recordingSchemaQueryer{
+		results: []*fakeSchemaRows{
+			newFakeSchemaRows([][]any{{"sys_user"}}),
+			newFakeSchemaRows([][]any{
+				{"id", "int8", "NO", nil, nil, "nextval('sys_user_id_seq'::regclass)", "true", "true"},
+				{"name", "varchar", "NO", "64", nil, nil, "false", "false"},
+			}),
+		},
+	}
+	registry := orm.NewRegistry()
+	nameSize := 64
+	notNull := false
+	if err := registry.RegisterEntity(orm.EntityMeta{
+		TypeName: "User",
+		Table:    "sys_user",
+		Columns: []orm.ColumnMeta{
+			{FieldName: "ID", ColumnName: "id", DBType: "bigint", PrimaryKey: true, AutoIncrement: true},
+			{FieldName: "Name", ColumnName: "name", DBType: "varchar", Nullable: &notNull, Size: &nameSize},
+		},
+	}); err != nil {
+		t.Fatalf("register entity failed: %v", err)
+	}
+
+	report, err := ValidateSQLSchemaCompatibility(context.Background(), SQLSchemaCompatibilityConfig{
+		DBType:      orm.DbTypePostgres,
+		Queryer:     queryer,
+		Registry:    registry,
+		PackageName: "account",
+		Tables:      []string{"sys_user"},
+	})
+	if err != nil {
+		t.Fatalf("validate schema compatibility failed: %v", err)
+	}
+	if len(report.Schema.Tables) != 1 || report.Model == nil || len(report.Source) == 0 {
+		t.Fatalf("unexpected report %#v", report)
+	}
+	if report.Drift.HasDrift() {
+		t.Fatalf("unexpected drift %#v", report.Drift)
+	}
+}
+
 type recordingSchemaQueryer struct {
 	queries []string
 	args    [][]any

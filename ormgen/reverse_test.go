@@ -121,6 +121,37 @@ func TestBuildPackageModelFromSchema_whenCustomTypeMapperProvided_shouldUseMappe
 	}
 }
 
+func TestBuildPackageModelFromSchema_whenDatabaseDefaultExpressionProvided_shouldOmitUnsafeDefaultTag(t *testing.T) {
+	model, err := BuildPackageModelFromSchema(ReverseEngineerSpec{PackageName: "account"}, SchemaModel{
+		Tables: []SchemaTable{{
+			Name: "sys_user",
+			Columns: []SchemaColumn{
+				{Name: "id", DBType: "bigint", PrimaryKey: true, AutoIncrement: true, DefaultValue: "nextval('sys_user_id_seq'::regclass)"},
+				{Name: "status", DBType: "varchar", DefaultValue: "ACTIVE"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("build package model failed: %v", err)
+	}
+	id := findColumn(t, model.Entities[0].Columns, "id")
+	if id.DefaultValue != "" {
+		t.Fatalf("auto increment default should be omitted, got %q", id.DefaultValue)
+	}
+	status := findColumn(t, model.Entities[0].Columns, "status")
+	if status.DefaultValue != "ACTIVE" {
+		t.Fatalf("simple default should be retained, got %q", status.DefaultValue)
+	}
+	rendered, err := Render(model)
+	if err != nil {
+		t.Fatalf("render reverse model failed: %v", err)
+	}
+	source := string(rendered)
+	if strings.Contains(source, "nextval") || !strings.Contains(source, "default='ACTIVE'") {
+		t.Fatalf("unexpected rendered source:\n%s", source)
+	}
+}
+
 func TestBuildPackageModelFromSchema_whenReverseOptionsProvided_shouldApplyNamingFilterOverridesAndTags(t *testing.T) {
 	selectDisabled := true
 	version := true

@@ -115,4 +115,12 @@ func TestV1GeneratorPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if _, err := ormgen.NewSQLSchemaDialect(orm.DbTypePostgres); err != nil {
 		t.Fatalf("new SQL schema dialect failed: %v", err)
 	}
+	_, err = ormgen.ValidateSQLSchemaCompatibility(context.Background(), ormgen.SQLSchemaCompatibilityConfig{
+		DBType:      orm.DbTypePostgres,
+		Queryer:     nil,
+		PackageName: "contract",
+	})
+	if err == nil {
+		t.Fatalf("expected nil queryer error")
+	}
 }

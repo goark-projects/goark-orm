@@ -192,6 +192,22 @@ func BenchmarkCountSQLBase_NestedOrderBy(b *testing.B) {
 	}
 }
 
+func BenchmarkResultObjectKey_Primitives(b *testing.B) {
+	fields := []ResultFieldMeta{
+		{Column: "id", ID: true},
+		{Column: "tenant_id", ID: true},
+	}
+	indexes := map[string]int{"id": 0, "tenant_id": 1}
+	values := []any{int64(1001), "tenant-alpha"}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		key := resultObjectKey(fields, indexes, values)
+		if key == "" {
+			b.Fatalf("expected key")
+		}
+	}
+}
+
 func BenchmarkContainsOrderBy_BracketIdentifiers(b *testing.B) {
 	query := `select [id], [order]],name] from [sys_user] where [where] = #{where} order by [id]`
 	b.ReportAllocs()
