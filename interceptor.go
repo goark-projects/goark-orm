@@ -11,6 +11,7 @@ type StatementRuntime struct {
 	Meta          StatementMeta
 	SQL           string
 	Args          NamedArgs
+	CacheKey      string
 	Dialect       Dialect
 	Configuration Configuration
 }

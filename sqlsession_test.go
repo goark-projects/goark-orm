@@ -1776,6 +1776,54 @@ func TestSQLSession_Query_whenStatementUsesProvider_shouldCompileProviderSQL(t *
 	}
 }
 
+func TestSQLSession_Query_whenProviderReturnsBuilderArgs_shouldMergeAndBind(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:         "ListByStatus",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.ListByStatus",
+		Command:    StatementCommandSelect,
+		Source:     StatementSourceAnnotation,
+		Provider:   "UserSQL.ListByStatus",
+		Parameters: []string{"status"},
+	})
+	err := registry.RegisterSQLProvider("UserSQL.ListByStatus", func(ctx context.Context, statement StatementMeta, args NamedArgs) (SQLSource, error) {
+		return NewSelectSQLBuilder().
+			Select("id", "name").
+			From("sys_user").
+			WhereEq("status", args["status"]).
+			OrderByAsc("id").
+			Build()
+	})
+	if err != nil {
+		t.Fatalf("register provider failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var users []sqlSessionUser
+	err = session.Query(context.Background(), "system.user.UserMapper.ListByStatus", NamedArgs{"status": "ACTIVE"}, &users)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if len(users) != 1 || users[0].Name != "Alice" {
+		t.Fatalf("unexpected users %#v", users)
+	}
+	if state.query != `SELECT "id", "name" FROM "sys_user" WHERE "status" = $1 ORDER BY "id" ASC` {
+		t.Fatalf("unexpected query %q", state.query)
+	}
+	if !reflect.DeepEqual(state.queryArgs, []driver.NamedValue{{Ordinal: 1, Value: "ACTIVE"}}) {
+		t.Fatalf("unexpected query args %#v", state.queryArgs)
+	}
+}
+
 func TestSQLSession_Query_whenStatementUsesMissingProvider_shouldReturnError(t *testing.T) {
 	state := openTestSQLState(t)
 	registry := newSQLSessionRegistry(t, StatementMeta{
@@ -1828,6 +1876,53 @@ func TestSQLSession_Query_whenProviderDescriptorRejectsStatement_shouldReturnBin
 	err = session.Query(context.Background(), "system.user.UserMapper.ListByStatus", NamedArgs{"status": "ACTIVE"}, &users)
 	if err == nil || !errors.Is(err, ErrBinding) || !strings.Contains(err.Error(), "is not allowed for statement") {
 		t.Fatalf("expected provider descriptor binding error, got %v", err)
+	}
+}
+
+type sqlProviderCacheContextKey struct{}
+
+func TestSQLSession_QueryOne_whenProviderCacheKeyChanges_shouldBypassLocalCache(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryResults = []testRowsData{
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Alice"}}},
+		{columns: []string{"id", "name"}, values: [][]driver.Value{{int64(7), "Bob"}}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:        "FindByID",
+		Namespace: "system.user.UserMapper",
+		FullName:  "system.user.UserMapper.FindByID",
+		Command:   StatementCommandSelect,
+		Source:    StatementSourceAnnotation,
+		Provider:  "UserSQL.FindByID",
+	})
+	err := registry.RegisterSQLProvider("UserSQL.FindByID", func(ctx context.Context, statement StatementMeta, args NamedArgs) (SQLSource, error) {
+		return SQLSource{
+			SQL:      "select id, name from sys_user where id = #{id}",
+			Args:     NamedArgs{"id": args["id"]},
+			CacheKey: ctx.Value(sqlProviderCacheContextKey{}).(string),
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("register provider failed: %v", err)
+	}
+	session, err := NewSQLSession(registry, state.db, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var first sqlSessionUser
+	firstCtx := context.WithValue(context.Background(), sqlProviderCacheContextKey{}, "tenant-a")
+	if err := session.QueryOne(firstCtx, "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &first); err != nil {
+		t.Fatalf("first query failed: %v", err)
+	}
+	var second sqlSessionUser
+	secondCtx := context.WithValue(context.Background(), sqlProviderCacheContextKey{}, "tenant-b")
+	if err := session.QueryOne(secondCtx, "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &second); err != nil {
+		t.Fatalf("second query failed: %v", err)
+	}
+
+	if first.Name != "Alice" || second.Name != "Bob" || len(state.queries) != 2 {
+		t.Fatalf("expected provider cache key to isolate queries, first=%#v second=%#v queries=%#v", first, second, state.queries)
 	}
 }
 

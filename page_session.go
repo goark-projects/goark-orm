@@ -3,6 +3,7 @@ package orm
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // PageQueryResult 描述分页查询除记录外的统计信息。
@@ -87,7 +88,7 @@ func (s *SQLSession) QueryPageStatement(ctx context.Context, meta StatementMeta,
 	if page.SearchCount {
 		countSQL := "SELECT COUNT(*) FROM (" + countSQLBase(runtime.SQL) + ") goark_orm_count"
 		var total int64
-		if err := s.queryCompiledOne(ctx, runtime.Meta, runtime.Dialect, countSQL, runtime.Args, &total); err != nil {
+		if err := s.queryCompiledOne(ctx, runtime.Meta, runtime.Dialect, countSQL, runtime.Args, runtime.CacheKey, &total); err != nil {
 			return PageQueryResult{}, err
 		}
 		result.Total = total
@@ -102,17 +103,18 @@ func (s *SQLSession) QueryPageStatement(ctx context.Context, meta StatementMeta,
 		listArgs[offsetName] = page.offset()
 		listSQL = limitOffsetSQL(runtime.Dialect, listSQL, "#{"+limitName+"}", "#{"+offsetName+"}")
 	}
-	if err := s.queryCompiledRows(ctx, runtime.Meta, runtime.Dialect, listSQL, listArgs, dest); err != nil {
+	if err := s.queryCompiledRows(ctx, runtime.Meta, runtime.Dialect, listSQL, listArgs, runtime.CacheKey, dest); err != nil {
 		return PageQueryResult{}, err
 	}
 	return result, nil
 }
 
-func (s *SQLSession) queryCompiledOne(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs, dest any) error {
+func (s *SQLSession) queryCompiledOne(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs, providerCacheKey string, dest any) error {
 	compiled, err := s.statementHandler.CompileText(ctx, meta, dialect, sqlText, args)
 	if err != nil {
 		return err
 	}
+	compiled.CacheKey = strings.TrimSpace(providerCacheKey)
 	cacheKey := localCacheKey(meta, compiled)
 	if hit, err := s.getLocalCache(cacheKey, dest); err != nil || hit {
 		return err
@@ -139,11 +141,12 @@ func (s *SQLSession) queryCompiledOne(ctx context.Context, meta StatementMeta, d
 	return s.putSecondLevelCache(ctx, meta, cacheKey, dest)
 }
 
-func (s *SQLSession) queryCompiledRows(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs, dest any) error {
+func (s *SQLSession) queryCompiledRows(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs, providerCacheKey string, dest any) error {
 	compiled, err := s.statementHandler.CompileText(ctx, meta, dialect, sqlText, args)
 	if err != nil {
 		return err
 	}
+	compiled.CacheKey = strings.TrimSpace(providerCacheKey)
 	cacheKey := localCacheKey(meta, compiled)
 	if hit, err := s.getLocalCache(cacheKey, dest); err != nil || hit {
 		return err

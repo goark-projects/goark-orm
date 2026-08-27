@@ -59,6 +59,8 @@ func localCacheKey(statement StatementMeta, compiled CompiledSQL) string {
 	var builder strings.Builder
 	builder.WriteString(statement.FullName)
 	builder.WriteByte(0)
+	builder.WriteString(compiled.CacheKey)
+	builder.WriteByte(0)
 	builder.WriteString(compiled.SQL)
 	for index, arg := range compiled.Args {
 		builder.WriteByte(0)

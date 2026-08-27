@@ -262,13 +262,19 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 	if renderArgs == nil {
 		renderArgs = NamedArgs{}
 	}
+	providerCacheKey := ""
 	if strings.TrimSpace(meta.Provider) != "" {
 		source, err := s.invokeSQLProvider(ctx, meta, renderArgs)
 		if err != nil {
 			return nil, err
 		}
+		renderArgs, err = mergeSQLSourceArgs(meta, renderArgs, source.Args)
+		if err != nil {
+			return nil, err
+		}
 		meta.SQL = source.SQL
 		meta.DynamicSQL = source.DynamicSQL
+		providerCacheKey = strings.TrimSpace(source.CacheKey)
 	}
 	sqlText := meta.SQL
 	if len(meta.DynamicSQL) > 0 {
@@ -283,6 +289,7 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 		Meta:          meta,
 		SQL:           sqlText,
 		Args:          copyNamedArgs(renderArgs),
+		CacheKey:      providerCacheKey,
 		Dialect:       s.Dialect(),
 		Configuration: s.Configuration(),
 	}
@@ -332,6 +339,8 @@ func (s *SQLSession) invokeSQLProvider(ctx context.Context, meta StatementMeta, 
 		}
 	}
 	source.SQL = strings.TrimSpace(source.SQL)
+	source.CacheKey = strings.TrimSpace(source.CacheKey)
+	source.Args = copyNamedArgs(source.Args)
 	if source.SQL != "" && len(source.DynamicSQL) > 0 {
 		return SQLSource{}, bindingErrorf("SQL provider %q for statement %s returned both SQL and DynamicSQL", name, meta.FullName)
 	}
@@ -339,6 +348,40 @@ func (s *SQLSession) invokeSQLProvider(ctx context.Context, meta StatementMeta, 
 		return SQLSource{}, bindingErrorf("SQL provider %q for statement %s returned empty SQL", name, meta.FullName)
 	}
 	return source, nil
+}
+
+func mergeSQLSourceArgs(statement StatementMeta, base NamedArgs, extra NamedArgs) (NamedArgs, error) {
+	if len(extra) == 0 {
+		return base, nil
+	}
+	merged := copyNamedArgs(base)
+	if merged == nil {
+		merged = NamedArgs{}
+	}
+	for key, value := range extra {
+		name := strings.TrimSpace(key)
+		if name == "" {
+			return nil, &BindingError{
+				Statement: statement.FullName,
+				Operation: "merge SQL provider args",
+				Message:   fmt.Sprintf("SQL provider for statement %s returned empty arg name", statement.FullName),
+			}
+		}
+		if existing, exists := merged[name]; exists && !reflect.DeepEqual(existing, value) {
+			return nil, &BindingError{
+				Statement: statement.FullName,
+				Operation: "merge SQL provider args",
+				Parameter: name,
+				Message: fmt.Sprintf(
+					"SQL provider arg %q conflicts with mapper arg on statement %s",
+					name,
+					statement.FullName,
+				),
+			}
+		}
+		merged[name] = value
+	}
+	return merged, nil
 }
 
 func dynamicSQLContainsForbiddenSubstitution(nodes []DynamicSQLNode) bool {
@@ -365,6 +408,7 @@ func (s *SQLSession) compileRuntime(ctx context.Context, runtime *StatementRunti
 	if err != nil {
 		return CompiledSQL{}, bindingFailure(runtime.Meta.FullName, "compile", err)
 	}
+	compiled.CacheKey = strings.TrimSpace(runtime.CacheKey)
 	return compiled, nil
 }
 

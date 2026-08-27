@@ -12,8 +12,9 @@ var rawSQLParamPattern = regexp.MustCompile(`\$\{\s*([^{}]+?)\s*\}`)
 
 // CompiledSQL 表示已经完成占位符改写和参数排序的 SQL。
 type CompiledSQL struct {
-	SQL  string
-	Args []any
+	SQL      string
+	Args     []any
+	CacheKey string
 }
 
 // CompileSQL 将 #{name} 改写为数据库方言占位符，并按出现顺序绑定参数。

@@ -98,6 +98,28 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if compiled.SQL != `select * from "sys_user" where id = $1 order by "id" DESC` {
 		t.Fatalf("unexpected compiled SQL %q", compiled.SQL)
 	}
+	source, err := orm.NewSelectSQLBuilder().
+		Select("id", "name").
+		From("sys_user").
+		WhereEq("status", "ACTIVE").
+		OrderByAsc("id").
+		CacheKey("contract").
+		Build()
+	if err != nil {
+		t.Fatalf("build provider SQL source failed: %v", err)
+	}
+	if source.CacheKey != "contract" || len(source.Args) == 0 {
+		t.Fatalf("unexpected SQL source %#v", source)
+	}
+	if _, err := orm.NewInsertSQLBuilder().Into("sys_user").Value("name", "Alice").Build(); err != nil {
+		t.Fatalf("build insert source failed: %v", err)
+	}
+	if _, err := orm.NewUpdateSQLBuilder().Table("sys_user").Set("name", "Alice").WhereEq("id", int64(1)).Build(); err != nil {
+		t.Fatalf("build update source failed: %v", err)
+	}
+	if _, err := orm.NewDeleteSQLBuilder().From("sys_user").WhereEq("id", int64(1)).Build(); err != nil {
+		t.Fatalf("build delete source failed: %v", err)
+	}
 	capabilities, err := orm.NewDialectCapabilities(orm.DbTypePostgres)
 	if err != nil {
 		t.Fatalf("new dialect capabilities failed: %v", err)

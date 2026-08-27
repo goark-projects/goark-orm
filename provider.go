@@ -10,6 +10,8 @@ import (
 type SQLSource struct {
 	SQL        string
 	DynamicSQL []DynamicSQLNode
+	Args       NamedArgs
+	CacheKey   string
 }
 
 // SQLProvider 按 Statement 和入参在运行期生成 SQL。
