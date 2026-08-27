@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCommand_whenGenerateORMToStdout_shouldPrintGeneratedSource(t *testing.T) {
@@ -72,6 +73,85 @@ func TestCommand_whenGenerateORMToFile_shouldWriteFileAndReportToStderr(t *testi
 	}
 	if !strings.Contains(outputText, "var UserFields = goarkORMUserFields") {
 		t.Fatalf("generated ORM file should contain field constants:\n%s", outputText)
+	}
+}
+
+func TestCommand_whenGenerateORMToFileUnchanged_shouldSkipWriteAndReportToStderr(t *testing.T) {
+	dir := writeORMFixture(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	output := filepath.Join(dir, "zz_goark_orm_sample_gen.go")
+
+	code := Main([]string{
+		"gen", "orm",
+		"--dir", dir,
+		"--output", output,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("initial generate failed with code %d, stderr=%s", code, stderr.String())
+	}
+	past := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(output, past, past); err != nil {
+		t.Fatalf("set generated file time failed: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+
+	code = Main([]string{
+		"gen", "orm",
+		"--dir", dir,
+		"--output", output,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout should be empty, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "unchanged "+output) {
+		t.Fatalf("expected unchanged path on stderr, got %q", stderr.String())
+	}
+	info, err := os.Stat(output)
+	if err != nil {
+		t.Fatalf("stat generated ORM file failed: %v", err)
+	}
+	if !info.ModTime().Equal(past) {
+		t.Fatalf("unchanged generated file should not be rewritten, got modtime %s", info.ModTime())
+	}
+}
+
+func TestWriteGeneratedFile_whenContentChanges_shouldReplaceWithoutTempFileLeak(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "zz_goark_orm_sample_gen.go")
+
+	result, err := writeGeneratedFile(output, []byte("old\n"))
+	if err != nil {
+		t.Fatalf("initial write failed: %v", err)
+	}
+	if !result.Changed || result.Path != filepath.Clean(output) {
+		t.Fatalf("unexpected initial write result %#v", result)
+	}
+	result, err = writeGeneratedFile(output, []byte("new\n"))
+	if err != nil {
+		t.Fatalf("replace write failed: %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("changed content should be written")
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read generated file failed: %v", err)
+	}
+	if string(data) != "new\n" {
+		t.Fatalf("unexpected generated file content %q", data)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".*.tmp-*"))
+	if err != nil {
+		t.Fatalf("glob temp files failed: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary generated files leaked: %#v", matches)
 	}
 }
 

@@ -68,11 +68,16 @@ func (c Command) finishGeneratedFile(output string, source []byte, mode generate
 	case generateORMModeDiff:
 		return c.diffGeneratedFile(output, source)
 	default:
-		if err := writeFile(output, source); err != nil {
+		result, err := writeGeneratedFile(output, source)
+		if err != nil {
 			_, _ = fmt.Fprintf(c.Err, "写入生成文件失败: %v\n", err)
 			return 1
 		}
-		_, _ = fmt.Fprintf(c.Err, "generated %s\n", output)
+		if result.Changed {
+			_, _ = fmt.Fprintf(c.Err, "generated %s\n", result.Path)
+		} else {
+			_, _ = fmt.Fprintf(c.Err, "unchanged %s\n", result.Path)
+		}
 		return 0
 	}
 }

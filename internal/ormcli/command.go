@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -252,14 +251,6 @@ func (c Command) runGenerateORMPattern(pattern string, spec ormgen.GenerateSpec,
 		_, _ = fmt.Fprintf(c.Err, "no goark-orm metadata found for %s\n", pattern)
 	}
 	return 0
-}
-
-func writeFile(path string, data []byte) error {
-	path = filepath.Clean(path)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o644)
 }
 
 func (c Command) printHelp(w io.Writer) {
