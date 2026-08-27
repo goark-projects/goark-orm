@@ -82,7 +82,11 @@ func writeRegisterFunction(builder *bytes.Buffer, model *PackageModel) {
 		if generatedRowScannerSupported(entity) {
 			builder.WriteString("if err := registry.RegisterRowScanner(")
 			builder.WriteString(strconv.Quote(entity.TypeName))
-			builder.WriteString(", orm.RowScannerFunc(")
+			if entityRowScannerUsesTypeHandlers(entity) {
+				builder.WriteString(", orm.TypeHandlerRowScannerFunc(")
+			} else {
+				builder.WriteString(", orm.RowScannerFunc(")
+			}
 			builder.WriteString(entityRowScannerFunctionName(entity))
 			builder.WriteString(")); err != nil {\nreturn err\n}\n")
 		}
@@ -216,14 +220,21 @@ func writeEntityTypedFields(builder *bytes.Buffer, entity EntityModel) {
 
 func writeEntityRowScanner(builder *bytes.Buffer, entity EntityModel) {
 	scannerName := entityRowScannerFunctionName(entity)
+	usesTypeHandlers := entityRowScannerUsesTypeHandlers(entity)
 	localName := lowerFirst(entity.TypeName)
 	if localName == "" || localName == entity.TypeName {
 		localName = "out"
 	}
 	builder.WriteString("func ")
 	builder.WriteString(scannerName)
-	builder.WriteString("(ctx context.Context, columns []string, row orm.RowScannerRow, dest any) error {\n")
-	builder.WriteString("_ = ctx\n")
+	builder.WriteString("(ctx context.Context, columns []string, row orm.RowScannerRow, dest any")
+	if usesTypeHandlers {
+		builder.WriteString(", handlers orm.RowScannerTypeHandlers")
+	}
+	builder.WriteString(") error {\n")
+	if !usesTypeHandlers {
+		builder.WriteString("_ = ctx\n")
+	}
 	builder.WriteString(localName)
 	builder.WriteString(", ok := dest.(*")
 	builder.WriteString(entity.TypeName)
@@ -233,7 +244,23 @@ func writeEntityRowScanner(builder *bytes.Buffer, entity EntityModel) {
 	builder.WriteString(" == nil {\nreturn &orm.MappingError{Message:")
 	builder.WriteString(strconv.Quote("row scanner destination must be *" + entity.TypeName))
 	builder.WriteString("}\n}\n")
-	builder.WriteString("targets := make([]any, len(columns))\n")
+	for _, column := range entity.Columns {
+		if strings.TrimSpace(column.TypeHandler) == "" {
+			continue
+		}
+		valueName := generatedTypeHandlerValueName(column)
+		builder.WriteString("var ")
+		builder.WriteString(valueName)
+		builder.WriteString(" any\n")
+		builder.WriteString("var ")
+		builder.WriteString(generatedTypeHandlerPresentName(column))
+		builder.WriteString(" bool\n")
+	}
+	builder.WriteString("var goarkORMTargets [")
+	builder.WriteString(strconv.Itoa(len(entity.Columns)))
+	builder.WriteString("]any\n")
+	builder.WriteString("targets := goarkORMTargets[:]\n")
+	builder.WriteString("if len(columns) > len(targets) {\ntargets = make([]any, len(columns))\n} else {\ntargets = targets[:len(columns)]\n}\n")
 	builder.WriteString("for index, column := range columns {\n")
 	builder.WriteString("switch goarkORMColumnKey(column) {\n")
 	for _, column := range entity.Columns {
@@ -249,14 +276,62 @@ func writeEntityRowScanner(builder *bytes.Buffer, entity EntityModel) {
 			builder.WriteString(strconv.Quote(key))
 		}
 		builder.WriteString(":\n")
+		if strings.TrimSpace(column.TypeHandler) == "" {
+			builder.WriteString("targets[index] = &")
+			builder.WriteString(localName)
+			builder.WriteByte('.')
+			builder.WriteString(column.FieldName)
+			builder.WriteByte('\n')
+			continue
+		}
 		builder.WriteString("targets[index] = &")
+		builder.WriteString(generatedTypeHandlerValueName(column))
+		builder.WriteByte('\n')
+		builder.WriteString(generatedTypeHandlerPresentName(column))
+		builder.WriteString(" = true\n")
+	}
+	builder.WriteString("default:\nvar discard any\ntargets[index] = &discard\n}\n}\n")
+	builder.WriteString("if err := row.Scan(targets...); err != nil {\nreturn err\n}\n")
+	for _, column := range entity.Columns {
+		if strings.TrimSpace(column.TypeHandler) == "" {
+			continue
+		}
+		presentName := generatedTypeHandlerPresentName(column)
+		valueName := generatedTypeHandlerValueName(column)
+		builder.WriteString("if ")
+		builder.WriteString(presentName)
+		builder.WriteString(" {\n")
+		builder.WriteString("if handlers == nil {\nreturn &orm.MappingError{Column:")
+		builder.WriteString(strconv.Quote(column.ColumnName))
+		builder.WriteString(", Field:")
+		builder.WriteString(strconv.Quote(column.FieldName))
+		builder.WriteString(", Message:")
+		builder.WriteString(strconv.Quote("type-handler \"" + column.TypeHandler + "\" is not registered"))
+		builder.WriteString("}\n}\n")
+		builder.WriteString("handler, ok := handlers.TypeHandler(")
+		builder.WriteString(strconv.Quote(column.TypeHandler))
+		builder.WriteString(")\nif !ok {\nreturn &orm.MappingError{Column:")
+		builder.WriteString(strconv.Quote(column.ColumnName))
+		builder.WriteString(", Field:")
+		builder.WriteString(strconv.Quote(column.FieldName))
+		builder.WriteString(", Message:")
+		builder.WriteString(strconv.Quote("type-handler \"" + column.TypeHandler + "\" is not registered"))
+		builder.WriteString("}\n}\n")
+		builder.WriteString("if err := handler.FromDB(ctx, ")
+		builder.WriteString(valueName)
+		builder.WriteString(", &")
 		builder.WriteString(localName)
 		builder.WriteByte('.')
 		builder.WriteString(column.FieldName)
-		builder.WriteByte('\n')
+		builder.WriteString("); err != nil {\nreturn &orm.MappingError{Column:")
+		builder.WriteString(strconv.Quote(column.ColumnName))
+		builder.WriteString(", Field:")
+		builder.WriteString(strconv.Quote(column.FieldName))
+		builder.WriteString(", Message:")
+		builder.WriteString(strconv.Quote("type-handler \"" + column.TypeHandler + "\" failed"))
+		builder.WriteString(", Err: err}\n}\n}\n")
 	}
-	builder.WriteString("default:\nvar discard any\ntargets[index] = &discard\n}\n}\n")
-	builder.WriteString("return row.Scan(targets...)\n")
+	builder.WriteString("return nil\n")
 	builder.WriteString("}\n\n")
 }
 
@@ -1199,11 +1274,28 @@ func generatedRowScannerSupported(entity EntityModel) bool {
 		return false
 	}
 	for _, column := range entity.Columns {
-		if strings.TrimSpace(column.FieldName) == "" || column.Transient || strings.TrimSpace(column.TypeHandler) != "" {
+		if strings.TrimSpace(column.FieldName) == "" || column.Transient {
 			return false
 		}
 	}
 	return true
+}
+
+func entityRowScannerUsesTypeHandlers(entity EntityModel) bool {
+	for _, column := range entity.Columns {
+		if strings.TrimSpace(column.TypeHandler) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func generatedTypeHandlerValueName(column ColumnModel) string {
+	return "goarkORM" + column.FieldName + "Value"
+}
+
+func generatedTypeHandlerPresentName(column ColumnModel) string {
+	return "goarkORM" + column.FieldName + "Present"
 }
 
 func generatedColumnMatchKeys(column ColumnModel) []string {

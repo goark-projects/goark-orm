@@ -167,6 +167,57 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenEntityUsesTypeHandler_shouldRenderTypeHandlerRowScanner(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+	Profile map[string]any `+"`"+`goark-orm:"column='profile';type-handler='json'"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper")
+type UserMapper interface {
+	//goark-orm:select(sql="select id, profile from sys_user where id = #{id}")
+	FindByID(ctx context.Context, id int64) (*User, error)
+}
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir, TypeHandlers: []string{"json"}})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := string(source)
+	expected := []string{
+		`registry.RegisterRowScanner("User", orm.TypeHandlerRowScannerFunc(goarkORMScanUserRow))`,
+		`func goarkORMScanUserRow(ctx context.Context, columns []string, row orm.RowScannerRow, dest any, handlers orm.RowScannerTypeHandlers) error`,
+		`handler, ok := handlers.TypeHandler("json")`,
+		`return &orm.MappingError{Column: "profile", Field: "Profile", Message: "type-handler \"json\" is not registered"}`,
+		`if err := handler.FromDB(ctx, goarkORMProfileValue, &user.Profile); err != nil {`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, output)
+		}
+	}
+	mustWriteFile(t, filepath.Join(dir, "zz_goark_orm_sample_gen.go"), output)
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatalf("resolve module root failed: %v", err)
+	}
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/goark-orm-typehandler-smoke\n\ngo 1.25\n\nrequire goark.dev/orm v0.0.0\n\nreplace goark.dev/orm => "+filepath.ToSlash(root)+"\n")
+	cmd := exec.Command("go", "test", "-mod=mod", ".")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	compileOutput, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated type-handler row scanner did not compile: %v\n%s", err, compileOutput)
+	}
+}
+
 func TestGenerate_whenAnnotationCallUsesOutAndCallResult_shouldRenderCallResult(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

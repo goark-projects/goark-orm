@@ -941,6 +941,12 @@ func (s *SQLSession) scanWithRegisteredRowScanner(ctx context.Context, row RowSc
 	if !ok {
 		return nil, false
 	}
+	if typed, ok := scanner.(TypeHandlerRowScanner); ok {
+		if err := typed.ScanRowWithTypeHandlers(ctx, columns, row, target.Addr().Interface(), rowScannerTypeHandlerMap(s.typeHandlers)); err != nil {
+			return mappingFailure(statement, err), true
+		}
+		return nil, true
+	}
 	if err := scanner.ScanRow(ctx, columns, row, target.Addr().Interface()); err != nil {
 		return mappingFailure(statement, err), true
 	}
