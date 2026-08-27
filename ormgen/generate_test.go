@@ -657,6 +657,49 @@ type UserMapper interface {
 	}
 }
 
+func TestGenerate_whenXMLForeachNullableDeclared_shouldRenderDynamicNodeNullable(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample
+
+import "context"
+
+//goark-orm:entity(table="sys_user")
+type User struct {
+	ID int64 `+"`"+`goark-orm:"column='id';primary-key=true"`+"`"+`
+}
+
+//goark-orm:mapper(namespace="system.user.UserMapper", xml="mapper/user_mapper.xml")
+type UserMapper interface {
+	List(ctx context.Context, ids []int64) ([]User, error)
+}
+`)
+	mustWriteFile(t, filepath.Join(dir, "mapper", "user_mapper.xml"), `<mapper namespace="system.user.UserMapper">
+  <select id="List">
+    select id from sys_user where id in
+    <foreach collection="ids" item="id" open="(" separator="," close=")" nullable="true">
+      #{id}
+    </foreach>
+  </select>
+</mapper>
+`)
+
+	source, err := Generate(GenerateSpec{Dir: dir})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	output := string(source)
+	expected := []string{
+		"Kind: orm.DynamicSQLNodeForeach",
+		`Collection: "ids"`,
+		"Nullable: goarkORMBoolPtr(true)",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated source missing %q:\n%s", fragment, output)
+		}
+	}
+}
+
 func TestGenerate_whenAnnotationContainsScript_shouldRenderDynamicSQLMetadata(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "mapper.go"), `package sample

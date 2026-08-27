@@ -766,6 +766,7 @@ func writeDynamicSQLNodes(builder *bytes.Buffer, nodes []orm.DynamicSQLNode) {
 		writeStringField(builder, "Open", node.Open)
 		writeStringField(builder, "Close", node.Close)
 		writeStringField(builder, "Separator", node.Separator)
+		writeBoolPtrField(builder, "Nullable", node.Nullable)
 		writeStringField(builder, "RefID", node.RefID)
 		if len(node.Children) > 0 {
 			builder.WriteString("Children:")
@@ -1354,6 +1355,20 @@ func modelNeedsPointerHelpers(model *PackageModel) bool {
 			if resultMap.AutoMapping != nil {
 				return true
 			}
+		}
+		for _, statement := range mapper.Statements {
+			if dynamicNodesNeedPointerHelpers(statement.DynamicSQL) || dynamicNodesNeedPointerHelpers(statement.SelectKey.DynamicSQL) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dynamicNodesNeedPointerHelpers(nodes []orm.DynamicSQLNode) bool {
+	for _, node := range nodes {
+		if node.Nullable != nil || dynamicNodesNeedPointerHelpers(node.Children) {
+			return true
 		}
 	}
 	return false

@@ -85,7 +85,11 @@ func (s *SQLSession) statementOptions(meta StatementMeta) StatementOptions {
 	if s == nil {
 		return meta.Options
 	}
-	return meta.Options.withDefaults(s.configuration.DefaultStatementTimeout, s.configuration.DefaultFetchSize)
+	return meta.Options.withDefaults(
+		s.configuration.DefaultStatementTimeout,
+		s.configuration.DefaultFetchSize,
+		s.configuration.DefaultResultSetType,
+	)
 }
 
 func (s *SQLSession) applyStatementOptions(ctx context.Context, query string, options StatementOptions, queryOnly bool) error {

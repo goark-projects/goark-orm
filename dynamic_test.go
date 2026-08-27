@@ -90,6 +90,70 @@ func TestRenderDynamicSQL_whenForeachCollection_shouldExpandItems(t *testing.T) 
 	}
 }
 
+func TestRenderDynamicSQLWithOptions_whenForeachCollectionNilAndNullableDisabled_shouldReject(t *testing.T) {
+	_, err := RenderDynamicSQLWithOptions([]DynamicSQLNode{
+		{Kind: DynamicSQLNodeText, Text: "select id from sys_user where id in"},
+		{
+			Kind:       DynamicSQLNodeForeach,
+			Collection: "ids",
+			Item:       "id",
+			Open:       "(",
+			Separator:  ",",
+			Close:      ")",
+			Children: []DynamicSQLNode{
+				{Kind: DynamicSQLNodeText, Text: "#{id}"},
+			},
+		},
+	}, NamedArgs{"ids": []int64(nil)}, DynamicSQLRenderOptions{NullableOnForEach: false})
+	if err == nil {
+		t.Fatalf("expected nil foreach collection to be rejected")
+	}
+}
+
+func TestRenderDynamicSQLWithOptions_whenForeachNodeAllowsNullable_shouldOverrideDefault(t *testing.T) {
+	nullable := true
+	rendered, err := RenderDynamicSQLWithOptions([]DynamicSQLNode{
+		{Kind: DynamicSQLNodeText, Text: "select id from sys_user where id in"},
+		{
+			Kind:       DynamicSQLNodeForeach,
+			Collection: "ids",
+			Nullable:   &nullable,
+			Open:       "(",
+			Close:      ")",
+			Children: []DynamicSQLNode{
+				{Kind: DynamicSQLNodeText, Text: "#{id}"},
+			},
+		},
+	}, NamedArgs{}, DynamicSQLRenderOptions{NullableOnForEach: false})
+	if err != nil {
+		t.Fatalf("render dynamic SQL failed: %v", err)
+	}
+	if rendered.SQL != "select id from sys_user where id in" {
+		t.Fatalf("unexpected SQL %q", rendered.SQL)
+	}
+}
+
+func TestRenderDynamicSQLWithOptions_whenShrinkWhitespaceEnabled_shouldCollapseFinalSQL(t *testing.T) {
+	rendered, err := RenderDynamicSQLWithOptions([]DynamicSQLNode{
+		{Kind: DynamicSQLNodeText, Text: "select  id\nfrom   sys_user"},
+		{
+			Kind: DynamicSQLNodeWhere,
+			Children: []DynamicSQLNode{
+				{Kind: DynamicSQLNodeText, Text: "\n  status   =   #{status}  "},
+			},
+		},
+	}, NamedArgs{"status": "ACTIVE"}, DynamicSQLRenderOptions{
+		NullableOnForEach:      true,
+		ShrinkWhitespacesInSQL: true,
+	})
+	if err != nil {
+		t.Fatalf("render dynamic SQL failed: %v", err)
+	}
+	if rendered.SQL != "select id from sys_user WHERE status = #{status}" {
+		t.Fatalf("unexpected SQL %q", rendered.SQL)
+	}
+}
+
 func TestRenderDynamicSQL_whenSetNode_shouldTrimTrailingComma(t *testing.T) {
 	rendered, err := RenderDynamicSQL([]DynamicSQLNode{
 		{Kind: DynamicSQLNodeText, Text: "update sys_user"},

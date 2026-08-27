@@ -7,17 +7,24 @@ import (
 
 // MyBatisSettings 描述运行期 settings 配置子集。
 type MyBatisSettings struct {
-	CacheEnabled               *bool
-	LocalCacheEnabled          *bool
-	LocalCacheScope            LocalCacheScope
-	MapUnderscoreToCamelCase   bool
-	UseGeneratedKeys           bool
-	LazyLoadingEnabled         bool
-	DefaultExecutorType        ExecutorType
-	PreparedStatementCacheSize int
-	DefaultStatementTimeout    time.Duration
-	DefaultFetchSize           int
-	DatabaseID                 string
+	CacheEnabled                     *bool
+	LocalCacheEnabled                *bool
+	LocalCacheScope                  LocalCacheScope
+	MapUnderscoreToCamelCase         bool
+	UseGeneratedKeys                 bool
+	LazyLoadingEnabled               bool
+	DefaultExecutorType              ExecutorType
+	PreparedStatementCacheSize       int
+	DefaultStatementTimeout          time.Duration
+	DefaultFetchSize                 int
+	DefaultResultSetType             ResultSetType
+	UseColumnLabel                   *bool
+	NullableOnForEach                *bool
+	ShrinkWhitespacesInSQL           bool
+	JDBCTypeForNull                  string
+	AutoMappingBehavior              AutoMappingBehavior
+	AutoMappingUnknownColumnBehavior AutoMappingUnknownColumnBehavior
+	DatabaseID                       string
 }
 
 // MyBatisEnvironment 描述数据库环境配置。Dialect 显式指定时优先于 DbType。
@@ -126,6 +133,13 @@ func (c MyBatisConfig) BuildConfiguration() (Configuration, error) {
 	out.PreparedStatementCacheSize = c.Settings.PreparedStatementCacheSize
 	out.DefaultStatementTimeout = c.Settings.DefaultStatementTimeout
 	out.DefaultFetchSize = c.Settings.DefaultFetchSize
+	out.DefaultResultSetType = c.Settings.DefaultResultSetType
+	out.UseColumnLabel = cloneBoolPointer(c.Settings.UseColumnLabel)
+	out.NullableOnForEach = cloneBoolPointer(c.Settings.NullableOnForEach)
+	out.ShrinkWhitespacesInSQL = c.Settings.ShrinkWhitespacesInSQL
+	out.JDBCTypeForNull = c.Settings.JDBCTypeForNull
+	out.AutoMappingBehavior = c.Settings.AutoMappingBehavior
+	out.AutoMappingUnknownColumnBehavior = c.Settings.AutoMappingUnknownColumnBehavior
 	return normalizeConfiguration(out, nil)
 }
 
@@ -148,6 +162,24 @@ func (c MyBatisConfig) Validate() error {
 	}
 	if c.Settings.DefaultFetchSize < 0 {
 		return configurationErrorf("defaultFetchSize must be >= 0")
+	}
+	if c.Settings.DefaultResultSetType != "" {
+		if _, err := ParseResultSetType(string(c.Settings.DefaultResultSetType)); err != nil {
+			return err
+		}
+	}
+	if _, err := normalizeJDBCTypeName(c.Settings.JDBCTypeForNull); err != nil {
+		return err
+	}
+	if c.Settings.AutoMappingBehavior != "" {
+		if _, err := ParseAutoMappingBehavior(string(c.Settings.AutoMappingBehavior)); err != nil {
+			return err
+		}
+	}
+	if c.Settings.AutoMappingUnknownColumnBehavior != "" {
+		if _, err := ParseAutoMappingUnknownColumnBehavior(string(c.Settings.AutoMappingUnknownColumnBehavior)); err != nil {
+			return err
+		}
 	}
 	if c.Settings.PreparedStatementCacheSize < 0 {
 		return configurationErrorf("preparedStatementCacheSize must be >= 0")

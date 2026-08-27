@@ -34,33 +34,47 @@ const (
 
 // Configuration 描述 ORM 运行期配置。
 type Configuration struct {
-	Dialect                    Dialect
-	DatabaseID                 string
-	GlobalConfig               GlobalConfig
-	LocalCacheEnabled          *bool
-	LocalCacheScope            LocalCacheScope
-	CacheEnabled               *bool
-	MapUnderscoreToCamelCase   bool
-	UseGeneratedKeys           bool
-	LazyLoadingEnabled         bool
-	DefaultExecutorType        ExecutorType
-	PreparedStatementCacheSize int
-	DefaultStatementTimeout    time.Duration
-	DefaultFetchSize           int
-	MetaObjectHandler          MetaObjectHandler
+	Dialect                          Dialect
+	DatabaseID                       string
+	GlobalConfig                     GlobalConfig
+	LocalCacheEnabled                *bool
+	LocalCacheScope                  LocalCacheScope
+	CacheEnabled                     *bool
+	MapUnderscoreToCamelCase         bool
+	UseGeneratedKeys                 bool
+	LazyLoadingEnabled               bool
+	DefaultExecutorType              ExecutorType
+	PreparedStatementCacheSize       int
+	DefaultStatementTimeout          time.Duration
+	DefaultFetchSize                 int
+	DefaultResultSetType             ResultSetType
+	UseColumnLabel                   *bool
+	NullableOnForEach                *bool
+	ShrinkWhitespacesInSQL           bool
+	JDBCTypeForNull                  string
+	AutoMappingBehavior              AutoMappingBehavior
+	AutoMappingUnknownColumnBehavior AutoMappingUnknownColumnBehavior
+	MetaObjectHandler                MetaObjectHandler
 }
 
 // DefaultConfiguration 返回独立 ORM 的默认运行期配置。
 func DefaultConfiguration() Configuration {
 	localCacheEnabled := true
 	cacheEnabled := true
+	useColumnLabel := true
+	nullableOnForEach := true
 	return Configuration{
-		LocalCacheEnabled:          &localCacheEnabled,
-		LocalCacheScope:            LocalCacheScopeSession,
-		CacheEnabled:               &cacheEnabled,
-		DefaultExecutorType:        ExecutorTypeSimple,
-		PreparedStatementCacheSize: DefaultPreparedStatementCacheSize,
-		GlobalConfig:               DefaultGlobalConfig(),
+		LocalCacheEnabled:                &localCacheEnabled,
+		LocalCacheScope:                  LocalCacheScopeSession,
+		CacheEnabled:                     &cacheEnabled,
+		DefaultExecutorType:              ExecutorTypeSimple,
+		PreparedStatementCacheSize:       DefaultPreparedStatementCacheSize,
+		UseColumnLabel:                   &useColumnLabel,
+		NullableOnForEach:                &nullableOnForEach,
+		JDBCTypeForNull:                  "OTHER",
+		AutoMappingBehavior:              AutoMappingBehaviorFull,
+		AutoMappingUnknownColumnBehavior: AutoMappingUnknownColumnBehaviorNone,
+		GlobalConfig:                     DefaultGlobalConfig(),
 	}
 }
 
@@ -85,6 +99,30 @@ func (c Configuration) WithSecondLevelCache(enabled bool) Configuration {
 // WithMapUnderscoreToCamelCase 返回设置下划线转驼峰自动映射后的配置副本。
 func (c Configuration) WithMapUnderscoreToCamelCase(enabled bool) Configuration {
 	c.MapUnderscoreToCamelCase = enabled
+	return c
+}
+
+// WithDefaultResultSetType 返回设置默认结果集类型后的配置副本。
+func (c Configuration) WithDefaultResultSetType(value ResultSetType) Configuration {
+	c.DefaultResultSetType = value
+	return c
+}
+
+// WithNullableOnForEach 返回设置 foreach 空集合策略后的配置副本。
+func (c Configuration) WithNullableOnForEach(enabled bool) Configuration {
+	c.NullableOnForEach = boolPointer(enabled)
+	return c
+}
+
+// WithAutoMappingBehavior 返回设置自动映射策略后的配置副本。
+func (c Configuration) WithAutoMappingBehavior(value AutoMappingBehavior) Configuration {
+	c.AutoMappingBehavior = value
+	return c
+}
+
+// WithAutoMappingUnknownColumnBehavior 返回设置未知自动映射列策略后的配置副本。
+func (c Configuration) WithAutoMappingUnknownColumnBehavior(value AutoMappingUnknownColumnBehavior) Configuration {
+	c.AutoMappingUnknownColumnBehavior = value
 	return c
 }
 
@@ -148,6 +186,16 @@ func normalizeConfiguration(config Configuration, fallbackDialect Dialect) (Conf
 	} else {
 		out.CacheEnabled = boolPointer(*out.CacheEnabled)
 	}
+	if out.UseColumnLabel == nil {
+		out.UseColumnLabel = boolPointer(boolValue(defaults.UseColumnLabel, true))
+	} else {
+		out.UseColumnLabel = boolPointer(*out.UseColumnLabel)
+	}
+	if out.NullableOnForEach == nil {
+		out.NullableOnForEach = boolPointer(boolValue(defaults.NullableOnForEach, true))
+	} else {
+		out.NullableOnForEach = boolPointer(*out.NullableOnForEach)
+	}
 	switch out.LocalCacheScope {
 	case "":
 		out.LocalCacheScope = defaults.LocalCacheScope
@@ -164,6 +212,39 @@ func normalizeConfiguration(config Configuration, fallbackDialect Dialect) (Conf
 	}
 	if out.DefaultFetchSize < 0 {
 		return Configuration{}, configurationErrorf("defaultFetchSize must be >= 0")
+	}
+	resultSetType, err := ParseResultSetType(string(out.DefaultResultSetType))
+	if err != nil {
+		return Configuration{}, err
+	}
+	out.DefaultResultSetType = resultSetType
+	jdbcType, err := normalizeJDBCTypeName(out.JDBCTypeForNull)
+	if err != nil {
+		return Configuration{}, err
+	}
+	if jdbcType == "" {
+		jdbcType = defaults.JDBCTypeForNull
+	}
+	out.JDBCTypeForNull = jdbcType
+	autoMapping, err := ParseAutoMappingBehavior(string(out.AutoMappingBehavior))
+	if err != nil {
+		return Configuration{}, err
+	}
+	switch autoMapping {
+	case "":
+		out.AutoMappingBehavior = defaults.AutoMappingBehavior
+	default:
+		out.AutoMappingBehavior = autoMapping
+	}
+	unknownColumn, err := ParseAutoMappingUnknownColumnBehavior(string(out.AutoMappingUnknownColumnBehavior))
+	if err != nil {
+		return Configuration{}, err
+	}
+	switch unknownColumn {
+	case "":
+		out.AutoMappingUnknownColumnBehavior = defaults.AutoMappingUnknownColumnBehavior
+	default:
+		out.AutoMappingUnknownColumnBehavior = unknownColumn
 	}
 	switch {
 	case out.PreparedStatementCacheSize == 0:
@@ -191,6 +272,12 @@ func cloneConfiguration(config Configuration) Configuration {
 	}
 	if config.CacheEnabled != nil {
 		config.CacheEnabled = boolPointer(*config.CacheEnabled)
+	}
+	if config.UseColumnLabel != nil {
+		config.UseColumnLabel = boolPointer(*config.UseColumnLabel)
+	}
+	if config.NullableOnForEach != nil {
+		config.NullableOnForEach = boolPointer(*config.NullableOnForEach)
 	}
 	return config
 }

@@ -150,12 +150,16 @@ func resultCollectionPlans(rootType reflect.Type, collections []ResultCollection
 
 func (s *SQLSession) applyBindings(ctx context.Context, target reflect.Value, bindings map[string]columnBinding, columns []string, values []any) error {
 	var columnIndexes map[string]int
+	failUnknown := s.shouldFailUnknownAutoMappingColumn(bindings)
 	for index, column := range columns {
 		if index < 0 || index >= len(values) {
 			continue
 		}
 		binding, ok := s.lookupColumnBinding(bindings, column)
 		if !ok {
+			if failUnknown {
+				return unknownAutoMappingColumnError(StatementMeta{}, column)
+			}
 			continue
 		}
 		if len(binding.presenceColumns) > 0 {

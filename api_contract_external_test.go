@@ -186,6 +186,9 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ orm.StatementHandlerMiddleware = orm.StatementHandlerMiddlewareFunc(func(next orm.StatementHandler) orm.StatementHandler { return next })
 	var _ orm.ParameterHandlerMiddleware = orm.ParameterHandlerMiddlewareFunc(func(next orm.ParameterHandler) orm.ParameterHandler { return next })
 	var _ orm.ResultSetHandlerMiddleware = orm.ResultSetHandlerMiddlewareFunc(func(next orm.ResultSetHandler) orm.ResultSetHandler { return next })
+	var _ orm.DynamicSQLRenderOptions = orm.DynamicSQLRenderOptions{NullableOnForEach: true, ShrinkWhitespacesInSQL: true}
+	var _ orm.AutoMappingBehavior = orm.AutoMappingBehaviorFull
+	var _ orm.AutoMappingUnknownColumnBehavior = orm.AutoMappingUnknownColumnBehaviorFailing
 
 	var _ func(*orm.Registry, orm.SQLExecutor, orm.Dialect, ...orm.SQLSessionOption) (*orm.SQLSession, error) = orm.NewSQLSession
 	var _ func(*orm.Registry, *sql.DB, orm.Dialect, ...orm.SQLSessionOption) (*orm.SQLSessionFactory, error) = orm.NewSQLSessionFactory
@@ -204,6 +207,9 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ func(*orm.Registry, string, orm.EntityMeta, orm.SQLInjector, ...orm.InjectOption) error = orm.RegisterInjectedStatements
 	var _ func(*orm.Registry, orm.InjectNamespaceResolver, ...orm.InjectOption) error = orm.RegisterDefaultInjectedStatementsForRegistry
 	var _ func(int) orm.SQLSessionOption = orm.WithPreparedStatementCacheSize
+	var _ func([]orm.DynamicSQLNode, orm.NamedArgs, orm.DynamicSQLRenderOptions) (orm.RenderedSQL, error) = orm.RenderDynamicSQLWithOptions
+	var _ func(string) (orm.AutoMappingBehavior, error) = orm.ParseAutoMappingBehavior
+	var _ func(string) (orm.AutoMappingUnknownColumnBehavior, error) = orm.ParseAutoMappingUnknownColumnBehavior
 	var _ int = orm.DefaultPreparedStatementCacheSize
 
 	if _, err := orm.ParseDbType("postgres"); err != nil {
@@ -220,6 +226,12 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	}
 	if _, err := orm.ParseResultSetType("FORWARD_ONLY"); err != nil {
 		t.Fatalf("parse result set type failed: %v", err)
+	}
+	if _, err := orm.ParseAutoMappingBehavior("FULL"); err != nil {
+		t.Fatalf("parse auto mapping behavior failed: %v", err)
+	}
+	if _, err := orm.ParseAutoMappingUnknownColumnBehavior("FAILING"); err != nil {
+		t.Fatalf("parse unknown column behavior failed: %v", err)
 	}
 
 	_, err = orm.AssembleMyBatisConfig(orm.MyBatisAssembly{

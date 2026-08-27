@@ -297,12 +297,18 @@ func (s *SQLSession) prepareStatementRuntime(ctx context.Context, meta Statement
 	}
 	sqlText := meta.SQL
 	if len(meta.DynamicSQL) > 0 {
-		rendered, err := RenderDynamicSQL(meta.DynamicSQL, renderArgs)
+		rendered, err := RenderDynamicSQLWithOptions(meta.DynamicSQL, renderArgs, DynamicSQLRenderOptions{
+			NullableOnForEach:      boolValue(s.configuration.NullableOnForEach, true),
+			ShrinkWhitespacesInSQL: s.configuration.ShrinkWhitespacesInSQL,
+		})
 		if err != nil {
 			return nil, bindingFailure(meta.FullName, "render dynamic", err)
 		}
 		sqlText = rendered.SQL
 		renderArgs = rendered.Args
+	}
+	if s.configuration.ShrinkWhitespacesInSQL && len(meta.DynamicSQL) == 0 {
+		sqlText = ShrinkSQLWhitespaces(sqlText)
 	}
 	runtime := &StatementRuntime{
 		Meta:          meta,
@@ -872,11 +878,13 @@ type columnBinding struct {
 	typeHandler     string
 	presenceColumns []string
 	auto            bool
+	autoMapping     bool
 	fieldName       string
 }
 
 func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(dest ...any) error }, columns []string, statement StatementMeta, target reflect.Value) error {
 	bindings := s.columnBindings(statement, target.Type())
+	failUnknown := s.shouldFailUnknownAutoMappingColumn(bindings)
 	var targetStack [rowScanStackTargetCount]any
 	targets := rowScanTargets(len(columns), &targetStack)
 	var rawValueStack [rowScanStackTargetCount]any
@@ -886,6 +894,9 @@ func (s *SQLSession) scanStruct(ctx context.Context, scanner interface{ Scan(des
 	for index, column := range columns {
 		binding, ok := s.lookupColumnBinding(bindings, column)
 		if !ok {
+			if failUnknown {
+				return unknownAutoMappingColumnError(statement, column)
+			}
 			var discard any
 			targets[index] = &discard
 			continue
@@ -977,10 +988,7 @@ func (s *SQLSession) columnBindingsWithResultMap(statement StatementMeta, typ re
 }
 
 func buildColumnBindingsWithResultMap(s *SQLSession, statement StatementMeta, typ reflect.Type, resultMap ResultMapMeta, hasResultMap bool) map[string]columnBinding {
-	autoMapping := true
-	if hasResultMap && resultMap.AutoMapping != nil {
-		autoMapping = *resultMap.AutoMapping
-	}
+	autoMapping := s.autoMappingEnabled(resultMap, hasResultMap)
 	bindings := make(map[string]columnBinding)
 	if !hasResultMap || autoMapping {
 		bindings = exportedFieldBindings(typ)
@@ -1007,6 +1015,7 @@ func addEntityColumnBindings(bindings map[string]columnBinding, typ reflect.Type
 			bindings[normalizeColumnKey(column.ColumnName)] = columnBinding{
 				index:       field.Index,
 				typeHandler: column.TypeHandler,
+				autoMapping: true,
 				fieldName:   field.Name,
 			}
 		}
@@ -1098,9 +1107,10 @@ func exportedFieldBindings(typ reflect.Type) map[string]columnBinding {
 			continue
 		}
 		bindings[normalizeColumnKey(field.Name)] = columnBinding{
-			index:     field.Index,
-			auto:      true,
-			fieldName: field.Name,
+			index:       field.Index,
+			auto:        true,
+			autoMapping: true,
+			fieldName:   field.Name,
 		}
 	}
 	return bindings

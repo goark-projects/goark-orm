@@ -11,19 +11,28 @@ func TestMyBatisConfig_BuildConfiguration_whenGoNativeModelProvided_shouldApplyR
 
 	cacheEnabled := false
 	localCacheEnabled := false
+	useColumnLabel := false
+	nullableOnForEach := false
 	config, err := MyBatisConfig{
 		Settings: MyBatisSettings{
-			CacheEnabled:               &cacheEnabled,
-			LocalCacheEnabled:          &localCacheEnabled,
-			LocalCacheScope:            LocalCacheScopeStatement,
-			MapUnderscoreToCamelCase:   true,
-			UseGeneratedKeys:           true,
-			LazyLoadingEnabled:         true,
-			DefaultExecutorType:        ExecutorTypeReuse,
-			PreparedStatementCacheSize: 64,
-			DefaultStatementTimeout:    3 * time.Second,
-			DefaultFetchSize:           128,
-			DatabaseID:                 "mysql8",
+			CacheEnabled:                     &cacheEnabled,
+			LocalCacheEnabled:                &localCacheEnabled,
+			LocalCacheScope:                  LocalCacheScopeStatement,
+			MapUnderscoreToCamelCase:         true,
+			UseGeneratedKeys:                 true,
+			LazyLoadingEnabled:               true,
+			DefaultExecutorType:              ExecutorTypeReuse,
+			PreparedStatementCacheSize:       64,
+			DefaultStatementTimeout:          3 * time.Second,
+			DefaultFetchSize:                 128,
+			DefaultResultSetType:             ResultSetTypeForwardOnly,
+			UseColumnLabel:                   &useColumnLabel,
+			NullableOnForEach:                &nullableOnForEach,
+			ShrinkWhitespacesInSQL:           true,
+			JDBCTypeForNull:                  "NULL",
+			AutoMappingBehavior:              AutoMappingBehaviorNone,
+			AutoMappingUnknownColumnBehavior: AutoMappingUnknownColumnBehaviorFailing,
+			DatabaseID:                       "mysql8",
 		},
 		Environment: MyBatisEnvironment{
 			ID:     "prod",
@@ -65,6 +74,19 @@ func TestMyBatisConfig_BuildConfiguration_whenGoNativeModelProvided_shouldApplyR
 	}
 	if config.DefaultStatementTimeout != 3*time.Second || config.DefaultFetchSize != 128 {
 		t.Fatalf("unexpected timeout or fetch size")
+	}
+	if config.DefaultResultSetType != ResultSetTypeForwardOnly {
+		t.Fatalf("unexpected default result set type %q", config.DefaultResultSetType)
+	}
+	if boolValue(config.UseColumnLabel, true) || boolValue(config.NullableOnForEach, true) {
+		t.Fatalf("expected nullable/useColumnLabel settings to be disabled")
+	}
+	if !config.ShrinkWhitespacesInSQL || config.JDBCTypeForNull != "NULL" {
+		t.Fatalf("unexpected SQL whitespace or JDBC null settings")
+	}
+	if config.AutoMappingBehavior != AutoMappingBehaviorNone ||
+		config.AutoMappingUnknownColumnBehavior != AutoMappingUnknownColumnBehaviorFailing {
+		t.Fatalf("unexpected auto mapping settings")
 	}
 	if config.DatabaseID != "mysql8" {
 		t.Fatalf("unexpected database id %q", config.DatabaseID)
@@ -125,5 +147,26 @@ func TestParseConfigurationEnums_whenValuesProvided_shouldMatchMyBatisNames(t *t
 	}
 	if executor != ExecutorTypeBatch {
 		t.Fatalf("unexpected executor type %q", executor)
+	}
+	resultSetType, err := ParseResultSetType("default")
+	if err != nil {
+		t.Fatalf("parse default result set type failed: %v", err)
+	}
+	if resultSetType != "" {
+		t.Fatalf("DEFAULT result set type should map to empty runtime hint, got %q", resultSetType)
+	}
+	autoMapping, err := ParseAutoMappingBehavior("partial")
+	if err != nil {
+		t.Fatalf("parse auto mapping behavior failed: %v", err)
+	}
+	if autoMapping != AutoMappingBehaviorPartial {
+		t.Fatalf("unexpected auto mapping behavior %q", autoMapping)
+	}
+	unknownColumn, err := ParseAutoMappingUnknownColumnBehavior("failing")
+	if err != nil {
+		t.Fatalf("parse unknown column behavior failed: %v", err)
+	}
+	if unknownColumn != AutoMappingUnknownColumnBehaviorFailing {
+		t.Fatalf("unexpected unknown column behavior %q", unknownColumn)
 	}
 }

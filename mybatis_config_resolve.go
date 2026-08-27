@@ -46,6 +46,18 @@ func (f MyBatisSettingsFile) resolveProperties(resolver *configPropertyResolver)
 	if out.DefaultStatementTimeout, err = resolveConfigString(resolver, f.DefaultStatementTimeout); err != nil {
 		return MyBatisSettingsFile{}, err
 	}
+	if out.DefaultResultSetType, err = resolveConfigString(resolver, f.DefaultResultSetType); err != nil {
+		return MyBatisSettingsFile{}, err
+	}
+	if out.JDBCTypeForNull, err = resolveConfigString(resolver, f.JDBCTypeForNull); err != nil {
+		return MyBatisSettingsFile{}, err
+	}
+	if out.AutoMappingBehavior, err = resolveConfigString(resolver, f.AutoMappingBehavior); err != nil {
+		return MyBatisSettingsFile{}, err
+	}
+	if out.AutoMappingUnknownColumnBehavior, err = resolveConfigString(resolver, f.AutoMappingUnknownColumnBehavior); err != nil {
+		return MyBatisSettingsFile{}, err
+	}
 	if out.DatabaseID, err = resolveConfigString(resolver, f.DatabaseID); err != nil {
 		return MyBatisSettingsFile{}, err
 	}

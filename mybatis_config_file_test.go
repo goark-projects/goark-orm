@@ -16,12 +16,19 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
   },
   "settings": {
     "cacheEnabled": false,
+    "useColumnLabel": false,
     "localCacheScope": "STATEMENT",
     "mapUnderscoreToCamelCase": true,
     "defaultExecutorType": "REUSE",
     "preparedStatementCacheSize": 64,
     "defaultStatementTimeout": "2s",
     "defaultFetchSize": 128,
+    "defaultResultSetType": "FORWARD_ONLY",
+    "nullableOnForEach": false,
+    "shrinkWhitespacesInSql": true,
+    "jdbcTypeForNull": "NULL",
+    "autoMappingBehavior": "NONE",
+    "autoMappingUnknownColumnBehavior": "FAILING",
     "databaseId": "postgres"
   },
   "environment": {
@@ -76,6 +83,19 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
 	}
 	if config.Settings.PreparedStatementCacheSize != 64 {
 		t.Fatalf("unexpected prepared statement cache size %d", config.Settings.PreparedStatementCacheSize)
+	}
+	if config.Settings.DefaultResultSetType != ResultSetTypeForwardOnly {
+		t.Fatalf("unexpected default result set type %q", config.Settings.DefaultResultSetType)
+	}
+	if boolValue(config.Settings.UseColumnLabel, true) || boolValue(config.Settings.NullableOnForEach, true) {
+		t.Fatalf("expected useColumnLabel and nullableOnForEach to be disabled")
+	}
+	if !config.Settings.ShrinkWhitespacesInSQL || config.Settings.JDBCTypeForNull != "NULL" {
+		t.Fatalf("unexpected SQL whitespace or JDBC null settings")
+	}
+	if config.Settings.AutoMappingBehavior != AutoMappingBehaviorNone ||
+		config.Settings.AutoMappingUnknownColumnBehavior != AutoMappingUnknownColumnBehaviorFailing {
+		t.Fatalf("unexpected auto mapping settings")
 	}
 	if config.Environment.DbType != DbTypePostgres {
 		t.Fatalf("unexpected db type %q", config.Environment.DbType)

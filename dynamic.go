@@ -13,26 +13,45 @@ type RenderedSQL struct {
 	Args NamedArgs
 }
 
+// DynamicSQLRenderOptions 描述动态 SQL 渲染期选项。
+type DynamicSQLRenderOptions struct {
+	NullableOnForEach      bool
+	ShrinkWhitespacesInSQL bool
+}
+
 type dynamicRenderContext struct {
-	args    NamedArgs
-	aliases map[string]string
-	values  map[string]any
-	seq     int
+	args                   NamedArgs
+	aliases                map[string]string
+	values                 map[string]any
+	nullableOnForEach      bool
+	shrinkWhitespacesInSQL bool
+	seq                    int
 }
 
 // RenderDynamicSQL 将动态 SQL 节点树渲染为可继续参数编译的 SQL。
 func RenderDynamicSQL(nodes []DynamicSQLNode, args NamedArgs) (RenderedSQL, error) {
+	return RenderDynamicSQLWithOptions(nodes, args, DynamicSQLRenderOptions{NullableOnForEach: true})
+}
+
+// RenderDynamicSQLWithOptions 按指定选项渲染动态 SQL 节点树。
+func RenderDynamicSQLWithOptions(nodes []DynamicSQLNode, args NamedArgs, options DynamicSQLRenderOptions) (RenderedSQL, error) {
 	ctx := &dynamicRenderContext{
-		args:    copyNamedArgs(args),
-		aliases: make(map[string]string),
-		values:  make(map[string]any),
+		args:                   copyNamedArgs(args),
+		aliases:                make(map[string]string),
+		values:                 make(map[string]any),
+		nullableOnForEach:      options.NullableOnForEach,
+		shrinkWhitespacesInSQL: options.ShrinkWhitespacesInSQL,
 	}
 	fragments, err := ctx.renderNodes(nodes)
 	if err != nil {
 		return RenderedSQL{}, err
 	}
+	sqlText := joinSQLFragments(fragments)
+	if ctx.shrinkWhitespacesInSQL {
+		sqlText = ShrinkSQLWhitespaces(sqlText)
+	}
 	return RenderedSQL{
-		SQL:  joinSQLFragments(fragments),
+		SQL:  sqlText,
 		Args: ctx.args,
 	}, nil
 }
@@ -185,12 +204,18 @@ func (c *dynamicRenderContext) renderForeach(node DynamicSQLNode) (string, error
 	}
 	collection, ok := c.lookup(collectionName)
 	if !ok || isNilValue(collection) {
-		return "", nil
+		if c.foreachNullable(node) {
+			return "", nil
+		}
+		return "", fmt.Errorf("goark-orm: foreach collection %q is nil", collectionName)
 	}
 	value := reflect.ValueOf(collection)
 	if value.Kind() == reflect.Pointer {
 		if value.IsNil() {
-			return "", nil
+			if c.foreachNullable(node) {
+				return "", nil
+			}
+			return "", fmt.Errorf("goark-orm: foreach collection %q is nil", collectionName)
 		}
 		value = value.Elem()
 	}
@@ -258,6 +283,13 @@ func (c *dynamicRenderContext) renderForeach(node DynamicSQLNode) (string, error
 	}
 	content := strings.Join(items, separator)
 	return strings.TrimSpace(node.Open + content + node.Close), nil
+}
+
+func (c *dynamicRenderContext) foreachNullable(node DynamicSQLNode) bool {
+	if node.Nullable != nil {
+		return *node.Nullable
+	}
+	return c.nullableOnForEach
 }
 
 func (c *dynamicRenderContext) renderChoose(node DynamicSQLNode) (string, error) {

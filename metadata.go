@@ -270,6 +270,7 @@ type DynamicSQLNode struct {
 	Open            string
 	Close           string
 	Separator       string
+	Nullable        *bool
 	RefID           string
 	Children        []DynamicSQLNode
 }

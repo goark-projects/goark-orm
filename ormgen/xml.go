@@ -797,14 +797,7 @@ func parseDynamicSQLNode(decoder *xml.Decoder, start xml.StartElement) (orm.Dyna
 			node.SuffixOverrides = attrValue(start, "suffixOverrides")
 		})
 	case "foreach":
-		return parseContainerDynamicNode(decoder, start, orm.DynamicSQLNodeForeach, func(node *orm.DynamicSQLNode) {
-			node.Collection = attrValue(start, "collection")
-			node.Item = attrValue(start, "item")
-			node.Index = attrValue(start, "index")
-			node.Open = attrValue(start, "open")
-			node.Close = attrValue(start, "close")
-			node.Separator = attrValue(start, "separator")
-		})
+		return parseForeachDynamicNode(decoder, start)
 	case "choose":
 		return parseContainerDynamicNode(decoder, start, orm.DynamicSQLNodeChoose, nil)
 	case "when":
@@ -843,6 +836,31 @@ func parseContainerDynamicNode(decoder *xml.Decoder, start xml.StartElement, kin
 	node := orm.DynamicSQLNode{Kind: kind, Children: children}
 	if apply != nil {
 		apply(&node)
+	}
+	return node, nil
+}
+
+func parseForeachDynamicNode(decoder *xml.Decoder, start xml.StartElement) (orm.DynamicSQLNode, error) {
+	children, err := parseDynamicSQLNodes(decoder, start.Name.Local)
+	if err != nil {
+		return orm.DynamicSQLNode{}, err
+	}
+	nullable, hasNullable, err := parseOptionalXMLBool(start, "nullable")
+	if err != nil {
+		return orm.DynamicSQLNode{}, err
+	}
+	node := orm.DynamicSQLNode{
+		Kind:       orm.DynamicSQLNodeForeach,
+		Collection: attrValue(start, "collection"),
+		Item:       attrValue(start, "item"),
+		Index:      attrValue(start, "index"),
+		Open:       attrValue(start, "open"),
+		Close:      attrValue(start, "close"),
+		Separator:  attrValue(start, "separator"),
+		Children:   children,
+	}
+	if hasNullable {
+		node.Nullable = &nullable
 	}
 	return node, nil
 }

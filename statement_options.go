@@ -29,7 +29,7 @@ type StatementOptions struct {
 // ParseResultSetType 解析 resultSetType 配置值。
 func ParseResultSetType(value string) (ResultSetType, error) {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
-	case "":
+	case "", "DEFAULT":
 		return "", nil
 	case string(ResultSetTypeForwardOnly):
 		return ResultSetTypeForwardOnly, nil
@@ -42,12 +42,15 @@ func ParseResultSetType(value string) (ResultSetType, error) {
 	}
 }
 
-func (o StatementOptions) withDefaults(timeout time.Duration, fetchSize int) StatementOptions {
+func (o StatementOptions) withDefaults(timeout time.Duration, fetchSize int, resultSetType ResultSetType) StatementOptions {
 	if o.Timeout <= 0 {
 		o.Timeout = timeout
 	}
 	if o.FetchSize <= 0 {
 		o.FetchSize = fetchSize
+	}
+	if o.ResultSetType == "" {
+		o.ResultSetType = resultSetType
 	}
 	return o
 }
