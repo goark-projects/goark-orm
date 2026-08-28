@@ -8,6 +8,7 @@ import (
 // PluginRef 描述运行期插件声明。内置插件直接按名称装配，自定义插件由调用方显式提供。
 type PluginRef struct {
 	Name    string            `json:"name"`
+	Order   int               `json:"order,omitempty"`
 	Enabled *bool             `json:"enabled,omitempty"`
 	Options map[string]string `json:"options,omitempty"`
 }
@@ -17,8 +18,9 @@ type PluginRegistry map[string]StatementInterceptor
 
 // SessionOptions 将配置声明转换为 SQLSessionOption。
 func (c MyBatisConfig) SessionOptions(plugins PluginRegistry) ([]SQLSessionOption, error) {
-	interceptors := make([]StatementInterceptor, 0, len(c.Plugins))
-	for _, plugin := range c.Plugins {
+	refs := orderedPluginRefs(c.Plugins)
+	interceptors := make([]StatementInterceptor, 0, len(refs))
+	for _, plugin := range refs {
 		if plugin.Enabled != nil && !*plugin.Enabled {
 			continue
 		}
@@ -43,6 +45,9 @@ func validatePluginRefs(plugins []PluginRef) error {
 		}
 		if _, exists := seen[name]; exists {
 			return configurationErrorf("duplicate plugin %q", plugin.Name)
+		}
+		if plugin.Order < 0 {
+			return configurationErrorf("plugin %q order must be >= 0", plugin.Name)
 		}
 		seen[name] = struct{}{}
 	}
@@ -70,6 +75,18 @@ func buildStatementInterceptor(plugin PluginRef, plugins PluginRegistry) (Statem
 			return nil, err
 		}
 		return NewReadOnlyInterceptor(), nil
+	case "tenant":
+		column, value, err := tenantPluginOptions(plugin.Options)
+		if err != nil {
+			return nil, err
+		}
+		return NewTenantInterceptor(column, value), nil
+	case "dynamictable":
+		tables, err := dynamicTablePluginOptions(plugin.Options)
+		if err != nil {
+			return nil, err
+		}
+		return NewDynamicTableInterceptor(tables), nil
 	case "illegalsql":
 		options, err := illegalSQLOptions(plugin.Options)
 		if err != nil {
@@ -86,6 +103,78 @@ func buildStatementInterceptor(plugin PluginRef, plugins PluginRegistry) (Statem
 		}
 		return interceptor, nil
 	}
+}
+
+func orderedPluginRefs(plugins []PluginRef) []PluginRef {
+	out := copyPluginRefs(plugins)
+	hasOrder := false
+	for _, plugin := range out {
+		if plugin.Order != 0 {
+			hasOrder = true
+			break
+		}
+	}
+	if !hasOrder {
+		return out
+	}
+	stableSortPluginRefs(out)
+	return out
+}
+
+func stableSortPluginRefs(plugins []PluginRef) {
+	for index := 1; index < len(plugins); index++ {
+		current := plugins[index]
+		currentRank := pluginOrderRank(current)
+		position := index - 1
+		for position >= 0 && pluginOrderRank(plugins[position]) > currentRank {
+			plugins[position+1] = plugins[position]
+			position--
+		}
+		plugins[position+1] = current
+	}
+}
+
+func pluginOrderRank(plugin PluginRef) int {
+	if plugin.Order > 0 {
+		return plugin.Order
+	}
+	return 1 << 30
+}
+
+func tenantPluginOptions(values map[string]string) (string, any, error) {
+	allowed := map[string]struct{}{
+		"column": {},
+		"value":  {},
+	}
+	plugin := PluginRef{Name: "tenant", Options: values}
+	if err := rejectPluginOptions(plugin, allowed); err != nil {
+		return "", nil, err
+	}
+	column := strings.TrimSpace(values["column"])
+	if column == "" {
+		return "", nil, configurationErrorf("plugin tenant option %q is required", "column")
+	}
+	value, ok := values["value"]
+	if !ok {
+		return "", nil, configurationErrorf("plugin tenant option %q is required", "value")
+	}
+	return column, value, nil
+}
+
+func dynamicTablePluginOptions(values map[string]string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, configurationErrorf("plugin dynamicTable requires table mappings")
+	}
+	out := make(map[string]string, len(values))
+	for logical, physical := range values {
+		logical = strings.TrimSpace(logical)
+		physical = strings.TrimSpace(physical)
+		if logical == "" || physical == "" {
+			return nil, configurationErrorf("plugin dynamicTable table mapping is empty")
+		}
+		out[logical] = physical
+	}
+	return out, nil
 }
 
 func illegalSQLOptions(values map[string]string) ([]IllegalSQLOption, error) {
