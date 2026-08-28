@@ -31,36 +31,21 @@ func (c *QueryChain[T, ID]) Wrapper() *QueryWrapper[T] {
 
 // Where 使用底层 QueryWrapper 添加复杂条件。
 func (c *QueryChain[T, ID]) Where(apply func(*QueryWrapper[T])) *QueryChain[T, ID] {
-	if c == nil {
-		return c
-	}
-	if c.wrapper == nil {
-		c.wrapper = NewQueryWrapper[T]()
-	}
-	if apply != nil {
-		apply(c.wrapper)
+	wrapper := c.queryWrapper()
+	if wrapper != nil && apply != nil {
+		apply(wrapper)
 	}
 	return c
 }
 
-// Eq 添加等值条件。
-func (c *QueryChain[T, ID]) Eq(field Field[T], value any) *QueryChain[T, ID] {
-	return c.Where(func(wrapper *QueryWrapper[T]) { wrapper.Eq(field, value) })
-}
-
-// Like 添加 LIKE 条件。
-func (c *QueryChain[T, ID]) Like(field Field[T], value any) *QueryChain[T, ID] {
-	return c.Where(func(wrapper *QueryWrapper[T]) { wrapper.Like(field, value) })
-}
-
-// OrderByAsc 添加升序排序。
-func (c *QueryChain[T, ID]) OrderByAsc(field Field[T]) *QueryChain[T, ID] {
-	return c.Where(func(wrapper *QueryWrapper[T]) { wrapper.OrderByAsc(field) })
-}
-
-// OrderByDesc 添加降序排序。
-func (c *QueryChain[T, ID]) OrderByDesc(field Field[T]) *QueryChain[T, ID] {
-	return c.Where(func(wrapper *QueryWrapper[T]) { wrapper.OrderByDesc(field) })
+func (c *QueryChain[T, ID]) queryWrapper() *QueryWrapper[T] {
+	if c == nil {
+		return nil
+	}
+	if c.wrapper == nil {
+		c.wrapper = NewQueryWrapper[T]()
+	}
+	return c.wrapper
 }
 
 // List 执行链式列表查询。
@@ -151,36 +136,21 @@ func (c *UpdateChain[T, ID]) Wrapper() *UpdateWrapper[T] {
 
 // Where 使用底层 UpdateWrapper 添加复杂条件。
 func (c *UpdateChain[T, ID]) Where(apply func(*UpdateWrapper[T])) *UpdateChain[T, ID] {
-	if c == nil {
-		return c
-	}
-	if c.wrapper == nil {
-		c.wrapper = NewUpdateWrapper[T]()
-	}
-	if apply != nil {
-		apply(c.wrapper)
+	wrapper := c.updateWrapper()
+	if wrapper != nil && apply != nil {
+		apply(wrapper)
 	}
 	return c
 }
 
-// Set 添加字段赋值。
-func (c *UpdateChain[T, ID]) Set(field Field[T], value any) *UpdateChain[T, ID] {
-	return c.Where(func(wrapper *UpdateWrapper[T]) { wrapper.Set(field, value) })
-}
-
-// SetIncrBy 添加字段自增赋值。
-func (c *UpdateChain[T, ID]) SetIncrBy(field Field[T], value any) *UpdateChain[T, ID] {
-	return c.Where(func(wrapper *UpdateWrapper[T]) { wrapper.SetIncrBy(field, value) })
-}
-
-// SetDecrBy 添加字段自减赋值。
-func (c *UpdateChain[T, ID]) SetDecrBy(field Field[T], value any) *UpdateChain[T, ID] {
-	return c.Where(func(wrapper *UpdateWrapper[T]) { wrapper.SetDecrBy(field, value) })
-}
-
-// Eq 添加等值条件。
-func (c *UpdateChain[T, ID]) Eq(field Field[T], value any) *UpdateChain[T, ID] {
-	return c.Where(func(wrapper *UpdateWrapper[T]) { wrapper.Eq(field, value) })
+func (c *UpdateChain[T, ID]) updateWrapper() *UpdateWrapper[T] {
+	if c == nil {
+		return nil
+	}
+	if c.wrapper == nil {
+		c.wrapper = NewUpdateWrapper[T]()
+	}
+	return c.wrapper
 }
 
 // Update 执行链式更新。

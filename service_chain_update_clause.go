@@ -1,0 +1,121 @@
+package orm
+
+// Nested 添加默认 AND 连接的嵌套条件组。
+func (c *UpdateChain[T, ID]) Nested(apply func(*UpdateWrapper[T])) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.Nested(apply)
+	}
+	return c
+}
+
+// And 添加 AND 连接的嵌套条件组。
+func (c *UpdateChain[T, ID]) And(apply func(*UpdateWrapper[T])) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.And(apply)
+	}
+	return c
+}
+
+// Or 添加 OR 连接的嵌套条件组。
+func (c *UpdateChain[T, ID]) Or(apply func(*UpdateWrapper[T])) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.Or(apply)
+	}
+	return c
+}
+
+// Exists 添加 EXISTS 子查询条件。
+func (c *UpdateChain[T, ID]) Exists(sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.Exists(sqlText, args)
+	}
+	return c
+}
+
+// NotExists 添加 NOT EXISTS 子查询条件。
+func (c *UpdateChain[T, ID]) NotExists(sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.NotExists(sqlText, args)
+	}
+	return c
+}
+
+// Apply 添加自定义条件片段。
+func (c *UpdateChain[T, ID]) Apply(sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.Apply(sqlText, args)
+	}
+	return c
+}
+
+// EqSQL 添加等值 SQL 子查询条件。
+func (c *UpdateChain[T, ID]) EqSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.EqSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// NeSQL 添加不等 SQL 子查询条件。
+func (c *UpdateChain[T, ID]) NeSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.NeSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// GtSQL 添加大于 SQL 子查询条件。
+func (c *UpdateChain[T, ID]) GtSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.GtSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// GeSQL 添加大于等于 SQL 子查询条件。
+func (c *UpdateChain[T, ID]) GeSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.GeSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// LtSQL 添加小于 SQL 子查询条件。
+func (c *UpdateChain[T, ID]) LtSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.LtSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// LeSQL 添加小于等于 SQL 子查询条件。
+func (c *UpdateChain[T, ID]) LeSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.LeSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// InSQL 添加 IN SQL 片段条件。
+func (c *UpdateChain[T, ID]) InSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.InSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// NotInSQL 添加 NOT IN SQL 片段条件。
+func (c *UpdateChain[T, ID]) NotInSQL(field Field[T], sqlText string, args NamedArgs) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.NotInSQL(field, sqlText, args)
+	}
+	return c
+}
+
+// Last 添加 SQL 尾部片段。
+func (c *UpdateChain[T, ID]) Last(sqlText string) *UpdateChain[T, ID] {
+	if wrapper := c.updateWrapper(); wrapper != nil {
+		wrapper.Last(sqlText)
+	}
+	return c
+}
