@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -67,7 +68,7 @@ func CompileSQLContext(ctx context.Context, query string, args NamedArgs, dialec
 		if err != nil {
 			return CompiledSQL{}, &BindingError{Parameter: name, Err: err}
 		}
-		builder.WriteString(dialect.Placeholder(ordinal))
+		writeDialectPlaceholder(&builder, dialect, ordinal)
 		ordinal++
 		compiled.Args = append(compiled.Args, value)
 		offset = end
@@ -79,6 +80,29 @@ func CompileSQLContext(ctx context.Context, query string, args NamedArgs, dialec
 		return CompiledSQL{}, bindingErrorf("SQL contains invalid parameter placeholder")
 	}
 	return compiled, nil
+}
+
+func writeDialectPlaceholder(builder *strings.Builder, dialect Dialect, ordinal int) {
+	switch dialect.(type) {
+	case questionDialect, mysqlDialect, sqliteDialect:
+		builder.WriteByte('?')
+	case postgresDialect:
+		builder.WriteByte('$')
+		writePositiveInt(builder, ordinal)
+	case sqlServerDialect:
+		builder.WriteString("@p")
+		writePositiveInt(builder, ordinal)
+	case oracleDialect:
+		builder.WriteByte(':')
+		writePositiveInt(builder, ordinal)
+	default:
+		builder.WriteString(dialect.Placeholder(ordinal))
+	}
+}
+
+func writePositiveInt(builder *strings.Builder, value int) {
+	var buf [20]byte
+	_, _ = builder.Write(strconv.AppendInt(buf[:0], int64(value), 10))
 }
 
 func renderRawSQL(query string, args NamedArgs, dialect Dialect) (string, error) {

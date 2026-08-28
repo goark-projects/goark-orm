@@ -38,6 +38,33 @@ func TestCompileSQL_whenPostgresDialect_shouldUseNumberedPlaceholders(t *testing
 	}
 }
 
+func TestCompileSQL_whenNumberedDialectsProvided_shouldUseDialectPlaceholders(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  Dialect
+		expected string
+	}{
+		{name: "sqlserver", dialect: NewSQLServerDialect(), expected: "select * from sys_user where id = @p1 and name = @p2"},
+		{name: "oracle", dialect: NewOracleDialect(), expected: "select * from sys_user where id = :1 and name = :2"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := CompileSQL(
+				"select * from sys_user where id = #{id} and name = #{name}",
+				NamedArgs{"id": int64(7), "name": "Alice"},
+				tt.dialect,
+			)
+			if err != nil {
+				t.Fatalf("compile SQL failed: %v", err)
+			}
+			if compiled.SQL != tt.expected {
+				t.Fatalf("unexpected SQL %q", compiled.SQL)
+			}
+		})
+	}
+}
+
 func TestCompileSQL_whenNestedParameterPathsProvided_shouldResolveStructMapAndSlice(t *testing.T) {
 	user := sqlSessionUser{ID: 7, Name: "Alice"}
 	compiled, err := CompileSQL(
