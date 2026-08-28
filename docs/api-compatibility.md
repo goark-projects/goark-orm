@@ -9,12 +9,13 @@
 The V1 compatibility surface includes:
 
 - Module path: `goark.dev/orm`.
-- Runtime package: `goark.dev/orm`.
+- Public runtime facade package: `goark.dev/orm`.
 - Optional audit package: `goark.dev/orm/audit`.
 - Optional DbKit convenience package: `goark.dev/orm/dbkit`.
 - Boot-style adapter package: `goark.dev/orm/ormboot`.
 - Generator package: `goark.dev/orm/ormgen`.
 - Test helper package: `goark.dev/orm/ormtest`.
+- Internal runtime implementation package: `goark.dev/orm/internal/runtime`; this is not part of the public compatibility surface.
 - CLI entrypoint: `goark-orm generate orm`.
 - Annotation prefixes: `//goark-orm:entity`, `//goark-orm:mapper`, `//goark-orm:select`, `//goark-orm:insert`, `//goark-orm:update`, `//goark-orm:delete`, and `//goark-orm:call`.
 - Struct tag key: `goark-orm`.

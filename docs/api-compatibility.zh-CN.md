@@ -9,12 +9,13 @@
 V1 兼容性范围包括：
 
 - Module path：`goark.dev/orm`。
-- 运行期包：`goark.dev/orm`。
+- 公共运行期门面包：`goark.dev/orm`。
 - 可选审计包：`goark.dev/orm/audit`。
 - 可选 DbKit 便捷包：`goark.dev/orm/dbkit`。
 - 启动装配适配包：`goark.dev/orm/ormboot`。
 - 生成器包：`goark.dev/orm/ormgen`。
 - 测试辅助包：`goark.dev/orm/ormtest`。
+- 内部运行期实现包：`goark.dev/orm/internal/runtime`；该包不属于公共兼容性范围。
 - CLI 入口：`goark-orm generate orm`。
 - 注解前缀：`//goark-orm:entity`、`//goark-orm:mapper`、`//goark-orm:select`、`//goark-orm:insert`、`//goark-orm:update`、`//goark-orm:delete`、`//goark-orm:call`。
 - Struct tag key：`goark-orm`。

@@ -169,6 +169,6 @@ The core test suite covers `sql.Out`, INOUT writeback, and multi-result-set scan
 ```bash
 GOWORK=off go test -count=1 ./...
 GOWORK=off go vet ./...
-GOWORK=off go test -run '^$' -bench . -benchmem ./
+GOWORK=off go test -run '^$' -bench . -benchmem ./internal/runtime
 git diff --check
 ```

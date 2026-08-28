@@ -27,7 +27,7 @@ $benchPattern = "^(" + ($benchNames -join "|") + ")$"
 $benchTimeArg = "-benchtime=" + $BenchTime
 
 $env:GOWORK = "off"
-$output = & go test -run '^$' -bench $benchPattern $benchTimeArg -benchmem ./ 2>&1
+$output = & go test -run '^$' -bench $benchPattern $benchTimeArg -benchmem ./internal/runtime 2>&1
 $exitCode = $LASTEXITCODE
 $output | ForEach-Object { Write-Output $_ }
 if ($exitCode -ne 0) {

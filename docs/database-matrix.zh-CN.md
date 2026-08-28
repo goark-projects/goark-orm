@@ -169,6 +169,6 @@ Core test suite 覆盖 fake drivers 上的 `sql.Out`、INOUT writeback 和 multi
 ```bash
 GOWORK=off go test -count=1 ./...
 GOWORK=off go vet ./...
-GOWORK=off go test -run '^$' -bench . -benchmem ./
+GOWORK=off go test -run '^$' -bench . -benchmem ./internal/runtime
 git diff --check
 ```

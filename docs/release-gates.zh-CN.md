@@ -19,7 +19,7 @@ GOWORK=off ./scripts/verify-release.sh
 - `go test -count=1 ./...`。
 - `go vet ./...`。
 - `git diff --check`。
-- 使用固定 `-benchtime=100x` 的 core 性能 smoke tests。
+- 在 `./internal/runtime` 上使用固定 `-benchtime=100x` 的 core 性能 smoke tests。
 
 需要更长性能运行时：
 
@@ -41,7 +41,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-bench.ps1
 powershell -ExecutionPolicy Bypass -File scripts/verify-bench.ps1 -EnforceTime
 ```
 
-当前阈值集合包含动态 SQL 渲染、SQLSession 扫描路径、生成 row scanner 和 TypeHandler-backed result mapping 的明确分配预算。
+当前阈值集合运行在 `./internal/runtime` 上，并包含动态 SQL 渲染、SQLSession 扫描路径、生成 row scanner 和 TypeHandler-backed result mapping 的明确分配预算。
 
 ## 真实数据库验证
 

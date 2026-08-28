@@ -19,7 +19,7 @@ The script runs:
 - `go test -count=1 ./...`.
 - `go vet ./...`.
 - `git diff --check`.
-- Core performance smoke tests with a fixed `-benchtime=100x`.
+- Core performance smoke tests in `./internal/runtime` with a fixed `-benchtime=100x`.
 
 Use a longer performance run when needed:
 
@@ -41,7 +41,7 @@ The threshold file is [../scripts/benchmark-thresholds.json](../scripts/benchmar
 powershell -ExecutionPolicy Bypass -File scripts/verify-bench.ps1 -EnforceTime
 ```
 
-The current threshold set includes explicit allocation budgets for dynamic SQL rendering and SQLSession scan paths, including generated row scanners and TypeHandler-backed result mapping.
+The current threshold set runs against `./internal/runtime` and includes explicit allocation budgets for dynamic SQL rendering and SQLSession scan paths, including generated row scanners and TypeHandler-backed result mapping.
 
 ## Real Database Verification
 
