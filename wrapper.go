@@ -69,6 +69,7 @@ const (
 	queryConditionPredicate queryConditionKind = ""
 	queryConditionNested    queryConditionKind = "nested"
 	queryConditionRaw       queryConditionKind = "raw"
+	queryConditionSQL       queryConditionKind = "sql"
 	queryConditionExists    queryConditionKind = "exists"
 	queryConditionNotExists queryConditionKind = "not_exists"
 )
@@ -613,6 +614,8 @@ func renderQueryCondition[T any](dialect Dialect, condition queryCondition[T], s
 		return "(" + strings.Join(nested, " ") + ")", next, nil
 	case queryConditionRaw:
 		return renderRawSQLFragment(condition.SQL, condition.Args, seq, args)
+	case queryConditionSQL:
+		return renderSQLCondition(dialect, condition, seq, args)
 	case queryConditionExists, queryConditionNotExists:
 		rendered, next, err := renderRawSQLFragment(condition.SQL, condition.Args, seq, args)
 		if err != nil || rendered == "" {
