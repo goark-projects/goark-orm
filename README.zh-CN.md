@@ -319,6 +319,7 @@ GOWORK=off ./scripts/verify-release.sh
 - [功能参考](docs/features.zh-CN.md)
 - [配置参考](docs/configuration.zh-CN.md)
 - [案例指南](docs/examples.zh-CN.md)
+- [生产级 Demo](docs/production-demo.zh-CN.md)
 - [API 兼容性](docs/api-compatibility.md)
 - [数据库矩阵](docs/database-matrix.md)
 - [Provider 与 SQL Builder](docs/provider-builder.md)

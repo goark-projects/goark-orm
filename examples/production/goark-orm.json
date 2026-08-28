@@ -1,0 +1,10 @@
+{
+  "databaseId": "postgres",
+  "typeHandlers": ["json"],
+  "packages": [
+    {
+      "dir": "account",
+      "output": "account/zz_goark_orm_account_gen.go"
+    }
+  ]
+}

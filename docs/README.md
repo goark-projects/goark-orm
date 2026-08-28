@@ -8,6 +8,7 @@ This directory is the reference documentation set for Goark ORM. English is the 
 - [Feature Reference](features.md): implemented runtime, generator, mapper, caching, routing, schema, and real database features.
 - [Configuration Reference](configuration.md): every generator and runtime JSON field, accepted values, defaults, and ownership rules.
 - [Examples Guide](examples.md): focused usage examples for generated mappers, XML mapping, wrappers, providers, runtime config, routing, audit, and real database verification.
+- [Production Demo](production-demo.md): production-oriented package layout with generator config, runtime config, mapper/provider code, service validation, and tests.
 
 ## Operations
 

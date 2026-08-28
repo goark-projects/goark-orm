@@ -318,6 +318,7 @@ GOWORK=off ./scripts/verify-release.sh
 - [Feature Reference](docs/features.md)
 - [Configuration Reference](docs/configuration.md)
 - [Examples Guide](docs/examples.md)
+- [Production Demo](docs/production-demo.md)
 - [API Compatibility](docs/api-compatibility.md)
 - [Database Matrix](docs/database-matrix.md)
 - [Provider And SQL Builder](docs/provider-builder.md)

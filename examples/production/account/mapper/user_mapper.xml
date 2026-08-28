@@ -1,0 +1,47 @@
+<mapper namespace="examples.production.account.UserMapper">
+  <cache eviction="LRU" size="1024" flushInterval="600000" readOnly="false" blocking="true"/>
+
+  <resultMap id="UserResult" type="User" autoMapping="false">
+    <id property="ID" column="id"/>
+    <result property="TenantID" column="tenant_id"/>
+    <result property="Email" column="email"/>
+    <result property="DisplayName" column="display_name"/>
+    <result property="Status" column="status"/>
+    <result property="Profile" column="profile" typeHandler="json"/>
+    <result property="Version" column="version"/>
+    <result property="Deleted" column="deleted"/>
+    <result property="CreatedAt" column="created_at"/>
+    <result property="UpdatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="FindByID" resultMap="UserResult" timeout="1s" fetchSize="1" resultSetType="FORWARD_ONLY">
+    select id, tenant_id, email, display_name, status, profile, version, deleted, created_at, updated_at
+    from sys_user
+    where tenant_id = #{tenantID}
+      and id = #{id}
+      and deleted = false
+  </select>
+
+  <select id="ListByTenant" resultMap="UserResult" timeout="2s" fetchSize="256" resultSetType="FORWARD_ONLY">
+    select id, tenant_id, email, display_name, status, profile, version, deleted, created_at, updated_at
+    from sys_user
+    <where>
+      tenant_id = #{tenantID}
+      and deleted = false
+      <if test="status != nil and status != ''">
+        and status = #{status}
+      </if>
+    </where>
+    order by id
+  </select>
+
+  <select id="ArchiveReturning" resultMap="UserResult" affectData="true" flushCache="true" useCache="false" databaseId="postgres" timeout="2s">
+    update sys_user
+    set status = 'ARCHIVED',
+        deleted = true,
+        updated_at = current_timestamp
+    where tenant_id = #{tenantID}
+      and id = #{id}
+    returning id, tenant_id, email, display_name, status, profile, version, deleted, created_at, updated_at
+  </select>
+</mapper>

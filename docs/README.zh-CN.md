@@ -8,6 +8,7 @@
 - [功能参考](features.zh-CN.md)：已实现的运行期、生成器、Mapper、缓存、路由、schema 和真实数据库能力。
 - [配置参考](configuration.zh-CN.md)：每个生成器和运行期 JSON 字段、可选值、默认值和所有权边界。
 - [案例指南](examples.zh-CN.md)：生成 Mapper、XML 映射、Wrapper、Provider、运行期配置、路由、审计和真实数据库验证示例。
+- [生产级 Demo](production-demo.zh-CN.md)：生产导向 package 组织、生成器配置、运行期配置、Mapper/Provider 代码、服务校验和测试。
 
 ## 运维与发布
 

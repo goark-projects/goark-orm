@@ -1,0 +1,70 @@
+{
+  "properties": {
+    "db.type": "postgres",
+    "env": "production"
+  },
+  "settings": {
+    "cacheEnabled": true,
+    "localCacheEnabled": true,
+    "localCacheScope": "SESSION",
+    "mapUnderscoreToCamelCase": true,
+    "defaultExecutorType": "REUSE",
+    "preparedStatementCacheSize": 256,
+    "defaultStatementTimeout": "2s",
+    "defaultFetchSize": 512,
+    "defaultResultSetType": "FORWARD_ONLY",
+    "nullableOnForEach": true,
+    "shrinkWhitespacesInSql": true,
+    "jdbcTypeForNull": "OTHER",
+    "autoMappingBehavior": "FULL",
+    "autoMappingUnknownColumnBehavior": "NONE",
+    "databaseId": "${db.type}"
+  },
+  "environment": {
+    "id": "${env}",
+    "dbType": "${db.type}"
+  },
+  "global": {
+    "dbConfig": {
+      "idType": "assign_id",
+      "tablePrefix": "sys_",
+      "logicDeleteField": "Deleted",
+      "logicDeleteValue": true,
+      "logicNotDeleteValue": false,
+      "insertStrategy": "not_empty",
+      "updateStrategy": "not_null",
+      "whereStrategy": "not_zero"
+    }
+  },
+  "typeAliases": [
+    {
+      "alias": "User",
+      "typeName": "examples.production.account.User"
+    }
+  ],
+  "typeHandlers": [
+    {
+      "name": "json"
+    }
+  ],
+  "mappers": [
+    {
+      "namespace": "examples.production.account.UserMapper"
+    }
+  ],
+  "plugins": [
+    {
+      "name": "blockAttack",
+      "order": 10
+    },
+    {
+      "name": "illegalSQL",
+      "order": 20,
+      "options": {
+        "denySelectWildcard": "true",
+        "denyMultipleStatements": "true",
+        "denyWriteWithoutWhere": "true"
+      }
+    }
+  ]
+}
