@@ -16,6 +16,10 @@ func compatibilityCallSQL(dbType orm.DbType, quotedTable string, quotedRoutine s
 		return "select id, name, age, profile, created_at from " + quotedRoutine + "(#{minAge})"
 	case orm.DbTypeMySQL, orm.DbTypeMariaDB:
 		return "call " + quotedRoutine + "(#{minAge})"
+	case orm.DbTypeSQLServer:
+		return "exec " + quotedRoutine + " @in_min_age = #{minAge}"
+	case orm.DbTypeOracle:
+		return "select id, name, age, profile, created_at from " + quotedTable + " where age >= #{minAge} order by id"
 	default:
 		return ""
 	}
@@ -37,6 +41,17 @@ func compatibilityMySQLCallRoutineDDL(quotedTable string, quotedRoutine string) 
 		"CREATE PROCEDURE " + quotedRoutine + "(IN in_min_age INTEGER)",
 		"BEGIN",
 		"SELECT id, name, age, profile, created_at FROM " + quotedTable + " WHERE age >= in_min_age ORDER BY id;",
+		"END",
+	}, " ")
+}
+
+// compatibilitySQLServerCallRoutineDDL 创建 SQL Server 结果集过程。
+func compatibilitySQLServerCallRoutineDDL(quotedTable string, quotedRoutine string) string {
+	return strings.Join([]string{
+		"CREATE PROCEDURE " + quotedRoutine + " @in_min_age INT AS",
+		"BEGIN",
+		"SET NOCOUNT ON;",
+		"SELECT id, name, age, profile, created_at FROM " + quotedTable + " WHERE age >= @in_min_age ORDER BY id;",
 		"END",
 	}, " ")
 }

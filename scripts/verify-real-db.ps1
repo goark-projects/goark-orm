@@ -7,7 +7,13 @@ param(
     [string]$MariaDBDSN = $env:GOARK_ORM_MARIADB_DSN,
     [string]$SQLiteDriver = $env:GOARK_ORM_SQLITE_DRIVER,
     [string]$SQLiteDSN = $env:GOARK_ORM_SQLITE_DSN,
-    [string]$SQLiteImport = $env:GOARK_ORM_SQLITE_IMPORT
+    [string]$SQLiteImport = $env:GOARK_ORM_SQLITE_IMPORT,
+    [string]$SQLServerDriver = $env:GOARK_ORM_SQLSERVER_DRIVER,
+    [string]$SQLServerDSN = $env:GOARK_ORM_SQLSERVER_DSN,
+    [string]$SQLServerAdminDSN = $env:GOARK_ORM_SQLSERVER_ADMIN_DSN,
+    [string]$SQLServerDatabase = $env:GOARK_ORM_SQLSERVER_DATABASE,
+    [string]$OracleDriver = $env:GOARK_ORM_ORACLE_DRIVER,
+    [string]$OracleDSN = $env:GOARK_ORM_ORACLE_DSN
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +29,15 @@ if ([string]::IsNullOrWhiteSpace($MariaDBDriver)) {
 }
 if ([string]::IsNullOrWhiteSpace($SQLiteDriver)) {
     $SQLiteDriver = "sqlite"
+}
+if ([string]::IsNullOrWhiteSpace($SQLServerDriver)) {
+    $SQLServerDriver = "sqlserver"
+}
+if ([string]::IsNullOrWhiteSpace($SQLServerDatabase)) {
+    $SQLServerDatabase = "goark_orm_test"
+}
+if ([string]::IsNullOrWhiteSpace($OracleDriver)) {
+    $OracleDriver = "oracle"
 }
 if (-not [string]::IsNullOrWhiteSpace($SQLiteDSN) -and [string]::IsNullOrWhiteSpace($SQLiteImport)) {
     throw "GOARK_ORM_SQLITE_IMPORT is required when GOARK_ORM_SQLITE_DSN is set"
@@ -65,6 +80,8 @@ go 1.25
 require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/jackc/pgx/v5 v5.7.6
+	github.com/microsoft/go-mssqldb v1.11.0
+	github.com/sijms/go-ora/v2 v2.9.0
 	goark.dev/orm v0.0.0
 )
 
@@ -77,6 +94,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +104,8 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/microsoft/go-mssqldb"
+	_ "github.com/sijms/go-ora/v2"
 $sqliteImportBlock
 	orm "goark.dev/orm"
 	"goark.dev/orm/ormgen"
@@ -93,6 +113,14 @@ $sqliteImportBlock
 )
 
 const ormReplacePath = "$($repoRoot.Replace("\", "/"))"
+
+func TestMain(m *testing.M) {
+	if err := ensureSQLServerDatabase(); err != nil {
+		fmt.Fprintf(os.Stderr, "prepare sqlserver database failed: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 func TestPostgresCompatibility(t *testing.T) {
 	runCompatibility(t, "GOARK_ORM_POSTGRES_DSN", "GOARK_ORM_POSTGRES_DRIVER", "pgx", "postgres")
@@ -126,6 +154,22 @@ func TestSQLiteReverseGeneratedSourceCompiles(t *testing.T) {
 	runReverseGeneratedSource(t, "GOARK_ORM_SQLITE_DSN", "GOARK_ORM_SQLITE_DRIVER", "sqlite", orm.DbTypeSQLite)
 }
 
+func TestSQLServerCompatibility(t *testing.T) {
+	runCompatibility(t, "GOARK_ORM_SQLSERVER_DSN", "GOARK_ORM_SQLSERVER_DRIVER", "sqlserver", "sqlserver")
+}
+
+func TestSQLServerReverseGeneratedSourceCompiles(t *testing.T) {
+	runReverseGeneratedSource(t, "GOARK_ORM_SQLSERVER_DSN", "GOARK_ORM_SQLSERVER_DRIVER", "sqlserver", orm.DbTypeSQLServer)
+}
+
+func TestOracleCompatibility(t *testing.T) {
+	runCompatibility(t, "GOARK_ORM_ORACLE_DSN", "GOARK_ORM_ORACLE_DRIVER", "oracle", "oracle")
+}
+
+func TestOracleReverseGeneratedSourceCompiles(t *testing.T) {
+	runReverseGeneratedSource(t, "GOARK_ORM_ORACLE_DSN", "GOARK_ORM_ORACLE_DRIVER", "oracle", orm.DbTypeOracle)
+}
+
 func runCompatibility(t *testing.T, dsnEnv string, driverEnv string, defaultDriver string, dbType string) {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv(dsnEnv))
@@ -140,6 +184,73 @@ func runCompatibility(t *testing.T, dsnEnv string, driverEnv string, defaultDriv
 	t.Setenv("GOARK_ORM_INTEGRATION_DSN", dsn)
 	t.Setenv("GOARK_ORM_INTEGRATION_DBTYPE", dbType)
 	ormtest.RunCompatibilitySuiteFromEnv(t)
+}
+
+func ensureSQLServerDatabase() error {
+	if strings.TrimSpace(os.Getenv("GOARK_ORM_SQLSERVER_DSN")) != "" {
+		return nil
+	}
+	adminDSN := strings.TrimSpace(os.Getenv("GOARK_ORM_SQLSERVER_ADMIN_DSN"))
+	if adminDSN == "" {
+		return nil
+	}
+	database := strings.TrimSpace(os.Getenv("GOARK_ORM_SQLSERVER_DATABASE"))
+	if database == "" {
+		database = "goark_orm_test"
+	}
+	if !safeSQLServerIdentifier(database) {
+		return fmt.Errorf("invalid sqlserver database name %q", database)
+	}
+	driver := strings.TrimSpace(os.Getenv("GOARK_ORM_SQLSERVER_DRIVER"))
+	if driver == "" {
+		driver = "sqlserver"
+	}
+	db, err := sql.Open(driver, adminDSN)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, "IF DB_ID(@p1) IS NULL BEGIN DECLARE @sql nvarchar(max) = N'CREATE DATABASE ' + QUOTENAME(@p1); EXEC (@sql); END", database)
+	if err != nil {
+		return err
+	}
+	dsn, err := sqlServerDSNForDatabase(adminDSN, database)
+	if err != nil {
+		return err
+	}
+	return os.Setenv("GOARK_ORM_SQLSERVER_DSN", dsn)
+}
+
+func sqlServerDSNForDatabase(adminDSN string, database string) (string, error) {
+	parsed, err := url.Parse(adminDSN)
+	if err != nil || parsed.Scheme == "" {
+		return "", fmt.Errorf("sqlserver admin DSN must use URL form: %w", err)
+	}
+	query := parsed.Query()
+	query.Set("database", database)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func safeSQLServerIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for index, r := range value {
+		if r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
+			continue
+		}
+		if index > 0 && r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func runReverseGeneratedSource(t *testing.T, dsnEnv string, driverEnv string, defaultDriver string, dbType orm.DbType) {
@@ -216,6 +327,14 @@ func reverseGeneratedSourceSQL(dbType orm.DbType, table string) ([]string, []str
 		return []string{
 			"CREATE TABLE " + table + " (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(64) NOT NULL, profile JSON NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)",
 		}, cleanup, "", nil
+	case orm.DbTypeSQLServer:
+		return []string{
+			"CREATE TABLE " + table + " (id BIGINT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(64) NOT NULL, profile NVARCHAR(MAX) NOT NULL CHECK (ISJSON(profile) = 1), created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME())",
+		}, cleanup, "dbo", nil
+	case orm.DbTypeOracle:
+		return []string{
+			"CREATE TABLE " + table + " (id NUMBER(19) GENERATED BY DEFAULT ON NULL AS IDENTITY PRIMARY KEY, name VARCHAR2(64 CHAR) NOT NULL, profile CLOB NOT NULL CHECK (profile IS JSON), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
+		}, []string{"BEGIN EXECUTE IMMEDIATE 'DROP TABLE " + table + " PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;"}, "", nil
 	default:
 		return nil, nil, "", fmt.Errorf("unsupported reverse generated source db type %q", dbType)
 	}
@@ -286,6 +405,12 @@ func writeBytesFile(t *testing.T, path string, content []byte) {
         $env:GOARK_ORM_MARIADB_DSN = $MariaDBDSN
         $env:GOARK_ORM_SQLITE_DRIVER = $SQLiteDriver
         $env:GOARK_ORM_SQLITE_DSN = $SQLiteDSN
+        $env:GOARK_ORM_SQLSERVER_DRIVER = $SQLServerDriver
+        $env:GOARK_ORM_SQLSERVER_DSN = $SQLServerDSN
+        $env:GOARK_ORM_SQLSERVER_ADMIN_DSN = $SQLServerAdminDSN
+        $env:GOARK_ORM_SQLSERVER_DATABASE = $SQLServerDatabase
+        $env:GOARK_ORM_ORACLE_DRIVER = $OracleDriver
+        $env:GOARK_ORM_ORACLE_DSN = $OracleDSN
         go mod tidy
         go test -count=1 -v
     } finally {

@@ -211,6 +211,18 @@ func (b *SelectSQLBuilder) Build() (SQLSource, error) {
 	if err != nil {
 		return SQLSource{}, err
 	}
+	var tailRowLock string
+	if b.rowLock != nil {
+		lockClause, err := RowLockClause(b.rowLock.dialect, b.rowLock.options)
+		if err != nil {
+			return SQLSource{}, err
+		}
+		if DialectCapabilitiesOf(b.rowLock.dialect).RowLock == DialectRowLockHints {
+			table += " " + lockClause
+		} else {
+			tailRowLock = lockClause
+		}
+	}
 	var parts []string
 	parts = append(parts, "SELECT "+strings.Join(projections, ", "), "FROM "+table)
 	joinSQL, err := state.joinClause(b.joins)
@@ -254,12 +266,8 @@ func (b *SelectSQLBuilder) Build() (SQLSource, error) {
 	if b.hasOffset {
 		parts = append(parts, "OFFSET "+state.value(b.offset))
 	}
-	if b.rowLock != nil {
-		lockClause, err := RowLockClause(b.rowLock.dialect, b.rowLock.options)
-		if err != nil {
-			return SQLSource{}, err
-		}
-		parts = append(parts, lockClause)
+	if tailRowLock != "" {
+		parts = append(parts, tailRowLock)
 	}
 	lastSQL, err := sanitizeLastSQL(b.lastSQL)
 	if err != nil {

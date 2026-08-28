@@ -217,6 +217,9 @@ func setReflectField(field reflect.Value, value any) error {
 		field.SetString(string(bytes))
 		return nil
 	}
+	if ok, err := setReflectScalarFromText(field, value); ok || err != nil {
+		return err
+	}
 	source := reflect.ValueOf(value)
 	if source.Type().AssignableTo(field.Type()) {
 		field.Set(source)

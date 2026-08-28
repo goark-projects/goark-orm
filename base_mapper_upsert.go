@@ -97,6 +97,8 @@ func (m *BaseMapper[T, ID]) upsertSQL(insertFields []ColumnMeta, conflictFields 
 		return m.onConflictUpsertSQL(insertSQL, conflictFields, updateFields)
 	case DialectUpsertOnDuplicateKey:
 		return m.onDuplicateKeyUpsertSQL(insertSQL, updateFields)
+	case DialectUpsertMerge:
+		return m.mergeUpsertSQL(table, insertFields, conflictFields, updateFields)
 	default:
 		return "", configurationErrorf("upsert is not supported by dialect %q", m.dialect.Name())
 	}

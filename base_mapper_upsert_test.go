@@ -80,6 +80,68 @@ func TestBaseMapper_Upsert_whenPostgresUpdateFieldsEmpty_shouldDoNothingOnConfli
 	}
 }
 
+func TestBaseMapper_Upsert_whenSQLServerProvided_shouldUseMerge(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewSQLServerDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperUser, int64](session, baseMapperUserEntity())
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	result, err := mapper.Upsert(
+		context.Background(),
+		&baseMapperUser{ID: 7, Name: "Alice", Status: "ACTIVE"},
+		[]Field[baseMapperUser]{baseMapperUserID},
+		[]Field[baseMapperUser]{baseMapperUserName},
+	)
+	if err != nil {
+		t.Fatalf("upsert failed: %v", err)
+	}
+
+	if result.RowsAffected != 1 {
+		t.Fatalf("unexpected result %#v", result)
+	}
+	expectedSQL := "MERGE INTO [sys_user] goark_orm_target USING (SELECT @p1 AS [id], @p2 AS [name], @p3 AS [status]) goark_orm_source ON (goark_orm_target.[id] = goark_orm_source.[id]) WHEN MATCHED THEN UPDATE SET goark_orm_target.[name] = goark_orm_source.[name] WHEN NOT MATCHED THEN INSERT ([id], [name], [status]) VALUES (goark_orm_source.[id], goark_orm_source.[name], goark_orm_source.[status]);"
+	if state.exec != expectedSQL {
+		t.Fatalf("unexpected upsert SQL %q", state.exec)
+	}
+}
+
+func TestBaseMapper_Upsert_whenOracleProvided_shouldUseMerge(t *testing.T) {
+	state := openTestSQLState(t)
+	state.execResult = testResult{rowsAffected: 1}
+	session, err := NewSQLSession(NewRegistry(), state.db, NewOracleDialect())
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+	mapper, err := NewBaseMapper[baseMapperUser, int64](session, baseMapperUserEntity())
+	if err != nil {
+		t.Fatalf("new base mapper failed: %v", err)
+	}
+
+	result, err := mapper.Upsert(
+		context.Background(),
+		&baseMapperUser{ID: 7, Name: "Alice", Status: "ACTIVE"},
+		[]Field[baseMapperUser]{baseMapperUserID},
+		[]Field[baseMapperUser]{baseMapperUserName},
+	)
+	if err != nil {
+		t.Fatalf("upsert failed: %v", err)
+	}
+
+	if result.RowsAffected != 1 {
+		t.Fatalf("unexpected result %#v", result)
+	}
+	expectedSQL := `MERGE INTO "sys_user" goark_orm_target USING (SELECT :1 AS "id", :2 AS "name", :3 AS "status" FROM dual) goark_orm_source ON (goark_orm_target."id" = goark_orm_source."id") WHEN MATCHED THEN UPDATE SET goark_orm_target."name" = goark_orm_source."name" WHEN NOT MATCHED THEN INSERT ("id", "name", "status") VALUES (goark_orm_source."id", goark_orm_source."name", goark_orm_source."status")`
+	if state.exec != expectedSQL {
+		t.Fatalf("unexpected upsert SQL %q", state.exec)
+	}
+}
+
 func TestBaseMapper_UpsertBatchSize_whenSessionSupportsBatch_shouldFlushUpserts(t *testing.T) {
 	state := openTestSQLState(t)
 	state.execResults = []driver.Result{

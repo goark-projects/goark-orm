@@ -41,6 +41,8 @@ func BuildUpsertSQL(dialect Dialect, spec UpsertSpec) (SQLSource, error) {
 		return buildOnConflictUpsertSQL(spec)
 	case DialectUpsertOnDuplicateKey:
 		return buildOnDuplicateKeyUpsertSQL(spec)
+	case DialectUpsertMerge:
+		return buildMergeUpsertSQL(dialect, spec)
 	default:
 		return SQLSource{}, configurationErrorf("upsert is not supported by dialect %q", dialect.Name())
 	}

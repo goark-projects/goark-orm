@@ -186,6 +186,28 @@ func TestWriteSQLBuilders_whenReturningProvided_shouldBuildReturningClauses(t *t
 	}
 }
 
+func TestSelectSQLBuilder_ForUpdate_whenSQLServerProvided_shouldRenderTableHint(t *testing.T) {
+	source, err := NewSelectSQLBuilder().
+		Select("id").
+		From("sys_user").
+		WhereEq("id", int64(7)).
+		ForUpdate(NewSQLServerDialect(), RowLockOptions{}).
+		Build()
+	if err != nil {
+		t.Fatalf("build select for update failed: %v", err)
+	}
+
+	compiled, err := CompileSQLContext(context.Background(), source.SQL, source.Args, NewSQLServerDialect())
+	if err != nil {
+		t.Fatalf("compile select for update failed: %v", err)
+	}
+
+	expected := "SELECT [id] FROM [sys_user] WITH (UPDLOCK, ROWLOCK) WHERE [id] = @p1"
+	if compiled.SQL != expected {
+		t.Fatalf("unexpected sqlserver for update SQL %q", compiled.SQL)
+	}
+}
+
 func TestWriteSQLBuilders_whenRequireWhereWithoutCondition_shouldReject(t *testing.T) {
 	if _, err := NewUpdateSQLBuilder().
 		Table("sys_user").
