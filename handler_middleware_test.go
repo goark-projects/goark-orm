@@ -121,6 +121,41 @@ func TestSQLSession_WithStatementHandlerMiddleware_whenRuntimeArgsMutated_should
 	}
 }
 
+func TestSQLSession_WithStatementHandler_whenCustomHandlerProvided_shouldNotBypassHandler(t *testing.T) {
+	state := openTestSQLState(t)
+	state.queryRows = testRowsData{
+		columns: []string{"id", "name"},
+		values:  [][]driver.Value{{int64(7), "Alice"}},
+	}
+	registry := newSQLSessionRegistry(t, StatementMeta{
+		ID:         "FindByID",
+		Namespace:  "system.user.UserMapper",
+		FullName:   "system.user.UserMapper.FindByID",
+		Command:    StatementCommandSelect,
+		Source:     StatementSourceAnnotation,
+		SQL:        "select id, name from sys_user where id = #{id}",
+		ResultType: "sqlSessionUser",
+	})
+	handler := &countingStatementHandler{dialect: NewPostgresDialect()}
+	session, err := NewSQLSession(registry, state.db, handler.dialect, WithStatementHandler(handler))
+	if err != nil {
+		t.Fatalf("new SQL session failed: %v", err)
+	}
+
+	var user sqlSessionUser
+	err = session.QueryOne(context.Background(), "system.user.UserMapper.FindByID", NamedArgs{"id": int64(7)}, &user)
+	if err != nil {
+		t.Fatalf("query one failed: %v", err)
+	}
+
+	if user.ID != 7 || user.Name != "Alice" {
+		t.Fatalf("unexpected user %#v", user)
+	}
+	if handler.prepareCalls != 1 || handler.compileCalls != 1 {
+		t.Fatalf("expected custom statement handler to run once, got prepare=%d compile=%d", handler.prepareCalls, handler.compileCalls)
+	}
+}
+
 type recordingExecutor struct {
 	next  StatementExecutor
 	calls *[]string
@@ -180,6 +215,31 @@ func (h mutatingStatementHandler) Compile(ctx context.Context, runtime *Statemen
 
 func (h mutatingStatementHandler) CompileText(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs) (CompiledSQL, error) {
 	return h.next.CompileText(ctx, meta, dialect, sqlText, args)
+}
+
+type countingStatementHandler struct {
+	dialect      Dialect
+	prepareCalls int
+	compileCalls int
+}
+
+func (h *countingStatementHandler) Prepare(ctx context.Context, meta StatementMeta, args NamedArgs) (*StatementRuntime, error) {
+	h.prepareCalls++
+	return &StatementRuntime{
+		Meta:    meta,
+		SQL:     meta.SQL,
+		Args:    args,
+		Dialect: h.dialect,
+	}, nil
+}
+
+func (h *countingStatementHandler) Compile(ctx context.Context, runtime *StatementRuntime) (CompiledSQL, error) {
+	h.compileCalls++
+	return CompileSQLContext(ctx, runtime.SQL, runtime.Args, runtime.Dialect)
+}
+
+func (h *countingStatementHandler) CompileText(ctx context.Context, meta StatementMeta, dialect Dialect, sqlText string, args NamedArgs) (CompiledSQL, error) {
+	return CompileSQLContext(ctx, sqlText, args, dialect)
 }
 
 type recordingParameterHandler struct {

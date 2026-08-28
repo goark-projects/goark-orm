@@ -267,6 +267,9 @@ func (s *SQLSession) compileStatement(ctx context.Context, meta StatementMeta, a
 	if s == nil {
 		return CompiledSQL{}, configurationErrorf("session is nil")
 	}
+	if s.canCompileStatementDirectly(meta) {
+		return s.compileStaticStatement(ctx, meta, args)
+	}
 	runtime, err := s.statementHandler.Prepare(ctx, meta, args)
 	if err != nil {
 		return CompiledSQL{}, err
