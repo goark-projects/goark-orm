@@ -12,6 +12,7 @@
 
 ## 运维与发布
 
+- [版本变更说明](../CHANGELOG.zh-CN.md)：已发布版本的能力、验证范围和已知边界。
 - [数据库矩阵](database-matrix.zh-CN.md)：方言行为、兼容套件覆盖、环境变量和 benchmark harness。
 - [Release Gates](release-gates.zh-CN.md)：本地 build、test、vet、generation、diff 和 benchmark 门禁。
 - [API 兼容性](api-compatibility.zh-CN.md)：V1 公共契约和演进规则。
