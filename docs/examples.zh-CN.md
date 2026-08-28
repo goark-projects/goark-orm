@@ -1,6 +1,6 @@
-# Goark ORM 案例说明
+# Goark ORM 案例指南
 
-本指南按当前代码已经实现的能力组织。驱动注册、DDL 和私有 SQL 保持在调用方工程或本地测试包中，不进入 core 仓库。
+本指南展示当前代码库已经实现的常用运行期和生成器路径。示例不会把驱动注册、DDL、凭据或私有 SQL 放进 core 仓库。
 
 ## 最小生成 Mapper
 
@@ -47,13 +47,7 @@ session, err := orm.NewSQLSession(registry, db, orm.NewPostgresDialect())
 if err != nil {
 	return err
 }
-
 mapper := NewUserMapper(session)
-user, err := mapper.FindByID(ctx, 7)
-if err != nil {
-	return err
-}
-_ = user
 ```
 
 ## XML Mapper
@@ -92,7 +86,7 @@ type UserMapper interface {
 </mapper>
 ```
 
-对会修改数据的 select 风格语句使用 `affectData="true"`，例如数据库特定的 `RETURNING` 工作流。运行期会按数据变更语句处理缓存刷新和审计中间件默认记录。
+对会修改数据的 select 风格语句使用 `affectData="true"`，例如数据库特定的 returning 工作流。运行期会按数据变更语句处理缓存刷新和审计默认记录。
 
 ```xml
 <select id="ArchiveReturning" resultMap="UserResult" affectData="true" flushCache="true" useCache="false">
@@ -103,7 +97,7 @@ type UserMapper interface {
 </select>
 ```
 
-命名 `resultSets` 可以把多个结果集映射为嵌套对象，不需要 Java 风格运行期代理：
+命名 `resultSets` 可以把多个结果集映射为嵌套对象：
 
 ```xml
 <resultMap id="UserWithRoles" type="User">
@@ -123,7 +117,7 @@ type UserMapper interface {
 
 ## BaseMapper 与 Service
 
-单主键实体生成 `New<Entity>BaseMapper` 和 `New<Entity>Service` 工厂。
+单主键实体会生成 `New<Entity>BaseMapper` 和 `New<Entity>Service` 工厂。
 
 ```go
 baseMapper, err := NewUserBaseMapper(session)
@@ -158,6 +152,38 @@ if err != nil {
 	return err
 }
 _ = users
+```
+
+## 类型化字段值
+
+```go
+names, err := orm.SelectFieldValues(
+	ctx,
+	baseMapper,
+	UserTypedFields.Name,
+	orm.NewQueryWrapper[User]().EqTyped(UserTypedFields.Status, "ACTIVE"),
+)
+if err != nil {
+	return err
+}
+
+firstName, err := orm.SelectFirstFieldValue(
+	ctx,
+	baseMapper,
+	UserTypedFields.Name,
+	orm.NewQueryWrapper[User]().OrderByAscTyped(UserTypedFields.ID),
+)
+if err != nil {
+	return err
+}
+
+ids, err := baseMapper.SelectIDs(ctx, nil)
+if err != nil {
+	return err
+}
+_ = names
+_ = firstName
+_ = ids
 ```
 
 ## 局部更新
@@ -339,7 +365,7 @@ mapper := NewUserMapper(routing)
 _ = mapper
 ```
 
-## 审计中间件
+## 审计 Middleware
 
 审计包是可选子包，不进入根包。默认记录写操作和 `affectData` 查询。
 
@@ -414,7 +440,7 @@ _ = session
 ```
 
 ```go
-assembled, err := orm.LoadAndAssembleMyBatisConfig("orm-runtime.json", orm.MyBatisAssembly{
+assembled, err := orm.LoadAndAssembleRuntimeConfig("orm-runtime.json", orm.RuntimeAssembly{
 	Registry: registry,
 	DB:       db,
 	TypeHandlers: map[string]orm.TypeHandler{
@@ -473,4 +499,4 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-本地矩阵可以使用 `scripts/verify-real-db.ps1`，对应 benchmark harness 使用 `scripts/verify-real-db-bench.ps1`。具体数据库驱动只在临时 harness 中导入；设置 `GOARK_ORM_SQLITE_DSN` 时还需要同时设置 `GOARK_ORM_SQLITE_IMPORT`。
+本地矩阵使用 `scripts/verify-real-db.ps1`，对应 benchmark harness 使用 `scripts/verify-real-db-bench.ps1`。具体数据库驱动只在临时 harness 中导入；设置 `GOARK_ORM_SQLITE_DSN` 时还需要同时设置 `GOARK_ORM_SQLITE_IMPORT`。

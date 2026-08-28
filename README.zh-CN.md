@@ -1,8 +1,8 @@
 # Goark ORM
 
-Goark ORM 是面向 `database/sql` 的 Go 原生数据映射模块。它使用显式元数据注册、稳定代码生成和小型运行期契约，提供 Session、事务、类型处理器、SQL 构建、结果映射、路由、缓存和真实数据库验证能力。
+Goark ORM 是面向 `database/sql` 的 Go 原生数据映射模块。它使用显式元数据、确定性代码生成、小型运行期契约和可复用真实数据库验证工具，服务于生产级 Go 应用。
 
-默认文档为英文：[README.md](README.md)。案例说明分别在 [docs/examples.md](docs/examples.md) 和 [docs/examples.zh-CN.md](docs/examples.zh-CN.md)。
+默认文档语言是英文：[README.md](README.md)。中文文档作为镜像维护在本文件和 `*.zh-CN.md` 指南中。
 
 ## 模块
 
@@ -12,34 +12,32 @@ module goark.dev/orm
 
 `orm.APIVersion` 当前为 `v1`。
 
-## 设计边界
+## 设计规则
 
-- 运行期只使用显式注册的元数据，不扫描 Mapper、XML 或实体。
-- 生成 Mapper 只依赖 `orm.Session` 接口，自动提交、事务、路由、批处理和流式查询可以复用同一套生成代码。
-- core 不导入具体数据库驱动，真实数据库验证由调用方显式导入驱动并通过环境变量开启。
-- Migration 和 DDL 生命周期不属于本模块。
-- `${}` 只接受显式 `RawSQLToken`，例如 `RawIdentifier` 和 `RawOrderBy`。
-- JSON 处理统一经过内部 JSON codec，底层使用 ByteDance Sonic。
+- 运行期元数据通过生成代码显式注册。
+- 源文件、XML Mapper 文件和 struct tag 是生成器输入；运行期不扫描这些文件。
+- 生成 Mapper 实现只依赖 `orm.Session`，自动提交 Session、事务 Session、批处理 Session、路由 Session 和流式签名共用同一生成接口。
+- core 包不导入具体数据库驱动。应用和测试 harness 负责驱动导入、DSN、连接池、schema setup 和 cleanup。
+- Schema migration 和 DDL 生命周期不属于本模块。
+- `${}` 原始 SQL 替换只接受显式 `RawSQLToken`，例如 `RawIdentifier` 和 `RawOrderBy`。
+- JSON 处理统一经过内部 Sonic-backed codec。
 
-## 当前能力
+## 能力地图
 
-- `//goark-orm:entity` 和严格 `goark-orm` struct tag 实体元数据。
-- `//goark-orm:mapper`、方法级 SQL 注解和 XML Mapper 元数据。
-- 生成元数据注册、实体 RowScanner、Mapper 实现、类型化字段常量、`BaseMapper` 工厂和 `Service` 工厂。
-- XML 动态 SQL：`sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`。
-- 安全表达式执行，覆盖布尔逻辑、比较、算术、三元表达式、集合判断、`empty`、`in/not in` 和白名单只读方法。
-- PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 和 Oracle 是当前标准真实数据库目标；问号占位符只承诺 SQL 生成方言能力。
-- Statement 级 timeout、fetch size、result set type、result ordered、key column、`affectData` select、缓存策略和拦截器忽略配置。
-- Callable statement，支持 IN、OUT、INOUT 参数、`sql.Out` 绑定和多结果集扫描。
-- ResultMap constructor、association、collection、discriminator、nested select、命名 resultSets 嵌套对象映射、显式 Lazy、column prefix 和 not-null guard。
-- Registry / Session 级 TypeHandler，内置 JSON、time、decimal、string、bool、bytes 处理器。
-- `BaseMapper`、`Service`、`QueryWrapper`、`UpdateWrapper`、类型化字段、强类型字段值查询、分页、批处理、逻辑删除、乐观锁、主键生成和自动填充。
-- SQL Provider 描述注册和 select/insert/update/delete SQL Builder。
-- SQLSession middleware 与拦截器，覆盖执行链路、可选审计记录、分页、租户、数据权限、动态表、SQL 观察、全表写保护、非法 SQL、只读会话和自定义治理规则。
-- 一级缓存、namespace 二级缓存、LRU、并发 miss 合并、缓存统计和事务提交后发布语义。
-- 多数据源路由 Session 和路由工厂。
-- `ormgen` schema 读取、反向工程、模板渲染、schema drift 和 schema compatibility helper。
-- `ormtest` 真实数据库套件和 benchmark harness，覆盖 ping、setup/cleanup、查询、分页、写语句、批处理、TypeHandler JSON/原生 JSON 列、UPSERT、生成主键回读、行锁，以及数据库和驱动支持的 callable。
+| 领域 | 当前能力 |
+| --- | --- |
+| 实体映射 | `//goark-orm:entity`、严格 `goark-orm` struct tag、类型化字段常量、生成 RowScanner |
+| Mapper 映射 | `//goark-orm:mapper`、方法级 SQL 注解、XML Mapper 文件、Provider 语句 |
+| 动态 SQL | `sql/include`、`bind`、`if`、`where`、`set`、`trim`、`foreach`、`choose/when/otherwise`、安全表达式执行 |
+| CRUD 辅助 | `BaseMapper`、`Service`、链式查询/更新 API、类型化 wrapper、分页、字段值查询、ID 列表 |
+| 写入语义 | 批处理写入、生成主键、insert/update/where 字段策略、自动填充、乐观锁、逻辑删除 |
+| 结果映射 | Constructor arg、association、collection、discriminator、nested select、命名 result set、显式懒加载 |
+| 运行期扩展 | TypeHandler、SQL Provider、拦截器、handler middleware、审计 middleware、缓存 SPI |
+| 治理 | 全表写保护、非法 SQL 规则、只读 Session、租户条件、数据权限、动态表名、SQL 观察 |
+| 缓存 | Session 一级缓存、namespace 二级缓存、LRU、TTL、并发 miss 合并、事务感知发布 |
+| 路由 | 显式数据源选择、读写分离、按语句路由 |
+| 方言 | PostgreSQL、MySQL、MariaDB、SQLite、SQL Server、Oracle，以及问号占位符 SQL 生成方言 |
+| 工具 | CLI 生成、多 package 生成配置、schema introspection、反向工程、drift 检查、真实数据库套件和 benchmark |
 
 ## 快速开始
 
@@ -71,13 +69,13 @@ type UserMapper interface {
 }
 ```
 
-生成代码：
+生成 Mapper 代码：
 
 ```bash
 GOWORK=off go run ./cmd/goark-orm generate orm --dir internal/user --output internal/user/zz_goark_orm_user_gen.go
 ```
 
-注册元数据并创建 Session：
+注册元数据并使用 Session：
 
 ```go
 registry := orm.NewRegistry()
@@ -101,7 +99,7 @@ if err != nil {
 _ = user
 ```
 
-使用生成的字段常量和通用 Mapper：
+使用生成字段常量和通用 Mapper：
 
 ```go
 baseMapper, err := NewUserBaseMapper(session)
@@ -130,23 +128,23 @@ names, err := orm.SelectFieldValues(
 if err != nil {
 	return err
 }
-ids, err := baseMapper.SelectIDs(ctx, nil)
-if err != nil {
-	return err
-}
 _ = names
-_ = ids
 ```
 
-## CLI 配置
+## 生成器配置
 
-多包生成可以使用可提交的 JSON 配置：
+生成可由可提交 JSON 文件驱动。解码器为严格模式，并使用内部 Sonic-backed JSON codec。
 
 ```json
 {
   "databaseId": "postgres",
   "typeHandlers": ["json", "decimal"],
   "buildTags": ["enterprise"],
+  "naming": {
+    "table": "snake_case",
+    "column": "snake_case",
+    "tablePrefix": "sys_"
+  },
   "packages": [
     {
       "dir": "internal/user",
@@ -165,63 +163,68 @@ GOWORK=off go run ./cmd/goark-orm generate orm --config goark-orm.json --check
 GOWORK=off go run ./cmd/goark-orm generate orm --config goark-orm.json --diff
 ```
 
-CLI 配置只负责源码扫描和文件输出，不连接数据库，也不生成迁移文件。
+生成器配置只控制源码扫描和文件输出，不连接数据库，也不生成 migration。
 
 ## 运行期配置
 
-`Configuration` 是直接运行期模型：
+`Configuration` 是直接运行期模型。加载 JSON 配置时使用 `RuntimeConfig`：
 
-```go
-config := orm.DefaultConfiguration().
-	WithLocalCache(true).
-	WithSecondLevelCache(true).
-	WithMapUnderscoreToCamelCase(true).
-	WithDefaultResultSetType(orm.ResultSetTypeForwardOnly).
-	WithNullableOnForEach(true)
-
-config.Dialect = orm.NewPostgresDialect()
-config.LocalCacheScope = orm.LocalCacheScopeSession
-config.DefaultExecutorType = orm.ExecutorTypeReuse
-config.ShrinkWhitespacesInSQL = true
-config.GlobalConfig.DbConfig.IDType = orm.IDTypeAssignID
-config.GlobalConfig.DbConfig.TablePrefix = "sys_"
-config.GlobalConfig.DbConfig.InsertStrategy = orm.FieldStrategyNotEmpty
-config.GlobalConfig.DbConfig.UpdateStrategy = orm.FieldStrategyNotEmpty
-
-session, err := orm.NewSQLSession(registry, db, nil, orm.WithConfiguration(config))
-if err != nil {
-	return err
+```json
+{
+  "settings": {
+    "cacheEnabled": true,
+    "localCacheEnabled": true,
+    "localCacheScope": "SESSION",
+    "mapUnderscoreToCamelCase": true,
+    "defaultExecutorType": "REUSE",
+    "preparedStatementCacheSize": 256,
+    "defaultStatementTimeout": "2s",
+    "defaultFetchSize": 512,
+    "defaultResultSetType": "FORWARD_ONLY",
+    "nullableOnForEach": true,
+    "shrinkWhitespacesInSql": true,
+    "jdbcTypeForNull": "OTHER",
+    "autoMappingBehavior": "FULL",
+    "autoMappingUnknownColumnBehavior": "NONE",
+    "databaseId": "postgres"
+  },
+  "environment": {
+    "id": "production",
+    "dbType": "postgres"
+  },
+  "global": {
+    "dbConfig": {
+      "idType": "assign_id",
+      "tablePrefix": "sys_",
+      "logicDeleteField": "Deleted",
+      "logicDeleteValue": true,
+      "logicNotDeleteValue": false,
+      "insertStrategy": "not_empty",
+      "updateStrategy": "not_null",
+      "whereStrategy": "not_zero"
+    }
+  },
+  "typeHandlers": [
+    {
+      "name": "json"
+    }
+  ],
+  "mappers": [
+    {
+      "namespace": "example.user.UserMapper"
+    }
+  ],
+  "plugins": [
+    {
+      "name": "blockAttack",
+      "order": 10
+    }
+  ]
 }
 ```
 
-## 审计中间件
-
-`goark.dev/orm/audit` 提供可选的 `StatementExecutorMiddleware`。默认记录写语句和 `affectData` 查询；普通读查询事件需要显式开启。
-
 ```go
-recorder := audit.RecorderFunc(func(ctx context.Context, event audit.Event) error {
-	if !event.Success() {
-		return logAuditFailure(ctx, event)
-	}
-	return writeAuditEvent(ctx, event)
-})
-
-session, err := orm.NewSQLSession(
-	registry,
-	db,
-	orm.NewPostgresDialect(),
-	orm.WithStatementExecutorMiddleware(audit.NewMiddleware(recorder)),
-)
-if err != nil {
-	return err
-}
-_ = session
-```
-
-JSON 配置解码是严格模式，并使用内部 Sonic JSON codec。`LoadAndAssembleMyBatisConfig` 可以一站式读取配置并装配运行期对象：
-
-```go
-assembled, err := orm.LoadAndAssembleMyBatisConfig("orm-runtime.json", orm.MyBatisAssembly{
+assembled, err := orm.LoadAndAssembleRuntimeConfig("orm-runtime.json", orm.RuntimeAssembly{
 	Registry: registry,
 	DB:       db,
 	TypeHandlers: map[string]orm.TypeHandler{
@@ -236,14 +239,16 @@ defer session.Close()
 _ = session
 ```
 
-## Goark Boot 风格装配
+完整生成器和运行期配置见 [docs/configuration.zh-CN.md](docs/configuration.zh-CN.md)。
 
-`goark.dev/orm/ormboot` 提供一个很小的 Goark 风格启动适配边界，但不会把 Goark 核心包导入 ORM 运行时。应用传入 `*sql.DB`、MyBatis 风格运行期配置和生成器元数据注册函数，再把返回的 Bean 实例注册到自己的容器中：
+## Boot 风格装配
+
+`goark.dev/orm/ormboot` 提供小型装配边界，便于接入应用容器或启动生命周期。该适配器不会让 ORM 运行时依赖框架包。
 
 ```go
 assembler, err := ormboot.New(ormboot.Config{
 	DB:            db,
-	MyBatisConfig: config,
+	RuntimeConfig: config,
 	MetadataRegistrars: []ormboot.MetadataRegistrar{
 		RegisterGoarkORMMetadata,
 	},
@@ -260,86 +265,11 @@ factory := runtime.SessionFactory()
 _ = factory
 ```
 
-适配器只管理自己创建的 ORM Session。驱动导入、`*sql.DB` 生命周期和真实事务管理器集成仍由调用方负责。
+适配器只管理自己创建的 ORM Session。驱动导入、`*sql.DB` 生命周期和事务管理器集成仍由调用方负责。
 
-## Provider SQL
+## 真实数据库验证
 
-Provider 必须显式注册，可以组合 SQL Builder：
-
-```go
-err := registry.RegisterSQLProviderDescriptor(orm.NewSQLProviderDescriptor(
-	"UserSQL.ListByStatus",
-	func(ctx context.Context, statement orm.StatementMeta, args orm.NamedArgs) (orm.SQLSource, error) {
-		return orm.NewSelectSQLBuilder().
-			Select("id", "name", "status").
-			From("sys_user").
-			WhereEq("status", args["status"]).
-			OrderByAsc("id").
-			Limit(args["limit"]).
-			CacheKey("tenant:" + args["tenant"].(string)).
-			Build()
-	},
-	orm.WithSQLProviderCommands(orm.StatementCommandSelect),
-	orm.WithSQLProviderStatements("example.user.UserMapper.ListByStatus"),
-))
-if err != nil {
-	return err
-}
-```
-
-## 事务与批处理
-
-```go
-factory, err := orm.NewSQLSessionFactory(registry, db, orm.NewPostgresDialect())
-if err != nil {
-	return err
-}
-
-err = factory.InTx(ctx, nil, func(ctx context.Context, session orm.Session) error {
-	batch, err := orm.NewBatchSession(session)
-	if err != nil {
-		return err
-	}
-	baseMapper, err := NewUserBaseMapper(batch)
-	if err != nil {
-		return err
-	}
-	_, err = baseMapper.UpdateWithWrapper(
-		ctx,
-		orm.NewUpdateWrapper[User]().
-			SetTyped(UserTypedFields.Status, "LOCKED").
-			EqTyped(UserTypedFields.ID, int64(7)),
-	)
-	if err != nil {
-		return err
-	}
-	_, err = batch.Flush(ctx)
-	return err
-})
-```
-
-## Schema 工具
-
-`ormgen` 可以通过 `database/sql` 读取真实 schema，构造生成模型，渲染 Go 源码，并可选对比已注册元数据：
-
-```go
-report, err := ormgen.ValidateSQLSchemaCompatibility(ctx, ormgen.SQLSchemaCompatibilityConfig{
-	DBType:      orm.DbTypePostgres,
-	SQLQueryer: db,
-	Schema:     "public",
-	Tables:     []string{"sys_user"},
-	PackageName: "user",
-	Registry:   registry,
-})
-if err != nil {
-	return err
-}
-_ = report.Source
-```
-
-## 真实数据库兼容性
-
-真实库套件只有在调用方提供驱动和 DSN 后才执行。标准套件当前支持 PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 和 Oracle。调用方测试工程可以使用 `ormtest.SupportedCompatibilityDBTypes()` 或 `ormtest.IsCompatibilityDBTypeSupported(dbType)` 判断当前支持边界：
+真实数据库套件只有在调用方提供驱动和 DSN 后才执行。标准套件当前支持 PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 和 Oracle。
 
 ```go
 package user_test
@@ -363,7 +293,7 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-兼容矩阵覆盖 CRUD、分页、批处理、TypeHandler 往返、原生 JSON 列、UPSERT、生成主键回读、行锁，以及具备可移植驱动行为的 callable statement 路径。详见 [docs/database-matrix.md](docs/database-matrix.md)。
+矩阵覆盖 CRUD、分页、批处理、TypeHandler 往返、原生 JSON 列、UPSERT、生成主键回读、行锁 smoke path，以及具备可移植驱动行为的 callable statement 路径。详见 [docs/database-matrix.md](docs/database-matrix.md)。
 
 ## 本地验证
 
@@ -376,20 +306,23 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-real-db-bench.ps1 -Bench
 git diff --check
 ```
 
-维护者发布前可以执行本地门禁：
+发布维护者可执行本地 release gate：
 
 ```bash
 GOWORK=off ./scripts/verify-release.sh
 ```
 
-## 更多文档
+## 文档
 
-- [案例说明](docs/examples.zh-CN.md)
-- [API Compatibility](docs/api-compatibility.md)
-- [Database Matrix](docs/database-matrix.md)
-- [MyBatis-Plus 迁移矩阵](docs/mybatis-plus-migration.zh-CN.md)
-- [Provider And SQL Builder](docs/provider-builder.md)
-- [Architecture Notes](docs/goark-orm-v1-design.md)
+- [英文文档索引](docs/README.md)
+- [中文文档索引](docs/README.zh-CN.md)
+- [功能参考](docs/features.zh-CN.md)
+- [配置参考](docs/configuration.zh-CN.md)
+- [案例指南](docs/examples.zh-CN.md)
+- [API 兼容性](docs/api-compatibility.md)
+- [数据库矩阵](docs/database-matrix.md)
+- [Provider 与 SQL Builder](docs/provider-builder.md)
+- [架构说明](docs/goark-orm-v1-design.md)
 - [Release Gates](docs/release-gates.md)
 
 ## 许可证
