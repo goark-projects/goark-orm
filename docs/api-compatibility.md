@@ -9,7 +9,7 @@
 The V1 compatibility surface includes:
 
 - Module path: `goark.dev/orm`.
-- Runtime packages under `goark.dev/orm`.
+- Runtime package: `goark.dev/orm`.
 - Optional audit package: `goark.dev/orm/audit`.
 - Optional DbKit convenience package: `goark.dev/orm/dbkit`.
 - Boot-style adapter package: `goark.dev/orm/ormboot`.
@@ -23,9 +23,9 @@ The V1 compatibility surface includes:
 
 The following exported runtime concepts are covered by the V1 compatibility policy:
 
-- `Session`, `ManagedSession`, `StatementSession`, `CallSession`, `StatementCallSession`.
+- `Session`, `ManagedSession`, `StatementSession`, `CallSession`, and `StatementCallSession`.
 - `SQLSession`, `SQLSessionFactory`, `TxSession`, `BatchSession`, `RoutingSession`, and `RoutingSessionFactory`.
-- `Configuration`, `GlobalConfig`, `DbConfig`, `MyBatisSettings`, `MyBatisConfig`, `MyBatisConfigFile`, `MyBatisGlobalConfigFile`, `MyBatisDbConfigFile`, `MyBatisAssembly`, and `MyBatisAssemblyResult`.
+- `Configuration`, `GlobalConfig`, `DbConfig`, `RuntimeSettings`, `RuntimeEnvironment`, `RuntimeConfig`, `RuntimeConfigFile`, `RuntimeSettingsFile`, `RuntimeEnvironmentFile`, `RuntimeAssembly`, and `RuntimeAssemblyResult`.
 - `ormboot.Config`, `ormboot.Assembler`, `ormboot.Runtime`, `ormboot.MetadataRegistrar`, `ormboot.BeanNames`, and `ormboot.BeanRegistration`.
 - `BaseMapper`, `Service`, `QueryChain`, `UpdateChain`, `QueryWrapper`, `UpdateWrapper`, typed field value query helpers, `Page`, `PageRequest`, `Cursor`, `Lazy`, and `LazySlice`.
 - `SQLInjector`, `SQLInjectorFunc`, `DefaultSQLInjector`, `InjectOption`, `InjectNamespaceResolver`, `RegisterInjectedStatements`, and `RegisterDefaultInjectedStatementsForRegistry`.
@@ -43,17 +43,18 @@ The stable metadata model includes:
 
 - `EntityMeta`, `ColumnMeta`, `MapperMeta`, `StatementMeta`, and `StatementOptions`.
 - `ParameterMeta`, `ResultSetMeta`, `ResultMapMeta`, constructor mapping, association mapping, collection mapping, discriminator mapping, cache metadata, and dynamic SQL nodes.
-- `StatementMeta.AffectData` for select-style statements that modify data and must use write-like cache/audit defaults.
+- `StatementMeta.AffectData` for select-style statements that modify data and must use write-like cache and audit defaults.
 - `StatementOptions.ResultSetType`, `StatementOptions.ResultOrdered`, and `StatementOptions.KeyColumn`.
 - `ResultAssociationMeta.ResultSet`, `ResultAssociationMeta.ForeignColumn`, `ResultCollectionMeta.ResultSet`, and `ResultCollectionMeta.ForeignColumn` for named multi-result-set nested object mapping.
-- Configuration and file settings for safe MyBatis parity: `DefaultResultSetType`, `UseColumnLabel`, `NullableOnForEach`, `ShrinkWhitespacesInSQL`, `JDBCTypeForNull`, `AutoMappingBehavior`, and `AutoMappingUnknownColumnBehavior`.
+- Configuration and file settings: `DefaultResultSetType`, `UseColumnLabel`, `NullableOnForEach`, `ShrinkWhitespacesInSQL`, `JDBCTypeForNull`, `AutoMappingBehavior`, and `AutoMappingUnknownColumnBehavior`.
 - Statement command, source, type, cache policy, parameter mode, result set type, field strategy, field fill, and ID type enums.
 
 ## Generator Contracts
 
 The V1 generator surface includes:
 
-- `GenerateSpec`, `PackageModel`, `EntityModel`, `MapperModel`, `StatementModel`, and rendering entrypoints.
+- `GenerateSpec`, `GenerateConfig`, `GeneratePackageSpec`, `ConfiguredGenerateSpec`, `PackageModel`, `EntityModel`, `MapperModel`, `StatementModel`, and rendering entrypoints.
+- Naming contracts: `NamingConfig`, `NamingStrategyExplicit`, `NamingStrategySame`, and `NamingStrategySnakeCase`.
 - Schema introspection contracts: `SchemaIntrospector`, `SQLSchemaIntrospector`, `SQLSchemaDialect`, `SchemaQueryer`, and `SQLQueryer`.
 - Reverse engineering contracts: `ReverseEngineerSpec`, `ReverseEngineer`, `BuildPackageModelFromSchema`, `TemplateRenderer`, and `ReverseEngineerWithRenderer`.
 - Drift and compatibility helpers: `DetectSchemaDrift`, `ValidateSchemaDrift`, `CompareSchemaDrift`, `ValidateSQLSchemaCompatibility`, `SQLSchemaCompatibilityConfig`, and `SQLSchemaCompatibilityReport`.

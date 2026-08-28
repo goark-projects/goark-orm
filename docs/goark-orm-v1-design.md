@@ -6,7 +6,7 @@ Accepted for the current V1 implementation.
 
 ## Context
 
-Goark ORM is an independent data mapping module. The runtime uses deterministic generated metadata and explicit registration. Source files, XML mapper files, and struct tags are generator inputs; they are not scanned by the runtime.
+Goark ORM is an independent Go data-mapping module. The runtime uses deterministic generated metadata and explicit registration. Source files, XML mapper files, and struct tags are generator inputs; they are not scanned by the runtime.
 
 ## Goals
 
@@ -16,6 +16,7 @@ Goark ORM is an independent data mapping module. The runtime uses deterministic 
 - Keep database driver registration outside core packages.
 - Keep schema lifecycle outside the ORM boundary.
 - Keep Go APIs explicit, small, and testable.
+- Keep JSON handling on the internal Sonic-backed codec path.
 
 ## Non-Goals
 
@@ -75,8 +76,8 @@ Rules:
 - Mapper namespace is required.
 - Mapper namespace must be explicitly declared.
 - Mapper namespace must be unique in the registry.
-- Entity table name is required.
-- Persistent fields require a `column` tag.
+- Entity table name is required unless generator naming derives it.
+- Persistent fields require a `column` tag unless generator naming derives it.
 - Non-persistent fields require `transient=true`.
 - A mapped entity needs at least one primary key for generated common CRUD.
 - SQL method annotations are mutually exclusive: `select`, `insert`, `update`, `delete`, or `call`.
@@ -84,23 +85,23 @@ Rules:
 
 ## Runtime Packages
 
-```text
-dialect        SQL placeholders, identifier quoting, pagination, capability metadata
-metadata       Entity, mapper, statement, result map, cache, and dynamic SQL metadata
-statement      SQL source, provider, raw token, dynamic SQL, and parameter binding
-executor       query, query-one, exec, callable, batch, and result mapping
-session        SQLSession, factory, transaction session, routing session, and caches
-typehandler    JSON, time, decimal, bool, bytes, and custom conversion SPI
-interceptor    pagination, tenant, data permission, dynamic table, guard, read-only, observer
-ormgen         source scanning, XML parsing, model validation, rendering, schema tools
-ormtest        caller-owned real database test suites
-```
+| Area | Responsibility |
+| --- | --- |
+| dialect | SQL placeholders, identifier quoting, pagination, capability metadata |
+| metadata | Entity, mapper, statement, result map, cache, and dynamic SQL metadata |
+| statement | SQL source, provider, raw token, dynamic SQL, and parameter binding |
+| executor | query, query-one, exec, callable, batch, and result mapping |
+| session | SQLSession, factory, transaction session, routing session, and caches |
+| typehandler | JSON, time, decimal, string, bool, bytes, and custom conversion SPI |
+| interceptor | pagination, tenant, data permission, dynamic table, guard, read-only, observer |
+| ormgen | source scanning, XML parsing, model validation, rendering, schema tools |
+| ormtest | caller-owned real database test suites |
 
 ## Runtime Configuration
 
 `Configuration` is the direct runtime configuration model. It controls dialect, database id, cache defaults, local cache scope, underscore-to-camel mapping, default executor type, default statement timeout, fetch size, and global entity behavior.
 
-The JSON configuration loader is strict and decodes through the internal Sonic-backed JSON codec. `AssembleMyBatisConfig` keeps assembly explicit: callers pass the registry, optional database handle, and named type handlers. It validates the configuration, type handler names, mapper namespaces, and registry metadata before creating a session factory.
+The JSON configuration loader is strict and decodes through the internal Sonic-backed JSON codec. `AssembleRuntimeConfig` keeps assembly explicit: callers pass the registry, optional database handle, named type handlers, custom plugins, and session options. It validates configuration, type handler names, mapper namespaces, and registry metadata before creating a session factory.
 
 ## Transactions
 

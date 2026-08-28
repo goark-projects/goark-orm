@@ -1,6 +1,6 @@
 # Goark ORM Examples
 
-This guide shows the common runtime and generator paths that are implemented in the current codebase. Examples keep driver registration, DDL, and private SQL outside the core repository.
+This guide shows common runtime and generator paths implemented in the current codebase. Examples keep driver registration, DDL, credentials, and private SQL outside the core repository.
 
 ## Minimal Generated Mapper
 
@@ -47,13 +47,7 @@ session, err := orm.NewSQLSession(registry, db, orm.NewPostgresDialect())
 if err != nil {
 	return err
 }
-
 mapper := NewUserMapper(session)
-user, err := mapper.FindByID(ctx, 7)
-if err != nil {
-	return err
-}
-_ = user
 ```
 
 ## XML Mapper
@@ -92,7 +86,7 @@ type UserMapper interface {
 </mapper>
 ```
 
-Use `affectData="true"` for select-style statements that modify data, such as database-specific `RETURNING` workflows. The runtime treats them as data-affecting statements for cache flushing and audit middleware defaults.
+Use `affectData="true"` for select-style statements that modify data, such as database-specific returning workflows. The runtime treats them as data-affecting statements for cache flushing and audit defaults.
 
 ```xml
 <select id="ArchiveReturning" resultMap="UserResult" affectData="true" flushCache="true" useCache="false">
@@ -103,7 +97,7 @@ Use `affectData="true"` for select-style statements that modify data, such as da
 </select>
 ```
 
-Named `resultSets` can map nested objects without Java-style runtime proxies:
+Named `resultSets` map nested objects from multiple result sets:
 
 ```xml
 <resultMap id="UserWithRoles" type="User">
@@ -158,6 +152,38 @@ if err != nil {
 	return err
 }
 _ = users
+```
+
+## Typed Field Values
+
+```go
+names, err := orm.SelectFieldValues(
+	ctx,
+	baseMapper,
+	UserTypedFields.Name,
+	orm.NewQueryWrapper[User]().EqTyped(UserTypedFields.Status, "ACTIVE"),
+)
+if err != nil {
+	return err
+}
+
+firstName, err := orm.SelectFirstFieldValue(
+	ctx,
+	baseMapper,
+	UserTypedFields.Name,
+	orm.NewQueryWrapper[User]().OrderByAscTyped(UserTypedFields.ID),
+)
+if err != nil {
+	return err
+}
+
+ids, err := baseMapper.SelectIDs(ctx, nil)
+if err != nil {
+	return err
+}
+_ = names
+_ = firstName
+_ = ids
 ```
 
 ## Partial Update
@@ -414,7 +440,7 @@ _ = session
 ```
 
 ```go
-assembled, err := orm.LoadAndAssembleMyBatisConfig("orm-runtime.json", orm.MyBatisAssembly{
+assembled, err := orm.LoadAndAssembleRuntimeConfig("orm-runtime.json", orm.RuntimeAssembly{
 	Registry: registry,
 	DB:       db,
 	TypeHandlers: map[string]orm.TypeHandler{
