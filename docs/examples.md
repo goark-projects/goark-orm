@@ -449,7 +449,7 @@ _ = report.Source
 
 ## Real Database Test Harness
 
-Keep driver imports and credentials in the caller's test harness. The standard reusable suite currently supports PostgreSQL, MySQL, MariaDB, and SQLite:
+Keep driver imports and credentials in the caller's test harness. The standard reusable suite currently supports PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, and Oracle:
 
 ```go
 package user_test
@@ -473,4 +473,4 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-Use `scripts/verify-real-db.ps1` for the local matrix. PostgreSQL and MySQL drivers are imported only in the temporary harness; SQLite additionally requires `GOARK_ORM_SQLITE_IMPORT` when `GOARK_ORM_SQLITE_DSN` is set.
+Use `scripts/verify-real-db.ps1` for the local matrix and `scripts/verify-real-db-bench.ps1` for the matching benchmark harness. Concrete drivers are imported only in the temporary harness; SQLite additionally requires `GOARK_ORM_SQLITE_IMPORT` when `GOARK_ORM_SQLITE_DSN` is set.

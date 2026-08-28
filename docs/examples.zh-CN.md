@@ -449,7 +449,7 @@ _ = report.Source
 
 ## 真实数据库测试 Harness
 
-驱动导入和凭据保留在调用方测试包。标准复用套件当前支持 PostgreSQL、MySQL、MariaDB 和 SQLite：
+驱动导入和凭据保留在调用方测试包。标准复用套件当前支持 PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 和 Oracle：
 
 ```go
 package user_test
@@ -473,4 +473,4 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-本地矩阵可以使用 `scripts/verify-real-db.ps1`。PostgreSQL 和 MySQL 驱动只在临时 harness 中导入；设置 `GOARK_ORM_SQLITE_DSN` 时还需要同时设置 `GOARK_ORM_SQLITE_IMPORT`。
+本地矩阵可以使用 `scripts/verify-real-db.ps1`，对应 benchmark harness 使用 `scripts/verify-real-db-bench.ps1`。具体数据库驱动只在临时 harness 中导入；设置 `GOARK_ORM_SQLITE_DSN` 时还需要同时设置 `GOARK_ORM_SQLITE_IMPORT`。

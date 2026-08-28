@@ -11,6 +11,7 @@ The V1 compatibility surface includes:
 - Module path: `goark.dev/orm`.
 - Runtime packages under `goark.dev/orm`.
 - Optional audit package: `goark.dev/orm/audit`.
+- Optional DbKit convenience package: `goark.dev/orm/dbkit`.
 - Boot-style adapter package: `goark.dev/orm/ormboot`.
 - Generator package: `goark.dev/orm/ormgen`.
 - Test helper package: `goark.dev/orm/ormtest`.
@@ -26,7 +27,7 @@ The following exported runtime concepts are covered by the V1 compatibility poli
 - `SQLSession`, `SQLSessionFactory`, `TxSession`, `BatchSession`, `RoutingSession`, and `RoutingSessionFactory`.
 - `Configuration`, `GlobalConfig`, `DbConfig`, `MyBatisSettings`, `MyBatisConfig`, `MyBatisConfigFile`, `MyBatisGlobalConfigFile`, `MyBatisDbConfigFile`, `MyBatisAssembly`, and `MyBatisAssemblyResult`.
 - `ormboot.Config`, `ormboot.Assembler`, `ormboot.Runtime`, `ormboot.MetadataRegistrar`, `ormboot.BeanNames`, and `ormboot.BeanRegistration`.
-- `BaseMapper`, `Service`, `QueryChain`, `UpdateChain`, `QueryWrapper`, `UpdateWrapper`, `Page`, `PageRequest`, `Cursor`, `Lazy`, and `LazySlice`.
+- `BaseMapper`, `Service`, `QueryChain`, `UpdateChain`, `QueryWrapper`, `UpdateWrapper`, typed field value query helpers, `Page`, `PageRequest`, `Cursor`, `Lazy`, and `LazySlice`.
 - `SQLInjector`, `SQLInjectorFunc`, `DefaultSQLInjector`, `InjectOption`, `InjectNamespaceResolver`, `RegisterInjectedStatements`, and `RegisterDefaultInjectedStatementsForRegistry`.
 - `Dialect`, `DialectCapabilities`, `DbType`, `UpsertSpec`, `RowLockOptions`, and `GeneratedKeyPlan`.
 - `TypeHandler`, `RowScanner`, `IdentifierGenerator`, `MetaObjectHandler`, and `EnumValuer`.
@@ -64,6 +65,7 @@ The V1 generator surface includes:
 - Base suite contracts: `DatabaseSuiteConfig`, `DatabaseCase`, `EnvSuiteOption`, `WithEnvPrefix`, `WithEnvRegistry`, `WithEnvCases`, `WithEnvSessionOptions`, `RunDatabaseSuite`, `RunDatabaseSuiteFromEnv`, `LoadDatabaseSuiteConfigFromEnv`, and `ParseSQLList`.
 - Reusable cases: `PingCase`, `QueryStatementCase`, `QueryOneStatementCase`, `ExecStatementCase`, `PageStatementCase`, and `CallStatementCase`.
 - Standard compatibility matrix contracts: `DefaultCompatibilityTable`, `CompatibilityRecord`, `CompatibilityProfile`, `CompatibilitySuiteOption`, `WithCompatibilityTable`, `WithCompatibilityNamespace`, `WithCompatibilityEnvPrefix`, `NewCompatibilitySuiteConfig`, `RunCompatibilitySuiteFromEnv`, `SupportedCompatibilityDBTypes`, and `IsCompatibilityDBTypeSupported`.
+- Standard benchmark matrix contracts: `DefaultBenchmarkTable`, `DatabaseBenchmarkConfig`, `DatabaseBenchmarkCase`, `DatabaseBenchmarkScope`, `NewBenchmarkSuiteConfig`, `RunDatabaseBenchmark`, `RunDatabaseBenchmarkFromEnv`, `LoadDatabaseBenchmarkConfigFromEnv`, `SupportedBenchmarkDBTypes`, and `IsBenchmarkDBTypeSupported`.
 - `NewCompatibilitySuiteConfig` returns `DatabaseSuiteConfig`; compatibility cases are ordinary `DatabaseCase` values.
 - Environment parsing helpers and SQL list parsing behavior documented in [database-matrix.md](database-matrix.md).
 

@@ -45,8 +45,10 @@ The current threshold set includes explicit allocation budgets for dynamic SQL r
 
 ## Real Database Verification
 
-Real database verification is not part of the default gate. Use `scripts/verify-real-db.ps1` to create a temporary driver harness and run the PostgreSQL, MySQL, MariaDB, and SQLite compatibility matrix without importing concrete drivers into core packages.
+Real database verification is not part of the default gate. Use `scripts/verify-real-db.ps1` to create a temporary driver harness and run the PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, and Oracle compatibility matrix without importing concrete drivers into core packages.
 
-PostgreSQL and MySQL are part of the standard local matrix when their DSNs are configured. MariaDB uses the MySQL-compatible driver path by default. SQLite is optional and requires both `GOARK_ORM_SQLITE_DSN` and `GOARK_ORM_SQLITE_IMPORT`; its standard suite skips callable statements because Go `database/sql` SQLite drivers do not expose a portable stored-procedure model.
+Use `scripts/verify-real-db-bench.ps1` for the matching real-database benchmark matrix. The benchmark suite measures prepared query reuse, generated row scanners, ResultMap JSON mapping, single-row insert, multi-row insert, batch insert, and native upsert. Treat `ns/op` as environment-specific because network, storage, database configuration, and driver behavior dominate absolute latency; compare repeated runs on the same release host.
+
+PostgreSQL and MySQL are part of the standard local matrix when their DSNs are configured. MariaDB uses the MySQL-compatible driver path by default. SQL Server can create the target database from `GOARK_ORM_SQLSERVER_ADMIN_DSN` when `GOARK_ORM_SQLSERVER_DSN` is empty. SQLite is optional and requires both `GOARK_ORM_SQLITE_DSN` and `GOARK_ORM_SQLITE_IMPORT`; its standard suite skips callable statements because Go `database/sql` SQLite drivers do not expose a portable stored-procedure model.
 
 The standard matrix and environment variables are documented in [database-matrix.md](database-matrix.md).

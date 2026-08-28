@@ -28,18 +28,18 @@ module goark.dev/orm
 - Generated metadata registration, entity row scanners, mapper implementations, typed field constants, `BaseMapper` factories, and `Service` factories.
 - Dynamic XML SQL nodes: `sql/include`, `bind`, `if`, `where`, `set`, `trim`, `foreach`, and `choose/when/otherwise`.
 - Safe expression evaluation for dynamic SQL, including boolean logic, comparisons, arithmetic, ternary expressions, collection tests, `empty`, `in/not in`, and whitelisted read-only string or collection helpers.
-- PostgreSQL, MySQL, MariaDB, and SQLite are the current standard real database targets. SQL Server, Oracle, and the question-placeholder dialect remain SQL generation dialects only.
+- PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, and Oracle are the current standard real database targets. The question-placeholder dialect remains a SQL generation dialect only.
 - Statement options for timeout, fetch size, result set type, ordered result mapping, generated key columns, `affectData` select statements, cache behavior, and interceptor ignore lists.
 - Callable statements with IN, OUT, INOUT parameters, `sql.Out` binding, and ordered multi-result-set scanning.
 - Result maps with constructor arguments, associations, collections, discriminator branches, nested selects, nested object mappings from named result sets, explicit lazy loading, column prefixes, and not-null guards.
 - Type handlers at registry and session level, including JSON, time, decimal, string, bool, and bytes handlers.
-- `BaseMapper`, `Service`, `QueryWrapper`, `UpdateWrapper`, typed fields, pagination, batch writes, logical delete, optimistic locking, key generation, and automatic fill hooks.
+- `BaseMapper`, `Service`, `QueryWrapper`, `UpdateWrapper`, typed fields, typed field-value queries, pagination, batch writes, logical delete, optimistic locking, key generation, and automatic fill hooks.
 - SQL provider descriptors and fluent SQL builders for select, insert, update, delete, upsert, row locks, generated key plans, and cache key extensions.
 - SQL session middleware and interceptors for statement execution, statement handling, parameter handling, result set handling, optional audit recording, pagination, tenant constraints, data permissions, dynamic table names, SQL observation, block-attack protection, illegal SQL rules, read-only sessions, and custom governance rules.
 - Local cache, namespace-level second-level cache, LRU eviction, blocking cache miss coalescing, cache stats, and transaction-aware cache publication.
 - Routing sessions and routing factories for explicit data-source selection, read/write split routing, and statement-based routing.
 - `ormgen` schema introspection, reverse engineering, custom template rendering, schema drift detection, and schema compatibility validation helpers.
-- `ormtest` real database suites for ping, setup/cleanup, query, pagination, writes, batch execution, type handlers, upsert, generated keys, row locks, and callable statements where the driver/database supports them.
+- `ormtest` real database suites and benchmark harnesses for ping, setup/cleanup, query, pagination, writes, batch execution, TypeHandler JSON/native JSON columns, upsert, generated keys, row locks, and callable statements where the driver/database supports them.
 
 ## Quick Start
 
@@ -120,6 +120,22 @@ if err != nil {
 	return err
 }
 _ = page
+
+names, err := orm.SelectFieldValues(
+	ctx,
+	baseMapper,
+	UserTypedFields.Name,
+	orm.NewQueryWrapper[User]().EqTyped(UserTypedFields.Status, "ACTIVE"),
+)
+if err != nil {
+	return err
+}
+ids, err := baseMapper.SelectIDs(ctx, nil)
+if err != nil {
+	return err
+}
+_ = names
+_ = ids
 ```
 
 ## CLI Configuration
@@ -323,7 +339,7 @@ _ = report.Source
 
 ## Real Database Compatibility
 
-The reusable database suite is disabled until the caller provides a driver and DSN. The standard suite currently supports PostgreSQL, MySQL, MariaDB, and SQLite. Caller-owned harnesses can check the current boundary with `ormtest.SupportedCompatibilityDBTypes()` or `ormtest.IsCompatibilityDBTypeSupported(dbType)`:
+The reusable database suite is disabled until the caller provides a driver and DSN. The standard suite currently supports PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, and Oracle. Caller-owned harnesses can check the current boundary with `ormtest.SupportedCompatibilityDBTypes()` or `ormtest.IsCompatibilityDBTypeSupported(dbType)`:
 
 ```go
 package user_test
@@ -347,7 +363,7 @@ GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-The PostgreSQL, MySQL, and MariaDB compatibility matrix includes callable statement coverage. SQLite runs the same CRUD, pagination, batch, TypeHandler, UPSERT, and generated-key cases but skips callable. Details are documented in [docs/database-matrix.md](docs/database-matrix.md).
+The matrix covers CRUD, pagination, batch execution, TypeHandler round trips, native JSON columns, UPSERT, generated-key readback, row locks, and callable statement paths where portable driver behavior exists. Details are documented in [docs/database-matrix.md](docs/database-matrix.md).
 
 ## Local Verification
 
@@ -356,6 +372,7 @@ GOWORK=off go test -count=1 ./...
 GOWORK=off go vet ./...
 powershell -ExecutionPolicy Bypass -File scripts/verify-bench.ps1 -EnforceTime
 powershell -ExecutionPolicy Bypass -File scripts/verify-real-db.ps1
+powershell -ExecutionPolicy Bypass -File scripts/verify-real-db-bench.ps1 -BenchTime 1s
 git diff --check
 ```
 
@@ -370,6 +387,7 @@ GOWORK=off ./scripts/verify-release.sh
 - [Examples Guide](docs/examples.md)
 - [API Compatibility](docs/api-compatibility.md)
 - [Database Matrix](docs/database-matrix.md)
+- [MyBatis-Plus Migration Matrix](docs/mybatis-plus-migration.zh-CN.md)
 - [Provider And SQL Builder](docs/provider-builder.md)
 - [Architecture Notes](docs/goark-orm-v1-design.md)
 - [Release Gates](docs/release-gates.md)
