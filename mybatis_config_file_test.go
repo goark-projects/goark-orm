@@ -29,7 +29,23 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
     "jdbcTypeForNull": "NULL",
     "autoMappingBehavior": "NONE",
     "autoMappingUnknownColumnBehavior": "FAILING",
-    "databaseId": "postgres"
+    "databaseId": "postgres",
+    "safeRowBoundsEnabled": true,
+    "safeResultHandlerEnabled": false,
+    "aggressiveLazyLoading": true,
+    "lazyLoadTriggerMethods": ["Close", "String"],
+    "defaultScriptingLanguage": "goarkXML",
+    "defaultEnumTypeHandler": "enum",
+    "callSettersOnNulls": true,
+    "returnInstanceForEmptyRow": true,
+    "logPrefix": "orm.",
+    "logImpl": "slog",
+    "proxyFactory": "none",
+    "vfsImpl": ["goark.dev/orm/internal/vfs"],
+    "useActualParamName": false,
+    "configurationFactory": "goark.dev/app.NewORMConfiguration",
+    "defaultSqlProviderType": "goark.dev/app.SQLProvider",
+    "argNameBasedConstructorAutoMapping": true
   },
   "environment": {
     "id": "dev",
@@ -96,6 +112,19 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
 	if config.Settings.AutoMappingBehavior != AutoMappingBehaviorNone ||
 		config.Settings.AutoMappingUnknownColumnBehavior != AutoMappingUnknownColumnBehaviorFailing {
 		t.Fatalf("unexpected auto mapping settings")
+	}
+	if !config.Settings.SafeRowBoundsEnabled || boolValue(config.Settings.SafeResultHandlerEnabled, true) {
+		t.Fatalf("unexpected safe handler settings")
+	}
+	if strings.Join(config.Settings.LazyLoadTriggerMethods, ",") != "Close,String" ||
+		config.Settings.DefaultScriptingLanguage != "goarkXML" ||
+		config.Settings.DefaultEnumTypeHandler != "enum" {
+		t.Fatalf("unexpected compatibility settings %#v", config.Settings)
+	}
+	if boolValue(config.Settings.UseActualParamName, true) ||
+		config.Settings.DefaultSQLProviderType != "goark.dev/app.SQLProvider" ||
+		!config.Settings.ArgNameBasedConstructorAutoMapping {
+		t.Fatalf("unexpected provider settings %#v", config.Settings)
 	}
 	if config.Environment.DbType != DbTypePostgres {
 		t.Fatalf("unexpected db type %q", config.Environment.DbType)

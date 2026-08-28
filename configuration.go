@@ -34,27 +34,43 @@ const (
 
 // Configuration 描述 ORM 运行期配置。
 type Configuration struct {
-	Dialect                          Dialect
-	DatabaseID                       string
-	GlobalConfig                     GlobalConfig
-	LocalCacheEnabled                *bool
-	LocalCacheScope                  LocalCacheScope
-	CacheEnabled                     *bool
-	MapUnderscoreToCamelCase         bool
-	UseGeneratedKeys                 bool
-	LazyLoadingEnabled               bool
-	DefaultExecutorType              ExecutorType
-	PreparedStatementCacheSize       int
-	DefaultStatementTimeout          time.Duration
-	DefaultFetchSize                 int
-	DefaultResultSetType             ResultSetType
-	UseColumnLabel                   *bool
-	NullableOnForEach                *bool
-	ShrinkWhitespacesInSQL           bool
-	JDBCTypeForNull                  string
-	AutoMappingBehavior              AutoMappingBehavior
-	AutoMappingUnknownColumnBehavior AutoMappingUnknownColumnBehavior
-	MetaObjectHandler                MetaObjectHandler
+	Dialect                            Dialect
+	DatabaseID                         string
+	GlobalConfig                       GlobalConfig
+	LocalCacheEnabled                  *bool
+	LocalCacheScope                    LocalCacheScope
+	CacheEnabled                       *bool
+	MapUnderscoreToCamelCase           bool
+	UseGeneratedKeys                   bool
+	LazyLoadingEnabled                 bool
+	DefaultExecutorType                ExecutorType
+	PreparedStatementCacheSize         int
+	DefaultStatementTimeout            time.Duration
+	DefaultFetchSize                   int
+	DefaultResultSetType               ResultSetType
+	UseColumnLabel                     *bool
+	NullableOnForEach                  *bool
+	ShrinkWhitespacesInSQL             bool
+	JDBCTypeForNull                    string
+	AutoMappingBehavior                AutoMappingBehavior
+	AutoMappingUnknownColumnBehavior   AutoMappingUnknownColumnBehavior
+	SafeRowBoundsEnabled               bool
+	SafeResultHandlerEnabled           *bool
+	AggressiveLazyLoading              bool
+	LazyLoadTriggerMethods             []string
+	DefaultScriptingLanguage           string
+	DefaultEnumTypeHandler             string
+	CallSettersOnNulls                 bool
+	ReturnInstanceForEmptyRow          bool
+	LogPrefix                          string
+	LogImpl                            string
+	ProxyFactory                       string
+	VFSImpl                            []string
+	UseActualParamName                 *bool
+	ConfigurationFactory               string
+	DefaultSQLProviderType             string
+	ArgNameBasedConstructorAutoMapping bool
+	MetaObjectHandler                  MetaObjectHandler
 }
 
 // DefaultConfiguration 返回独立 ORM 的默认运行期配置。
@@ -63,6 +79,8 @@ func DefaultConfiguration() Configuration {
 	cacheEnabled := true
 	useColumnLabel := true
 	nullableOnForEach := true
+	safeResultHandlerEnabled := true
+	useActualParamName := true
 	return Configuration{
 		LocalCacheEnabled:                &localCacheEnabled,
 		LocalCacheScope:                  LocalCacheScopeSession,
@@ -74,6 +92,9 @@ func DefaultConfiguration() Configuration {
 		JDBCTypeForNull:                  "OTHER",
 		AutoMappingBehavior:              AutoMappingBehaviorFull,
 		AutoMappingUnknownColumnBehavior: AutoMappingUnknownColumnBehaviorNone,
+		SafeResultHandlerEnabled:         &safeResultHandlerEnabled,
+		LazyLoadTriggerMethods:           defaultLazyLoadTriggerMethods(),
+		UseActualParamName:               &useActualParamName,
 		GlobalConfig:                     DefaultGlobalConfig(),
 	}
 }
@@ -196,6 +217,35 @@ func normalizeConfiguration(config Configuration, fallbackDialect Dialect) (Conf
 	} else {
 		out.NullableOnForEach = boolPointer(*out.NullableOnForEach)
 	}
+	if out.SafeResultHandlerEnabled == nil {
+		out.SafeResultHandlerEnabled = boolPointer(boolValue(defaults.SafeResultHandlerEnabled, true))
+	} else {
+		out.SafeResultHandlerEnabled = boolPointer(*out.SafeResultHandlerEnabled)
+	}
+	if out.UseActualParamName == nil {
+		out.UseActualParamName = boolPointer(boolValue(defaults.UseActualParamName, true))
+	} else {
+		out.UseActualParamName = boolPointer(*out.UseActualParamName)
+	}
+	if len(out.LazyLoadTriggerMethods) == 0 {
+		out.LazyLoadTriggerMethods = cloneStringSlice(defaults.LazyLoadTriggerMethods)
+	} else {
+		out.LazyLoadTriggerMethods, err = normalizeSettingList("lazyLoadTriggerMethods", out.LazyLoadTriggerMethods, false)
+		if err != nil {
+			return Configuration{}, err
+		}
+	}
+	out.DefaultScriptingLanguage = strings.TrimSpace(out.DefaultScriptingLanguage)
+	out.DefaultEnumTypeHandler = strings.TrimSpace(out.DefaultEnumTypeHandler)
+	out.LogPrefix = strings.TrimSpace(out.LogPrefix)
+	out.LogImpl = strings.TrimSpace(out.LogImpl)
+	out.ProxyFactory = strings.TrimSpace(out.ProxyFactory)
+	out.ConfigurationFactory = strings.TrimSpace(out.ConfigurationFactory)
+	out.DefaultSQLProviderType = strings.TrimSpace(out.DefaultSQLProviderType)
+	out.VFSImpl, err = normalizeSettingList("vfsImpl", out.VFSImpl, true)
+	if err != nil {
+		return Configuration{}, err
+	}
 	switch out.LocalCacheScope {
 	case "":
 		out.LocalCacheScope = defaults.LocalCacheScope
@@ -252,6 +302,9 @@ func normalizeConfiguration(config Configuration, fallbackDialect Dialect) (Conf
 	case out.PreparedStatementCacheSize < 0:
 		return Configuration{}, configurationErrorf("preparedStatementCacheSize must be >= 0")
 	}
+	if err := validateCompatibilitySettings(out.compatibilitySettings()); err != nil {
+		return Configuration{}, err
+	}
 	return out, nil
 }
 
@@ -279,5 +332,13 @@ func cloneConfiguration(config Configuration) Configuration {
 	if config.NullableOnForEach != nil {
 		config.NullableOnForEach = boolPointer(*config.NullableOnForEach)
 	}
+	if config.SafeResultHandlerEnabled != nil {
+		config.SafeResultHandlerEnabled = boolPointer(*config.SafeResultHandlerEnabled)
+	}
+	if config.UseActualParamName != nil {
+		config.UseActualParamName = boolPointer(*config.UseActualParamName)
+	}
+	config.LazyLoadTriggerMethods = cloneStringSlice(config.LazyLoadTriggerMethods)
+	config.VFSImpl = cloneStringSlice(config.VFSImpl)
 	return config
 }

@@ -7,24 +7,40 @@ import (
 
 // MyBatisSettings 描述运行期 settings 配置子集。
 type MyBatisSettings struct {
-	CacheEnabled                     *bool
-	LocalCacheEnabled                *bool
-	LocalCacheScope                  LocalCacheScope
-	MapUnderscoreToCamelCase         bool
-	UseGeneratedKeys                 bool
-	LazyLoadingEnabled               bool
-	DefaultExecutorType              ExecutorType
-	PreparedStatementCacheSize       int
-	DefaultStatementTimeout          time.Duration
-	DefaultFetchSize                 int
-	DefaultResultSetType             ResultSetType
-	UseColumnLabel                   *bool
-	NullableOnForEach                *bool
-	ShrinkWhitespacesInSQL           bool
-	JDBCTypeForNull                  string
-	AutoMappingBehavior              AutoMappingBehavior
-	AutoMappingUnknownColumnBehavior AutoMappingUnknownColumnBehavior
-	DatabaseID                       string
+	CacheEnabled                       *bool
+	LocalCacheEnabled                  *bool
+	LocalCacheScope                    LocalCacheScope
+	MapUnderscoreToCamelCase           bool
+	UseGeneratedKeys                   bool
+	LazyLoadingEnabled                 bool
+	DefaultExecutorType                ExecutorType
+	PreparedStatementCacheSize         int
+	DefaultStatementTimeout            time.Duration
+	DefaultFetchSize                   int
+	DefaultResultSetType               ResultSetType
+	UseColumnLabel                     *bool
+	NullableOnForEach                  *bool
+	ShrinkWhitespacesInSQL             bool
+	JDBCTypeForNull                    string
+	AutoMappingBehavior                AutoMappingBehavior
+	AutoMappingUnknownColumnBehavior   AutoMappingUnknownColumnBehavior
+	DatabaseID                         string
+	SafeRowBoundsEnabled               bool
+	SafeResultHandlerEnabled           *bool
+	AggressiveLazyLoading              bool
+	LazyLoadTriggerMethods             []string
+	DefaultScriptingLanguage           string
+	DefaultEnumTypeHandler             string
+	CallSettersOnNulls                 bool
+	ReturnInstanceForEmptyRow          bool
+	LogPrefix                          string
+	LogImpl                            string
+	ProxyFactory                       string
+	VFSImpl                            []string
+	UseActualParamName                 *bool
+	ConfigurationFactory               string
+	DefaultSQLProviderType             string
+	ArgNameBasedConstructorAutoMapping bool
 }
 
 // MyBatisEnvironment 描述数据库环境配置。Dialect 显式指定时优先于 DbType。
@@ -140,6 +156,22 @@ func (c MyBatisConfig) BuildConfiguration() (Configuration, error) {
 	out.JDBCTypeForNull = c.Settings.JDBCTypeForNull
 	out.AutoMappingBehavior = c.Settings.AutoMappingBehavior
 	out.AutoMappingUnknownColumnBehavior = c.Settings.AutoMappingUnknownColumnBehavior
+	out.SafeRowBoundsEnabled = c.Settings.SafeRowBoundsEnabled
+	out.SafeResultHandlerEnabled = cloneBoolPointer(c.Settings.SafeResultHandlerEnabled)
+	out.AggressiveLazyLoading = c.Settings.AggressiveLazyLoading
+	out.LazyLoadTriggerMethods = cloneStringSlice(c.Settings.LazyLoadTriggerMethods)
+	out.DefaultScriptingLanguage = c.Settings.DefaultScriptingLanguage
+	out.DefaultEnumTypeHandler = c.Settings.DefaultEnumTypeHandler
+	out.CallSettersOnNulls = c.Settings.CallSettersOnNulls
+	out.ReturnInstanceForEmptyRow = c.Settings.ReturnInstanceForEmptyRow
+	out.LogPrefix = c.Settings.LogPrefix
+	out.LogImpl = c.Settings.LogImpl
+	out.ProxyFactory = c.Settings.ProxyFactory
+	out.VFSImpl = cloneStringSlice(c.Settings.VFSImpl)
+	out.UseActualParamName = cloneBoolPointer(c.Settings.UseActualParamName)
+	out.ConfigurationFactory = c.Settings.ConfigurationFactory
+	out.DefaultSQLProviderType = c.Settings.DefaultSQLProviderType
+	out.ArgNameBasedConstructorAutoMapping = c.Settings.ArgNameBasedConstructorAutoMapping
 	return normalizeConfiguration(out, nil)
 }
 
@@ -186,6 +218,9 @@ func (c MyBatisConfig) Validate() error {
 	}
 	if c.Settings.DefaultStatementTimeout < 0 {
 		return configurationErrorf("defaultStatementTimeout must be >= 0")
+	}
+	if err := validateCompatibilitySettings(c.Settings.compatibilitySettings()); err != nil {
+		return err
 	}
 	if _, err := c.TypeAliasMap(); err != nil {
 		return err

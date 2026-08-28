@@ -27,24 +27,40 @@ type MyBatisConfigFile struct {
 
 // MyBatisSettingsFile 使用字符串承载需要解析的枚举和时间配置。
 type MyBatisSettingsFile struct {
-	CacheEnabled                     *bool  `json:"cacheEnabled,omitempty"`
-	LocalCacheEnabled                *bool  `json:"localCacheEnabled,omitempty"`
-	UseColumnLabel                   *bool  `json:"useColumnLabel,omitempty"`
-	LocalCacheScope                  string `json:"localCacheScope,omitempty"`
-	MapUnderscoreToCamelCase         bool   `json:"mapUnderscoreToCamelCase,omitempty"`
-	UseGeneratedKeys                 bool   `json:"useGeneratedKeys,omitempty"`
-	LazyLoadingEnabled               bool   `json:"lazyLoadingEnabled,omitempty"`
-	DefaultExecutorType              string `json:"defaultExecutorType,omitempty"`
-	PreparedStatementCacheSize       int    `json:"preparedStatementCacheSize,omitempty"`
-	DefaultStatementTimeout          string `json:"defaultStatementTimeout,omitempty"`
-	DefaultFetchSize                 int    `json:"defaultFetchSize,omitempty"`
-	DefaultResultSetType             string `json:"defaultResultSetType,omitempty"`
-	NullableOnForEach                *bool  `json:"nullableOnForEach,omitempty"`
-	ShrinkWhitespacesInSQL           bool   `json:"shrinkWhitespacesInSql,omitempty"`
-	JDBCTypeForNull                  string `json:"jdbcTypeForNull,omitempty"`
-	AutoMappingBehavior              string `json:"autoMappingBehavior,omitempty"`
-	AutoMappingUnknownColumnBehavior string `json:"autoMappingUnknownColumnBehavior,omitempty"`
-	DatabaseID                       string `json:"databaseId,omitempty"`
+	CacheEnabled                       *bool    `json:"cacheEnabled,omitempty"`
+	LocalCacheEnabled                  *bool    `json:"localCacheEnabled,omitempty"`
+	UseColumnLabel                     *bool    `json:"useColumnLabel,omitempty"`
+	LocalCacheScope                    string   `json:"localCacheScope,omitempty"`
+	MapUnderscoreToCamelCase           bool     `json:"mapUnderscoreToCamelCase,omitempty"`
+	UseGeneratedKeys                   bool     `json:"useGeneratedKeys,omitempty"`
+	LazyLoadingEnabled                 bool     `json:"lazyLoadingEnabled,omitempty"`
+	DefaultExecutorType                string   `json:"defaultExecutorType,omitempty"`
+	PreparedStatementCacheSize         int      `json:"preparedStatementCacheSize,omitempty"`
+	DefaultStatementTimeout            string   `json:"defaultStatementTimeout,omitempty"`
+	DefaultFetchSize                   int      `json:"defaultFetchSize,omitempty"`
+	DefaultResultSetType               string   `json:"defaultResultSetType,omitempty"`
+	NullableOnForEach                  *bool    `json:"nullableOnForEach,omitempty"`
+	ShrinkWhitespacesInSQL             bool     `json:"shrinkWhitespacesInSql,omitempty"`
+	JDBCTypeForNull                    string   `json:"jdbcTypeForNull,omitempty"`
+	AutoMappingBehavior                string   `json:"autoMappingBehavior,omitempty"`
+	AutoMappingUnknownColumnBehavior   string   `json:"autoMappingUnknownColumnBehavior,omitempty"`
+	DatabaseID                         string   `json:"databaseId,omitempty"`
+	SafeRowBoundsEnabled               bool     `json:"safeRowBoundsEnabled,omitempty"`
+	SafeResultHandlerEnabled           *bool    `json:"safeResultHandlerEnabled,omitempty"`
+	AggressiveLazyLoading              bool     `json:"aggressiveLazyLoading,omitempty"`
+	LazyLoadTriggerMethods             []string `json:"lazyLoadTriggerMethods,omitempty"`
+	DefaultScriptingLanguage           string   `json:"defaultScriptingLanguage,omitempty"`
+	DefaultEnumTypeHandler             string   `json:"defaultEnumTypeHandler,omitempty"`
+	CallSettersOnNulls                 bool     `json:"callSettersOnNulls,omitempty"`
+	ReturnInstanceForEmptyRow          bool     `json:"returnInstanceForEmptyRow,omitempty"`
+	LogPrefix                          string   `json:"logPrefix,omitempty"`
+	LogImpl                            string   `json:"logImpl,omitempty"`
+	ProxyFactory                       string   `json:"proxyFactory,omitempty"`
+	VFSImpl                            []string `json:"vfsImpl,omitempty"`
+	UseActualParamName                 *bool    `json:"useActualParamName,omitempty"`
+	ConfigurationFactory               string   `json:"configurationFactory,omitempty"`
+	DefaultSQLProviderType             string   `json:"defaultSqlProviderType,omitempty"`
+	ArgNameBasedConstructorAutoMapping bool     `json:"argNameBasedConstructorAutoMapping,omitempty"`
 }
 
 // MyBatisEnvironmentFile 描述 JSON 中的数据库环境。
@@ -187,24 +203,40 @@ func (f MyBatisSettingsFile) Build() (MyBatisSettings, error) {
 		return MyBatisSettings{}, err
 	}
 	return MyBatisSettings{
-		CacheEnabled:                     cloneBoolPointer(f.CacheEnabled),
-		LocalCacheEnabled:                cloneBoolPointer(f.LocalCacheEnabled),
-		UseColumnLabel:                   cloneBoolPointer(f.UseColumnLabel),
-		LocalCacheScope:                  scope,
-		MapUnderscoreToCamelCase:         f.MapUnderscoreToCamelCase,
-		UseGeneratedKeys:                 f.UseGeneratedKeys,
-		LazyLoadingEnabled:               f.LazyLoadingEnabled,
-		DefaultExecutorType:              executorType,
-		PreparedStatementCacheSize:       f.PreparedStatementCacheSize,
-		DefaultStatementTimeout:          timeout,
-		DefaultFetchSize:                 f.DefaultFetchSize,
-		DefaultResultSetType:             resultSetType,
-		NullableOnForEach:                cloneBoolPointer(f.NullableOnForEach),
-		ShrinkWhitespacesInSQL:           f.ShrinkWhitespacesInSQL,
-		JDBCTypeForNull:                  jdbcTypeForNull,
-		AutoMappingBehavior:              autoMapping,
-		AutoMappingUnknownColumnBehavior: unknownColumn,
-		DatabaseID:                       strings.TrimSpace(f.DatabaseID),
+		CacheEnabled:                       cloneBoolPointer(f.CacheEnabled),
+		LocalCacheEnabled:                  cloneBoolPointer(f.LocalCacheEnabled),
+		UseColumnLabel:                     cloneBoolPointer(f.UseColumnLabel),
+		LocalCacheScope:                    scope,
+		MapUnderscoreToCamelCase:           f.MapUnderscoreToCamelCase,
+		UseGeneratedKeys:                   f.UseGeneratedKeys,
+		LazyLoadingEnabled:                 f.LazyLoadingEnabled,
+		DefaultExecutorType:                executorType,
+		PreparedStatementCacheSize:         f.PreparedStatementCacheSize,
+		DefaultStatementTimeout:            timeout,
+		DefaultFetchSize:                   f.DefaultFetchSize,
+		DefaultResultSetType:               resultSetType,
+		NullableOnForEach:                  cloneBoolPointer(f.NullableOnForEach),
+		ShrinkWhitespacesInSQL:             f.ShrinkWhitespacesInSQL,
+		JDBCTypeForNull:                    jdbcTypeForNull,
+		AutoMappingBehavior:                autoMapping,
+		AutoMappingUnknownColumnBehavior:   unknownColumn,
+		DatabaseID:                         strings.TrimSpace(f.DatabaseID),
+		SafeRowBoundsEnabled:               f.SafeRowBoundsEnabled,
+		SafeResultHandlerEnabled:           cloneBoolPointer(f.SafeResultHandlerEnabled),
+		AggressiveLazyLoading:              f.AggressiveLazyLoading,
+		LazyLoadTriggerMethods:             cloneStringSlice(f.LazyLoadTriggerMethods),
+		DefaultScriptingLanguage:           strings.TrimSpace(f.DefaultScriptingLanguage),
+		DefaultEnumTypeHandler:             strings.TrimSpace(f.DefaultEnumTypeHandler),
+		CallSettersOnNulls:                 f.CallSettersOnNulls,
+		ReturnInstanceForEmptyRow:          f.ReturnInstanceForEmptyRow,
+		LogPrefix:                          strings.TrimSpace(f.LogPrefix),
+		LogImpl:                            strings.TrimSpace(f.LogImpl),
+		ProxyFactory:                       strings.TrimSpace(f.ProxyFactory),
+		VFSImpl:                            cloneStringSlice(f.VFSImpl),
+		UseActualParamName:                 cloneBoolPointer(f.UseActualParamName),
+		ConfigurationFactory:               strings.TrimSpace(f.ConfigurationFactory),
+		DefaultSQLProviderType:             strings.TrimSpace(f.DefaultSQLProviderType),
+		ArgNameBasedConstructorAutoMapping: f.ArgNameBasedConstructorAutoMapping,
 	}, nil
 }
 

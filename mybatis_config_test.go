@@ -2,6 +2,7 @@ package orm
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,6 +94,63 @@ func TestMyBatisConfig_BuildConfiguration_whenGoNativeModelProvided_shouldApplyR
 	}
 	if config.GlobalConfig.DbConfig.IDType != IDTypeAssignID || config.GlobalConfig.DbConfig.TablePrefix != "sys_" {
 		t.Fatalf("unexpected global db config %#v", config.GlobalConfig.DbConfig)
+	}
+}
+
+func TestMyBatisConfig_BuildConfiguration_whenCompatibilitySettingsProvided_shouldCarryStableSettings(t *testing.T) {
+	t.Parallel()
+
+	safeResultHandler := false
+	useActualParamName := false
+	config, err := MyBatisConfig{
+		Settings: MyBatisSettings{
+			SafeRowBoundsEnabled:               true,
+			SafeResultHandlerEnabled:           &safeResultHandler,
+			AggressiveLazyLoading:              true,
+			LazyLoadTriggerMethods:             []string{"Close", "String"},
+			DefaultScriptingLanguage:           "goarkXML",
+			DefaultEnumTypeHandler:             "enum",
+			CallSettersOnNulls:                 true,
+			ReturnInstanceForEmptyRow:          true,
+			LogPrefix:                          "orm.",
+			LogImpl:                            "slog",
+			ProxyFactory:                       "none",
+			VFSImpl:                            []string{"goark.dev/orm/internal/vfs"},
+			UseActualParamName:                 &useActualParamName,
+			ConfigurationFactory:               "goark.dev/app.NewORMConfiguration",
+			DefaultSQLProviderType:             "goark.dev/app.SQLProvider",
+			ArgNameBasedConstructorAutoMapping: true,
+		},
+	}.BuildConfiguration()
+	if err != nil {
+		t.Fatalf("build configuration failed: %v", err)
+	}
+
+	if !config.SafeRowBoundsEnabled || boolValue(config.SafeResultHandlerEnabled, true) {
+		t.Fatalf("safe settings were not applied: %#v", config)
+	}
+	if !config.AggressiveLazyLoading || strings.Join(config.LazyLoadTriggerMethods, ",") != "Close,String" {
+		t.Fatalf("lazy loading compatibility settings were not applied: %#v", config.LazyLoadTriggerMethods)
+	}
+	if config.DefaultScriptingLanguage != "goarkXML" || config.DefaultEnumTypeHandler != "enum" {
+		t.Fatalf("default handler settings were not applied")
+	}
+	if !config.CallSettersOnNulls || !config.ReturnInstanceForEmptyRow {
+		t.Fatalf("null or empty-row settings were not applied")
+	}
+	if config.LogPrefix != "orm." || config.LogImpl != "slog" || config.ProxyFactory != "none" {
+		t.Fatalf("logging/proxy settings were not applied")
+	}
+	if len(config.VFSImpl) != 1 || config.VFSImpl[0] != "goark.dev/orm/internal/vfs" {
+		t.Fatalf("unexpected vfs settings %#v", config.VFSImpl)
+	}
+	if boolValue(config.UseActualParamName, true) {
+		t.Fatalf("useActualParamName should be explicitly disabled")
+	}
+	if config.ConfigurationFactory != "goark.dev/app.NewORMConfiguration" ||
+		config.DefaultSQLProviderType != "goark.dev/app.SQLProvider" ||
+		!config.ArgNameBasedConstructorAutoMapping {
+		t.Fatalf("provider/constructor compatibility settings were not applied")
 	}
 }
 
