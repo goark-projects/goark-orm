@@ -3,6 +3,7 @@ package ormboot
 import (
 	"database/sql"
 	"fmt"
+	"reflect"
 	"strings"
 
 	orm "goark.dev/orm"
@@ -39,6 +40,7 @@ type Config struct {
 	BeanNames          BeanNames
 	Registry           *orm.Registry
 	DB                 *sql.DB
+	RuntimeConfig      orm.RuntimeConfig
 	MyBatisConfig      orm.MyBatisConfig
 	TypeHandlers       map[string]orm.TypeHandler
 	Plugins            orm.PluginRegistry
@@ -57,6 +59,9 @@ func normalizeConfig(config Config) (Config, error) {
 	if config.Registry == nil {
 		config.Registry = orm.NewRegistry()
 	}
+	if !runtimeConfigConfigured(config.RuntimeConfig) {
+		config.RuntimeConfig = config.MyBatisConfig
+	}
 	beanNames, err := normalizeBeanNames(config.BeanNames)
 	if err != nil {
 		return Config{}, err
@@ -66,6 +71,22 @@ func normalizeConfig(config Config) (Config, error) {
 	config.SessionOptions = append([]orm.SQLSessionOption(nil), config.SessionOptions...)
 	config.MetadataRegistrars = append([]MetadataRegistrar(nil), config.MetadataRegistrars...)
 	return config, nil
+}
+
+func runtimeConfigConfigured(config orm.RuntimeConfig) bool {
+	if len(config.Properties) > 0 ||
+		len(config.TypeAliases) > 0 ||
+		len(config.TypeHandlers) > 0 ||
+		len(config.Mappers) > 0 ||
+		len(config.Plugins) > 0 {
+		return true
+	}
+	return !reflect.DeepEqual(config.Settings, orm.RuntimeSettings{}) ||
+		!reflect.DeepEqual(config.Environment, orm.RuntimeEnvironment{}) ||
+		config.DatabaseIDProvider.Type != "" ||
+		config.DatabaseIDProvider.DefaultID != "" ||
+		len(config.DatabaseIDProvider.Properties) > 0 ||
+		!reflect.DeepEqual(config.Global, orm.GlobalConfig{})
 }
 
 func normalizeBeanNames(names BeanNames) (BeanNames, error) {

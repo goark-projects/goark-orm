@@ -19,9 +19,9 @@ func TestAssembler_Assemble_whenMetadataRegistrarProvided_shouldCreateRuntimeAnd
 	assembler, err := ormboot.New(ormboot.Config{
 		Name: "userORM",
 		DB:   db,
-		MyBatisConfig: orm.MyBatisConfig{
-			Settings:    orm.MyBatisSettings{DefaultExecutorType: orm.ExecutorTypeReuse},
-			Environment: orm.MyBatisEnvironment{DbType: orm.DbTypePostgres},
+		RuntimeConfig: orm.RuntimeConfig{
+			Settings:    orm.RuntimeSettings{DefaultExecutorType: orm.ExecutorTypeReuse},
+			Environment: orm.RuntimeEnvironment{DbType: orm.DbTypePostgres},
 			Mappers:     []orm.MapperRef{{Namespace: "system.user.UserMapper"}},
 		},
 		MetadataRegistrars: []ormboot.MetadataRegistrar{
@@ -89,6 +89,29 @@ func TestAssembler_Assemble_whenRegistrarFails_shouldReturnContextualError(t *te
 
 	if !errors.Is(err, expected) || !strings.Contains(err.Error(), "register metadata") {
 		t.Fatalf("expected wrapped metadata error, got %v", err)
+	}
+}
+
+func TestAssembler_Assemble_whenLegacyConfigProvided_shouldStillCreateRuntime(t *testing.T) {
+	db := sql.OpenDB(noopConnector{})
+	defer db.Close()
+	assembler, err := ormboot.New(ormboot.Config{
+		DB: db,
+		MyBatisConfig: orm.MyBatisConfig{
+			Environment: orm.MyBatisEnvironment{DbType: orm.DbTypePostgres},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new assembler failed: %v", err)
+	}
+
+	runtime, err := assembler.Assemble(context.Background())
+	if err != nil {
+		t.Fatalf("assemble runtime failed: %v", err)
+	}
+	defer runtime.Close()
+	if runtime.Configuration().Dialect.Name() != "postgres" {
+		t.Fatalf("unexpected dialect %s", runtime.Configuration().Dialect.Name())
 	}
 }
 

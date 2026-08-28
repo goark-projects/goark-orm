@@ -56,8 +56,8 @@ func (a *Assembler) Assemble(ctx context.Context) (*Runtime, error) {
 			return nil, fmt.Errorf("goark-orm/ormboot: register metadata %d failed: %w", index+1, err)
 		}
 	}
-	result, err := orm.AssembleMyBatisConfig(orm.MyBatisAssembly{
-		Config:         a.config.MyBatisConfig,
+	result, err := orm.AssembleRuntimeConfig(orm.RuntimeAssembly{
+		Config:         a.config.RuntimeConfig,
 		Registry:       a.config.Registry,
 		DB:             a.config.DB,
 		TypeHandlers:   a.config.TypeHandlers,

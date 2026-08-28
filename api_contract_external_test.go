@@ -203,6 +203,11 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ func(*orm.Registry, orm.SQLExecutor, orm.Dialect, ...orm.SQLSessionOption) (*orm.SQLSession, error) = orm.NewSQLSession
 	var _ func(*orm.Registry, *sql.DB, orm.Dialect, ...orm.SQLSessionOption) (*orm.SQLSessionFactory, error) = orm.NewSQLSessionFactory
 	var _ func(orm.Session) (*orm.BatchSession, error) = orm.NewBatchSession
+	var _ func() orm.RuntimeConfig = orm.DefaultRuntimeConfig
+	var _ func(io.Reader) (orm.RuntimeConfig, error) = orm.DecodeRuntimeConfig
+	var _ func(string) (orm.RuntimeConfig, error) = orm.LoadRuntimeConfig
+	var _ func(orm.RuntimeAssembly) (orm.RuntimeAssemblyResult, error) = orm.AssembleRuntimeConfig
+	var _ func(string, orm.RuntimeAssembly) (orm.RuntimeAssemblyResult, error) = orm.LoadAndAssembleRuntimeConfig
 	var _ func(io.Reader) (orm.MyBatisConfig, error) = orm.DecodeMyBatisConfig
 	var _ func(string) (orm.MyBatisConfig, error) = orm.LoadMyBatisConfig
 	var _ func(string, orm.MyBatisAssembly) (orm.MyBatisAssemblyResult, error) = orm.LoadAndAssembleMyBatisConfig

@@ -16,6 +16,7 @@ func TestPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 		Name:               ormboot.DefaultName,
 		BeanNames:          ormboot.BeanNames{SessionFactory: ormboot.BeanNameSessionFactory},
 		DB:                 (*sql.DB)(nil),
+		RuntimeConfig:      orm.DefaultRuntimeConfig(),
 		MyBatisConfig:      orm.DefaultMyBatisConfig(),
 		MetadataRegistrars: []ormboot.MetadataRegistrar{func(*orm.Registry) error { return nil }},
 	}
