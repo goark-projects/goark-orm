@@ -152,6 +152,7 @@ func resolvePluginRefs(resolver *configPropertyResolver, items []PluginRef) ([]P
 		}
 		out = append(out, PluginRef{
 			Name:    name,
+			Order:   item.Order,
 			Enabled: cloneBoolPointer(item.Enabled),
 			Options: options,
 		})

@@ -82,8 +82,8 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
     {"resource": "mapper/${systemPackage}/user.xml", "namespace": "${mapperNamespace}"}
   ],
   "plugins": [
-    {"name": "pagination"},
-    {"name": "illegalSQL", "options": {"denySelectWildcard": "false"}}
+    {"name": "pagination", "order": 20},
+    {"name": "illegalSQL", "order": 10, "options": {"denySelectWildcard": "false"}}
   ]
 }`)
 
@@ -132,7 +132,8 @@ func TestDecodeMyBatisConfig_whenJSONProvided_shouldBuildConfig(t *testing.T) {
 	if len(config.TypeHandlers) != 2 || config.TypeHandlers[1].Name != "profile" {
 		t.Fatalf("unexpected type handlers %#v", config.TypeHandlers)
 	}
-	if len(config.Plugins) != 2 || config.Plugins[1].Name != "illegalSQL" {
+	if len(config.Plugins) != 2 || config.Plugins[1].Name != "illegalSQL" ||
+		config.Plugins[0].Order != 20 || config.Plugins[1].Order != 10 {
 		t.Fatalf("unexpected plugins %#v", config.Plugins)
 	}
 	if config.TypeAliases[0].TypeName != "system.User" || config.Mappers[0].Namespace != "system.user.UserMapper" {
