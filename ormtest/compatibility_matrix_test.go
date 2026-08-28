@@ -25,8 +25,14 @@ func TestNewCompatibilitySuiteConfig_whenPostgres_shouldBuildQuotedDDLAndCases(t
 	if !strings.Contains(config.SetupSQL[5], `CREATE FUNCTION "public"."goark_orm_compat_users_report"`) {
 		t.Fatalf("setup SQL should create callable function: %#v", config.SetupSQL)
 	}
-	if len(config.Cases) != 11 {
+	if !strings.Contains(config.SetupSQL[4], "profile JSONB NOT NULL") {
+		t.Fatalf("postgres DDL should declare native JSONB: %s", config.SetupSQL[4])
+	}
+	if len(config.Cases) != 12 {
 		t.Fatalf("unexpected case count %d", len(config.Cases))
+	}
+	if !containsDatabaseCase(config.Cases, compatibilityJSONNativeCaseName) {
+		t.Fatalf("expected native json compatibility case")
 	}
 	if !containsDatabaseCase(config.Cases, "compatibility-callable") {
 		t.Fatalf("expected callable compatibility case")
@@ -61,6 +67,9 @@ func TestNewCompatibilitySuiteConfig_whenMySQL_shouldUseUTF8MB4DDL(t *testing.T)
 	if !strings.Contains(config.SetupSQL[4], "DEFAULT CHARSET=utf8mb4") {
 		t.Fatalf("mysql DDL should declare utf8mb4: %s", config.SetupSQL[4])
 	}
+	if !strings.Contains(config.SetupSQL[4], "profile JSON NOT NULL") {
+		t.Fatalf("mysql DDL should declare native JSON: %s", config.SetupSQL[4])
+	}
 	if !strings.Contains(config.SetupSQL[4], "`goark_orm_compat_users`") {
 		t.Fatalf("mysql DDL should quote table: %s", config.SetupSQL[4])
 	}
@@ -86,8 +95,11 @@ func TestNewCompatibilitySuiteConfig_whenMariaDB_shouldUseMySQLCompatibleDDL(t *
 	if !strings.Contains(config.SetupSQL[5], "CREATE PROCEDURE `goark_orm_compat_users_report`") {
 		t.Fatalf("mariadb setup SQL should create callable procedure: %s", config.SetupSQL[5])
 	}
-	if len(config.Cases) != 11 || !containsDatabaseCase(config.Cases, "compatibility-callable") {
+	if len(config.Cases) != 12 || !containsDatabaseCase(config.Cases, "compatibility-callable") {
 		t.Fatalf("expected callable cases for mariadb, got %#v", config.Cases)
+	}
+	if !containsDatabaseCase(config.Cases, compatibilityJSONNativeCaseName) {
+		t.Fatalf("expected native json compatibility case")
 	}
 }
 
@@ -105,11 +117,17 @@ func TestNewCompatibilitySuiteConfig_whenSQLite_shouldBuildDDLWithoutCallable(t 
 	if !strings.Contains(config.SetupSQL[2], "AUTOINCREMENT") {
 		t.Fatalf("sqlite key DDL should declare AUTOINCREMENT: %s", config.SetupSQL[2])
 	}
+	if !strings.Contains(config.SetupSQL[3], "json_valid(profile)") {
+		t.Fatalf("sqlite DDL should validate JSON text: %s", config.SetupSQL[3])
+	}
 	if strings.Contains(strings.Join(config.SetupSQL, " "), "PROCEDURE") || strings.Contains(strings.Join(config.SetupSQL, " "), "FUNCTION") {
 		t.Fatalf("sqlite setup SQL must not create callable routine: %#v", config.SetupSQL)
 	}
-	if len(config.Cases) != 10 || containsDatabaseCase(config.Cases, "compatibility-callable") {
+	if len(config.Cases) != 11 || containsDatabaseCase(config.Cases, "compatibility-callable") {
 		t.Fatalf("sqlite should skip callable case, got %#v", config.Cases)
+	}
+	if !containsDatabaseCase(config.Cases, compatibilityJSONNativeCaseName) {
+		t.Fatalf("expected native json compatibility case")
 	}
 }
 
@@ -129,6 +147,12 @@ func TestNewCompatibilitySuiteConfig_whenSQLServer_shouldBuildDDLAndCases(t *tes
 	}
 	if !strings.Contains(config.SetupSQL[4], "[dbo].[goark_orm_compat_users]") {
 		t.Fatalf("sqlserver DDL should quote table: %s", config.SetupSQL[4])
+	}
+	if !strings.Contains(config.SetupSQL[4], "ISJSON(profile) = 1") {
+		t.Fatalf("sqlserver DDL should validate JSON text: %s", config.SetupSQL[4])
+	}
+	if !containsDatabaseCase(config.Cases, compatibilityJSONNativeCaseName) {
+		t.Fatalf("expected native json compatibility case")
 	}
 	if !containsDatabaseCase(config.Cases, "compatibility-callable") {
 		t.Fatalf("expected callable compatibility case")
@@ -152,8 +176,38 @@ func TestNewCompatibilitySuiteConfig_whenOracle_shouldBuildDDLAndCases(t *testin
 	if !strings.Contains(config.SetupSQL[3], `"goark_orm_compat_users"`) {
 		t.Fatalf("oracle DDL should quote table: %s", config.SetupSQL[3])
 	}
+	if !strings.Contains(config.SetupSQL[3], "profile IS JSON") {
+		t.Fatalf("oracle DDL should validate JSON CLOB: %s", config.SetupSQL[3])
+	}
+	if !containsDatabaseCase(config.Cases, compatibilityJSONNativeCaseName) {
+		t.Fatalf("expected native json compatibility case")
+	}
 	if !containsDatabaseCase(config.Cases, "compatibility-callable") {
 		t.Fatalf("expected callable compatibility case")
+	}
+}
+
+func TestCompatibilityJSONProbeSQL_whenDialectProvided_shouldUseNativeExpression(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  orm.Dialect
+		expected string
+	}{
+		{name: "postgres", dialect: orm.NewPostgresDialect(), expected: "profile ->> 'role'"},
+		{name: "mysql", dialect: orm.NewMySQLDialect(), expected: "JSON_UNQUOTE(JSON_EXTRACT(profile, '$.role'))"},
+		{name: "sqlserver", dialect: orm.NewSQLServerDialect(), expected: "JSON_VALUE(profile, '$.role')"},
+		{name: "oracle", dialect: orm.NewOracleDialect(), expected: "JSON_VALUE(profile, '$.role')"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sqlText, err := compatibilityJSONProbeSQL(tt.dialect, "goark_orm_compat_users")
+			if err != nil {
+				t.Fatalf("build JSON probe SQL failed: %v", err)
+			}
+			if !strings.Contains(sqlText, tt.expected) {
+				t.Fatalf("unexpected JSON probe SQL %q", sqlText)
+			}
+		})
 	}
 }
 

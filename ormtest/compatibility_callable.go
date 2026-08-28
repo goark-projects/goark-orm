@@ -29,7 +29,7 @@ func compatibilityCallSQL(dbType orm.DbType, quotedTable string, quotedRoutine s
 func compatibilityPostgresCallRoutineDDL(quotedTable string, quotedRoutine string) string {
 	return strings.Join([]string{
 		"CREATE FUNCTION " + quotedRoutine + "(min_age INTEGER)",
-		"RETURNS TABLE(id BIGINT, name VARCHAR(64), age INTEGER, profile TEXT, created_at VARCHAR(40))",
+		"RETURNS TABLE(id BIGINT, name VARCHAR(64), age INTEGER, profile JSONB, created_at VARCHAR(40))",
 		"LANGUAGE SQL",
 		"AS 'SELECT t.id, t.name, t.age, t.profile, t.created_at FROM " + quotedTable + " AS t WHERE t.age >= min_age ORDER BY t.id'",
 	}, " ")
