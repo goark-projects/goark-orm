@@ -12,11 +12,11 @@
 
 ## 运维与发布
 
-- [Database Matrix](database-matrix.md)：方言行为、兼容套件覆盖、环境变量和 benchmark harness。
-- [Release Gates](release-gates.md)：本地 build、test、vet、generation、diff 和 benchmark 门禁。
-- [API Compatibility](api-compatibility.md)：V1 公共契约和演进规则。
-- [Architecture Notes](goark-orm-v1-design.md)：设计边界、元数据流、运行期职责和关键决策。
-- [Provider And SQL Builder](provider-builder.md)：Provider 注册、Builder API、cache key、upsert 和行锁。
+- [数据库矩阵](database-matrix.zh-CN.md)：方言行为、兼容套件覆盖、环境变量和 benchmark harness。
+- [Release Gates](release-gates.zh-CN.md)：本地 build、test、vet、generation、diff 和 benchmark 门禁。
+- [API 兼容性](api-compatibility.zh-CN.md)：V1 公共契约和演进规则。
+- [架构说明](goark-orm-v1-design.zh-CN.md)：设计边界、元数据流、运行期职责和关键决策。
+- [Provider 与 SQL Builder](provider-builder.zh-CN.md)：Provider 注册、Builder API、cache key、upsert 和行锁。
 
 ## 文档规则
 

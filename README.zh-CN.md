@@ -320,11 +320,11 @@ GOWORK=off ./scripts/verify-release.sh
 - [配置参考](docs/configuration.zh-CN.md)
 - [案例指南](docs/examples.zh-CN.md)
 - [生产级 Demo](docs/production-demo.zh-CN.md)
-- [API 兼容性](docs/api-compatibility.md)
-- [数据库矩阵](docs/database-matrix.md)
-- [Provider 与 SQL Builder](docs/provider-builder.md)
-- [架构说明](docs/goark-orm-v1-design.md)
-- [Release Gates](docs/release-gates.md)
+- [API 兼容性](docs/api-compatibility.zh-CN.md)
+- [数据库矩阵](docs/database-matrix.zh-CN.md)
+- [Provider 与 SQL Builder](docs/provider-builder.zh-CN.md)
+- [架构说明](docs/goark-orm-v1-design.zh-CN.md)
+- [Release Gates](docs/release-gates.zh-CN.md)
 
 ## 许可证
 
