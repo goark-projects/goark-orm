@@ -98,7 +98,7 @@ func TestBuildPackageModelFromSchema_whenCustomTypeMapperProvided_shouldUseMappe
 		PackageName: "event",
 		TypeMapper: SchemaTypeMapperFunc(func(column SchemaColumn) (string, error) {
 			if column.Name == "payload" {
-				return "json.RawMessage", nil
+				return "sonic.NoCopyRawMessage", nil
 			}
 			return DefaultSchemaTypeMapper().GoType(column)
 		}),
@@ -116,8 +116,19 @@ func TestBuildPackageModelFromSchema_whenCustomTypeMapperProvided_shouldUseMappe
 		t.Fatalf("build package model failed: %v", err)
 	}
 
-	if got := model.Entities[0].Columns[0].FieldType; got != "json.RawMessage" {
+	if got := model.Entities[0].Columns[0].FieldType; got != "sonic.NoCopyRawMessage" {
 		t.Fatalf("expected custom mapped type, got %q", got)
+	}
+	rendered, err := Render(model)
+	if err != nil {
+		t.Fatalf("render reverse model failed: %v", err)
+	}
+	source := string(rendered)
+	if !strings.Contains(source, `"github.com/bytedance/sonic"`) {
+		t.Fatalf("generated source should import sonic:\n%s", source)
+	}
+	if strings.Contains(source, `"encoding/json"`) {
+		t.Fatalf("generated source must not import encoding/json:\n%s", source)
 	}
 }
 

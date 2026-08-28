@@ -187,7 +187,7 @@ func knownImportPathsForFieldType(fieldType string) []string {
 		qualifier string
 		path      string
 	}{
-		{qualifier: "json", path: "encoding/json"},
+		{qualifier: "sonic", path: "github.com/bytedance/sonic"},
 		{qualifier: "sql", path: "database/sql"},
 		{qualifier: "time", path: "time"},
 		{qualifier: "net", path: "net"},
