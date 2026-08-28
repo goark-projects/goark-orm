@@ -59,6 +59,16 @@ func writeImports(builder *bytes.Buffer, model *PackageModel) {
 		builder.WriteByte('\n')
 		written["context"] = struct{}{}
 	}
+	for _, item := range model.Imports {
+		if item.Path == "" || item.Path == "context" || item.Path == "goark.dev/orm" {
+			continue
+		}
+		if _, ok := written[item.Path]; ok {
+			continue
+		}
+		writeImport(builder, item)
+		written[item.Path] = struct{}{}
+	}
 	for _, importPath := range modelKnownImportPaths(model) {
 		if _, ok := written[importPath]; ok {
 			continue
@@ -71,6 +81,15 @@ func writeImports(builder *bytes.Buffer, model *PackageModel) {
 	builder.WriteString(strconv.Quote("goark.dev/orm"))
 	builder.WriteByte('\n')
 	builder.WriteString(")\n\n")
+}
+
+func writeImport(builder *bytes.Buffer, item ImportModel) {
+	if strings.TrimSpace(item.Name) != "" {
+		builder.WriteString(item.Name)
+		builder.WriteByte(' ')
+	}
+	builder.WriteString(strconv.Quote(item.Path))
+	builder.WriteByte('\n')
 }
 
 func writeRegisterFunction(builder *bytes.Buffer, model *PackageModel) {

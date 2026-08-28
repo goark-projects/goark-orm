@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
-	"go/build"
-	"go/parser"
 	"go/printer"
 	"go/token"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -23,11 +20,6 @@ import (
 
 var sqlParameterPattern = regexp.MustCompile(`#\{\s*([^{}]+?)\s*\}`)
 
-type scanContext struct {
-	fset       *token.FileSet
-	interfaces map[string]*ast.InterfaceType
-}
-
 // ScanPackage 扫描单个 Go package 的 ORM 元数据。
 func ScanPackage(spec GenerateSpec) (*PackageModel, error) {
 	spec.Dir = strings.TrimSpace(spec.Dir)
@@ -39,64 +31,23 @@ func ScanPackage(spec GenerateSpec) (*PackageModel, error) {
 		return nil, fmt.Errorf("goark-orm: naming %w", err)
 	}
 	spec.Naming = naming
-	fset := token.NewFileSet()
-	buildContext := build.Default
-	buildContext.BuildTags = uniqueConfigStrings(spec.BuildTags)
-	var matchErr error
-	packages, err := parser.ParseDir(fset, spec.Dir, func(info os.FileInfo) bool {
-		if matchErr != nil {
-			return false
-		}
-		name := info.Name()
-		if !strings.HasSuffix(name, ".go") ||
-			strings.HasSuffix(name, "_test.go") ||
-			strings.HasPrefix(name, "zz_goark_orm_") {
-			return false
-		}
-		ok, err := buildContext.MatchFile(spec.Dir, name)
-		if err != nil {
-			matchErr = err
-			return false
-		}
-		return ok
-	}, parser.ParseComments)
+	loaded, err := loadScanPackage(spec)
 	if err != nil {
 		return nil, err
-	}
-	if matchErr != nil {
-		return nil, matchErr
-	}
-	if len(packages) == 0 {
-		return nil, fmt.Errorf("goark-orm: no Go package found in %s", spec.Dir)
-	}
-	packageNames := make([]string, 0, len(packages))
-	for name := range packages {
-		packageNames = append(packageNames, name)
-	}
-	sort.Strings(packageNames)
-	packageName := strings.TrimSpace(spec.PackageName)
-	if packageName == "" {
-		if len(packageNames) != 1 {
-			return nil, fmt.Errorf("goark-orm: multiple Go packages found in %s: %s", spec.Dir, strings.Join(packageNames, ", "))
-		}
-		packageName = packageNames[0]
-	}
-	pkg := packages[packageName]
-	if pkg == nil {
-		return nil, fmt.Errorf("goark-orm: package %q not found in %s", packageName, spec.Dir)
 	}
 
 	model := &PackageModel{
 		Dir:         spec.Dir,
-		PackageName: packageName,
+		PackageName: loaded.pkg.Name,
 	}
-	ctx := newScanContext(fset, pkg)
-	files := sortedFiles(fset, pkg)
+	ctx := newScanContext(loaded.fset, loaded.pkg, loaded.sources)
+	files := sortedFiles(loaded.fset, loaded.pkg)
 	for _, file := range files {
 		if err := scanFile(model, ctx, file, spec); err != nil {
 			return nil, err
 		}
 	}
+	model.Imports = ctx.importList()
 	if err := finalizeModel(model, spec); err != nil {
 		return nil, err
 	}
@@ -106,6 +57,9 @@ func ScanPackage(spec GenerateSpec) (*PackageModel, error) {
 func sortedFiles(fset *token.FileSet, pkg *ast.Package) []*ast.File {
 	files := make([]*ast.File, 0, len(pkg.Files))
 	for _, file := range pkg.Files {
+		if !scanSourceFileAllowed(fset, file) {
+			continue
+		}
 		files = append(files, file)
 	}
 	sort.Slice(files, func(i, j int) bool {
@@ -114,33 +68,8 @@ func sortedFiles(fset *token.FileSet, pkg *ast.Package) []*ast.File {
 	return files
 }
 
-func newScanContext(fset *token.FileSet, pkg *ast.Package) *scanContext {
-	ctx := &scanContext{
-		fset:       fset,
-		interfaces: make(map[string]*ast.InterfaceType),
-	}
-	for _, file := range sortedFiles(fset, pkg) {
-		for _, decl := range file.Decls {
-			genDecl, ok := decl.(*ast.GenDecl)
-			if !ok || genDecl.Tok != token.TYPE {
-				continue
-			}
-			for _, rawSpec := range genDecl.Specs {
-				typeSpec, ok := rawSpec.(*ast.TypeSpec)
-				if !ok {
-					continue
-				}
-				interfaceType, ok := typeSpec.Type.(*ast.InterfaceType)
-				if ok {
-					ctx.interfaces[typeSpec.Name.Name] = interfaceType
-				}
-			}
-		}
-	}
-	return ctx
-}
-
 func scanFile(model *PackageModel, ctx *scanContext, file *ast.File, spec GenerateSpec) error {
+	source := ctx.sourceForFile(file)
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
 		if !ok || genDecl.Tok != token.TYPE {
@@ -161,14 +90,14 @@ func scanFile(model *PackageModel, ctx *scanContext, file *ast.File, spec Genera
 			}
 			annotations := mergeAnnotations(declAnnotations, specAnnotations)
 			if _, ok := findAnnotation(annotations, "entity"); ok {
-				entity, err := buildEntity(model, ctx.fset, typeSpec, annotations, spec)
+				entity, err := buildEntity(model, ctx, source, typeSpec, annotations, spec)
 				if err != nil {
 					return err
 				}
 				model.Entities = append(model.Entities, entity)
 			}
 			if _, ok := findAnnotation(annotations, "mapper"); ok {
-				mapper, err := buildMapper(model, ctx, typeSpec, annotations, spec)
+				mapper, err := buildMapper(model, ctx, source, typeSpec, annotations, spec)
 				if err != nil {
 					return err
 				}
@@ -179,7 +108,7 @@ func scanFile(model *PackageModel, ctx *scanContext, file *ast.File, spec Genera
 	return nil
 }
 
-func buildEntity(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpec, annotations []annotation, spec GenerateSpec) (EntityModel, error) {
+func buildEntity(model *PackageModel, ctx *scanContext, source scanSource, typeSpec *ast.TypeSpec, annotations []annotation, spec GenerateSpec) (EntityModel, error) {
 	entityAnnotation, _ := findAnnotation(annotations, "entity")
 	table := strings.TrimSpace(entityAnnotation.Args["table"])
 	if table == "" {
@@ -216,7 +145,7 @@ func buildEntity(model *PackageModel, fset *token.FileSet, typeSpec *ast.TypeSpe
 			}
 		}
 		for _, name := range field.Names {
-			column, err := buildColumn(entity.TypeName, name.Name, exprString(fset, field.Type), tag, spec.Naming)
+			column, err := buildColumn(entity.TypeName, name.Name, exprString(ctx.fset, field.Type), tag, spec.Naming)
 			if err != nil {
 				return EntityModel{}, err
 			}
@@ -442,7 +371,7 @@ func typeHandlerSet(spec GenerateSpec) map[string]struct{} {
 	return out
 }
 
-func buildMapper(model *PackageModel, ctx *scanContext, typeSpec *ast.TypeSpec, annotations []annotation, spec GenerateSpec) (MapperModel, error) {
+func buildMapper(model *PackageModel, ctx *scanContext, source scanSource, typeSpec *ast.TypeSpec, annotations []annotation, spec GenerateSpec) (MapperModel, error) {
 	mapperAnnotation, _ := findAnnotation(annotations, "mapper")
 	namespace := strings.TrimSpace(mapperAnnotation.Args["namespace"])
 	if namespace == "" {
@@ -485,7 +414,7 @@ func buildMapper(model *PackageModel, ctx *scanContext, typeSpec *ast.TypeSpec, 
 	usedXMLStatements := make(map[string]struct{})
 	seenMethods := make(map[string]struct{})
 	for _, method := range interfaceType.Methods.List {
-		methods, err := buildMapperMethods(ctx, namespace, method, statementByID, nil)
+		methods, err := buildMapperMethods(ctx, namespace, source, method, statementByID, nil)
 		if err != nil {
 			return MapperModel{}, err
 		}
@@ -514,15 +443,15 @@ func buildMapper(model *PackageModel, ctx *scanContext, typeSpec *ast.TypeSpec, 
 	return mapper, nil
 }
 
-func buildMapperMethods(ctx *scanContext, namespace string, field *ast.Field, xmlStatements map[string]StatementModel, stack map[string]struct{}) ([]MethodModel, error) {
+func buildMapperMethods(ctx *scanContext, namespace string, source scanSource, field *ast.Field, xmlStatements map[string]StatementModel, stack map[string]struct{}) ([]MethodModel, error) {
 	if len(field.Names) == 0 {
-		embeddedName, err := embeddedInterfaceName(ctx.fset, field.Type)
+		embeddedName, err := ctx.embeddedInterfaceName(source, field.Type)
 		if err != nil {
 			return nil, err
 		}
-		interfaceType, ok := ctx.interfaces[embeddedName]
+		interfaceItem, ok := ctx.interfaces[embeddedName]
 		if !ok {
-			return nil, fmt.Errorf("goark-orm: embedded mapper interface %s is not found in current package", embeddedName)
+			return nil, fmt.Errorf("goark-orm: embedded mapper interface %s is not found", embeddedName)
 		}
 		if stack == nil {
 			stack = make(map[string]struct{})
@@ -532,10 +461,10 @@ func buildMapperMethods(ctx *scanContext, namespace string, field *ast.Field, xm
 		}
 		stack[embeddedName] = struct{}{}
 		defer delete(stack, embeddedName)
-		out := make([]MethodModel, 0, len(interfaceType.Methods.List))
+		out := make([]MethodModel, 0, len(interfaceItem.Interface.Methods.List))
 		seen := make(map[string]struct{})
-		for _, embeddedField := range interfaceType.Methods.List {
-			methods, err := buildMapperMethods(ctx, namespace, embeddedField, xmlStatements, stack)
+		for _, embeddedField := range interfaceItem.Interface.Methods.List {
+			methods, err := buildMapperMethods(ctx, namespace, interfaceItem.Source, embeddedField, xmlStatements, stack)
 			if err != nil {
 				return nil, err
 			}
@@ -556,7 +485,7 @@ func buildMapperMethods(ctx *scanContext, namespace string, field *ast.Field, xm
 		if !ok {
 			return nil, fmt.Errorf("goark-orm: mapper method %s must be function", methodName)
 		}
-		method, err := buildMethodSignature(ctx.fset, methodName, funcType)
+		method, err := buildMethodSignature(ctx, source, methodName, funcType)
 		if err != nil {
 			return nil, err
 		}
@@ -587,16 +516,26 @@ func buildMapperMethods(ctx *scanContext, namespace string, field *ast.Field, xm
 	return out, nil
 }
 
-func embeddedInterfaceName(fset *token.FileSet, expr ast.Expr) (string, error) {
+func (ctx *scanContext) embeddedInterfaceName(source scanSource, expr ast.Expr) (string, error) {
 	switch item := expr.(type) {
 	case *ast.Ident:
 		if item.Name == "" {
 			return "", fmt.Errorf("goark-orm: embedded mapper interface is empty")
 		}
 		return item.Name, nil
+	case *ast.SelectorExpr:
+		qualifier, ok := item.X.(*ast.Ident)
+		if !ok {
+			break
+		}
+		importPath := strings.TrimSpace(source.Imports[qualifier.Name])
+		if importPath == "" {
+			break
+		}
+		return interfaceKey(importPath, item.Sel.Name), nil
 	default:
-		return "", fmt.Errorf("goark-orm: embedded mapper interface %s must be local named interface", exprString(fset, expr))
 	}
+	return "", fmt.Errorf("goark-orm: embedded mapper interface %s must be named interface", ctx.exprString(source, expr))
 }
 
 func applyMethodSignatureToStatement(method *MethodModel) {
@@ -630,7 +569,7 @@ func normalizeResultType(typ string) string {
 	return normalizeTypeName(typ)
 }
 
-func buildMethodSignature(fset *token.FileSet, methodName string, fn *ast.FuncType) (MethodModel, error) {
+func buildMethodSignature(ctx *scanContext, source scanSource, methodName string, fn *ast.FuncType) (MethodModel, error) {
 	method := MethodModel{Name: methodName}
 	if fn.Params == nil || len(fn.Params.List) == 0 {
 		return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s first parameter must be context.Context", methodName)
@@ -644,7 +583,7 @@ func buildMethodSignature(fset *token.FileSet, methodName string, fn *ast.FuncTy
 		for _, name := range names {
 			method.Params = append(method.Params, ParamModel{
 				Name: name.Name,
-				Type: exprString(fset, field.Type),
+				Type: ctx.exprString(source, field.Type),
 			})
 			paramIndex++
 		}
@@ -661,14 +600,14 @@ func buildMethodSignature(fset *token.FileSet, methodName string, fn *ast.FuncTy
 	}
 	switch resultCount {
 	case 1:
-		if exprString(fset, fn.Results.List[0].Type) != "error" {
+		if ctx.exprString(source, fn.Results.List[0].Type) != "error" {
 			return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s single return value must be error", methodName)
 		}
 	case 2:
-		if exprString(fset, fn.Results.List[1].Type) != "error" {
+		if ctx.exprString(source, fn.Results.List[1].Type) != "error" {
 			return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s last return value must be error", methodName)
 		}
-		method.ResultType = exprString(fset, fn.Results.List[0].Type)
+		method.ResultType = ctx.exprString(source, fn.Results.List[0].Type)
 	default:
 		return MethodModel{}, fmt.Errorf("goark-orm: mapper method %s must return (T, error) or error", methodName)
 	}

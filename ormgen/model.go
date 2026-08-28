@@ -16,8 +16,15 @@ type GenerateSpec struct {
 type PackageModel struct {
 	Dir         string
 	PackageName string
+	Imports     []ImportModel
 	Entities    []EntityModel
 	Mappers     []MapperModel
+}
+
+// ImportModel 描述生成源码需要保留的外部类型导入。
+type ImportModel struct {
+	Name string
+	Path string
 }
 
 // EntityModel 描述一个实体类型。
