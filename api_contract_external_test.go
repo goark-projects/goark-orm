@@ -208,6 +208,15 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	var _ func(string, orm.MyBatisAssembly) (orm.MyBatisAssemblyResult, error) = orm.LoadAndAssembleMyBatisConfig
 	var _ func(orm.StatementSession, orm.EntityMeta, ...orm.BaseMapperOption) (*orm.BaseMapper[contractUser, int64], error) = orm.NewBaseMapper[contractUser, int64]
 	var _ func(*orm.BaseMapper[contractUser, int64]) (*orm.Service[contractUser, int64], error) = orm.NewService[contractUser, int64]
+	var _ func(context.Context, *orm.BaseMapper[contractUser, int64], orm.TypedField[contractUser, string], *orm.QueryWrapper[contractUser]) ([]string, error) = orm.SelectFieldValues[contractUser, int64, string]
+	var _ func(context.Context, *orm.BaseMapper[contractUser, int64], orm.TypedField[contractUser, string], *orm.QueryWrapper[contractUser]) (string, error) = orm.SelectFieldValue[contractUser, int64, string]
+	var _ func(context.Context, *orm.BaseMapper[contractUser, int64], orm.TypedField[contractUser, string], *orm.QueryWrapper[contractUser]) (string, error) = orm.SelectFirstFieldValue[contractUser, int64, string]
+	var _ func(context.Context, *orm.Service[contractUser, int64], orm.TypedField[contractUser, string], *orm.QueryWrapper[contractUser]) ([]string, error) = orm.ListFieldValues[contractUser, int64, string]
+	var _ func(context.Context, *orm.Service[contractUser, int64], orm.TypedField[contractUser, string], *orm.QueryWrapper[contractUser]) (string, error) = orm.GetFieldValue[contractUser, int64, string]
+	var _ func(context.Context, *orm.Service[contractUser, int64], orm.TypedField[contractUser, string], *orm.QueryWrapper[contractUser]) (string, error) = orm.GetFirstFieldValue[contractUser, int64, string]
+	var _ func(*orm.BaseMapper[contractUser, int64], context.Context, *orm.QueryWrapper[contractUser]) ([]int64, error) = (*orm.BaseMapper[contractUser, int64]).SelectIDs
+	var _ func(*orm.Service[contractUser, int64], context.Context, *orm.QueryWrapper[contractUser]) ([]int64, error) = (*orm.Service[contractUser, int64]).ListIDs
+	var _ func(*orm.QueryChain[contractUser, int64], context.Context) ([]int64, error) = (*orm.QueryChain[contractUser, int64]).IDs
 	var _ func(*orm.Registry) error = orm.ValidateRegistry
 	var _ orm.SQLInjector = orm.DefaultSQLInjector{}
 	var _ orm.SQLInjector = orm.SQLInjectorFunc(func(orm.EntityMeta, orm.Dialect, orm.GlobalConfig) ([]orm.StatementMeta, error) { return nil, nil })
