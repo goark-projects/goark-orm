@@ -126,6 +126,16 @@ func TestV1RuntimePublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	if _, err := orm.NewInsertSQLBuilder().Into("sys_user").Value("name", "Alice").Build(); err != nil {
 		t.Fatalf("build insert source failed: %v", err)
 	}
+	if _, err := orm.NewMultiRowInsertSQLBuilder().
+		Into("sys_user").
+		Columns("id", "name").
+		Rows(
+			orm.NamedArgs{"id": int64(1), "name": "Alice"},
+			orm.NamedArgs{"id": int64(2), "name": "Bob"},
+		).
+		Build(orm.NewPostgresDialect()); err != nil {
+		t.Fatalf("build multi-row insert source failed: %v", err)
+	}
 	if _, err := orm.NewInsertSQLBuilder().Into("sys_user").Value("name", "Alice").Returning("id").Build(); err != nil {
 		t.Fatalf("build insert returning source failed: %v", err)
 	}

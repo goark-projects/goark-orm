@@ -186,6 +186,53 @@ func TestWriteSQLBuilders_whenReturningProvided_shouldBuildReturningClauses(t *t
 	}
 }
 
+func TestMultiRowInsertSQLBuilder_whenPostgresProvided_shouldBuildValuesList(t *testing.T) {
+	source, err := NewMultiRowInsertSQLBuilder().
+		Into("sys_user").
+		Columns("id", "name").
+		Row(NamedArgs{"id": int64(1), "name": "Alice"}).
+		Row(NamedArgs{"id": int64(2), "name": "Bob"}).
+		Build(NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("build multi-row insert failed: %v", err)
+	}
+	compiled, err := CompileSQLContext(context.Background(), source.SQL, source.Args, NewPostgresDialect())
+	if err != nil {
+		t.Fatalf("compile multi-row insert failed: %v", err)
+	}
+	if compiled.SQL != `INSERT INTO "sys_user" ("id", "name") VALUES ($1, $2), ($3, $4)` {
+		t.Fatalf("unexpected multi-row SQL %q", compiled.SQL)
+	}
+	if !reflect.DeepEqual(compiled.Args, []any{int64(1), "Alice", int64(2), "Bob"}) {
+		t.Fatalf("unexpected multi-row args %#v", compiled.Args)
+	}
+}
+
+func TestMultiRowInsertSQLBuilder_whenOracleProvided_shouldBuildInsertAll(t *testing.T) {
+	source, err := NewMultiRowInsertSQLBuilder().
+		Into("sys_user").
+		Columns("id", "name").
+		Rows(
+			NamedArgs{"id": int64(1), "name": "Alice"},
+			NamedArgs{"id": int64(2), "name": "Bob"},
+		).
+		Build(NewOracleDialect())
+	if err != nil {
+		t.Fatalf("build oracle multi-row insert failed: %v", err)
+	}
+	compiled, err := CompileSQLContext(context.Background(), source.SQL, source.Args, NewOracleDialect())
+	if err != nil {
+		t.Fatalf("compile oracle multi-row insert failed: %v", err)
+	}
+	expected := `INSERT ALL INTO "sys_user" ("id", "name") VALUES (:1, :2) INTO "sys_user" ("id", "name") VALUES (:3, :4) SELECT 1 FROM dual`
+	if compiled.SQL != expected {
+		t.Fatalf("unexpected oracle multi-row SQL %q", compiled.SQL)
+	}
+	if !reflect.DeepEqual(compiled.Args, []any{int64(1), "Alice", int64(2), "Bob"}) {
+		t.Fatalf("unexpected oracle multi-row args %#v", compiled.Args)
+	}
+}
+
 func TestSelectSQLBuilder_ForUpdate_whenSQLServerProvided_shouldRenderTableHint(t *testing.T) {
 	source, err := NewSelectSQLBuilder().
 		Select("id").

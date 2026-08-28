@@ -61,6 +61,29 @@ func TestV1ORMTestPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 	_ = ormtest.CallStatementCase("call", statement, orm.NamedArgs{}, nil, nil)
 	_ = ormtest.PingCase()
 
+	benchmark, err := ormtest.NewBenchmarkSuiteConfig(
+		orm.DbTypePostgres,
+		ormtest.WithBenchmarkTable("goark_orm_contract_bench_users"),
+		ormtest.WithBenchmarkNamespace("contract.BenchmarkMapper"),
+	)
+	if err != nil {
+		t.Fatalf("new benchmark suite config failed: %v", err)
+	}
+	if benchmark.DBType != orm.DbTypePostgres || len(benchmark.Cases) == 0 {
+		t.Fatalf("unexpected benchmark config %#v", benchmark)
+	}
+	if !ormtest.IsBenchmarkDBTypeSupported(orm.DbTypePostgres) || len(ormtest.SupportedBenchmarkDBTypes()) != 6 {
+		t.Fatalf("unexpected benchmark support boundary")
+	}
+	_, configured, err = ormtest.LoadDatabaseBenchmarkConfigFromEnv("GOARK_ORM_CONTRACT_NOT_SET")
+	if err != nil {
+		t.Fatalf("load benchmark env config failed: %v", err)
+	}
+	if configured {
+		t.Fatalf("unexpected configured benchmark env")
+	}
+	_ = ormtest.PingBenchmarkCase()
+
 	var _ = ormtest.DatabaseSuiteConfig{
 		DriverName: "contract",
 		DBType:     orm.DbTypePostgres,
@@ -68,6 +91,18 @@ func TestV1ORMTestPublicAPIContract_shouldCompileExternalUsage(t *testing.T) {
 		Cases: []ormtest.DatabaseCase{{
 			Name: "noop",
 			Run: func(context.Context, *orm.SQLSession, *sql.DB) error {
+				return nil
+			},
+		}},
+	}
+	var _ = ormtest.DatabaseBenchmarkConfig{
+		DriverName: "contract",
+		DBType:     orm.DbTypePostgres,
+		Registry:   orm.NewRegistry(),
+		Cases: []ormtest.DatabaseBenchmarkCase{{
+			Name: "noop",
+			Run: func(scope ormtest.DatabaseBenchmarkScope) error {
+				_ = scope
 				return nil
 			},
 		}},
