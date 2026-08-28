@@ -2,7 +2,7 @@
 
 Goark ORM is a Go-native data mapper for `database/sql`. It uses explicit metadata, deterministic generated code, small runtime contracts, and reusable real-database verification tools for production Go services.
 
-English is the default documentation language. Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md); each long-form guide also has a `*.zh-CN.md` mirror.
+English is the default documentation language. Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md); each long-form guide and example README also has a `*.zh-CN.md` mirror.
 
 ## Module
 
@@ -287,8 +287,8 @@ func TestORMDatabaseCompatibility(t *testing.T) {
 ```
 
 ```bash
+# Set GOARK_ORM_INTEGRATION_DSN outside the repository before running.
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
-GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=disable' \
 GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
@@ -317,6 +317,7 @@ GOWORK=off ./scripts/verify-release.sh
 - [Documentation Index](docs/README.md)
 - [Feature Reference](docs/features.md)
 - [Configuration Reference](docs/configuration.md)
+- [Annotation, Tag, And XML Mapper Reference](docs/annotations.md)
 - [Examples Guide](docs/examples.md)
 - [Production Demo](docs/production-demo.md)
 - [API Compatibility](docs/api-compatibility.md)
@@ -324,6 +325,8 @@ GOWORK=off ./scripts/verify-release.sh
 - [Provider And SQL Builder](docs/provider-builder.md)
 - [Architecture Notes](docs/goark-orm-v1-design.md)
 - [Release Gates](docs/release-gates.md)
+- [Changelog](CHANGELOG.md)
+- [Example Workspace](examples/README.md)
 
 ## License
 

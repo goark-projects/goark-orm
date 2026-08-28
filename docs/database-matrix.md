@@ -51,8 +51,8 @@ The standard suite is disabled unless all required environment variables are pro
 Use `ormtest.SupportedCompatibilityDBTypes()` or `ormtest.IsCompatibilityDBTypeSupported(dbType)` when a caller-owned harness needs to branch on the current standard support boundary. The list is intentionally limited to engines with executable suite coverage: `postgres`, `mysql`, `mariadb`, `sqlite`, `sqlserver`, and `oracle`.
 
 ```bash
+# Set GOARK_ORM_INTEGRATION_DSN outside the repository before running.
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
-GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=disable' \
 GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
@@ -107,8 +107,8 @@ Use `ormtest.WithCompatibilityTable("schema.table_name")` when multiple suites n
 Use `scripts/verify-real-db.ps1` to run the standard PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, and Oracle suites from an isolated temporary module. The script imports concrete drivers only inside the temporary module, keeps `goark.dev/orm` dependency-light, and removes the temporary module after the run.
 
 ```powershell
-$env:GOARK_ORM_POSTGRES_DSN = 'postgres://user:pass@127.0.0.1:5432/goark-orm-test?sslmode=disable'
-$env:GOARK_ORM_MYSQL_DSN = 'user:pass@tcp(127.0.0.1:3306)/goark-orm-test?parseTime=true'
+# Set GOARK_ORM_POSTGRES_DSN, GOARK_ORM_MYSQL_DSN, or another supported DSN
+# in the shell or CI secret store before running.
 powershell -ExecutionPolicy Bypass -File scripts/verify-real-db.ps1
 ```
 
@@ -137,8 +137,8 @@ Optional variables:
 Use `scripts/verify-real-db-bench.ps1` to run the same driver-isolated temporary module as a benchmark harness.
 
 ```powershell
-$env:GOARK_ORM_POSTGRES_DSN = 'postgres://user:pass@127.0.0.1:5432/goark-orm-test?sslmode=disable'
-$env:GOARK_ORM_MYSQL_DSN = 'user:pass@tcp(127.0.0.1:3306)/goark-orm-test?parseTime=true'
+# Set the target GOARK_ORM_*_DSN variables in the shell or CI secret store
+# before running the database benchmark harness.
 powershell -ExecutionPolicy Bypass -File scripts/verify-real-db-bench.ps1 -BenchTime 1s
 ```
 

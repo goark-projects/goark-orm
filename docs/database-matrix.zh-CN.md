@@ -51,8 +51,8 @@ PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 和 Oracle 是当前标准真
 调用方 harness 需要按当前标准支持边界分支时，可使用 `ormtest.SupportedCompatibilityDBTypes()` 或 `ormtest.IsCompatibilityDBTypeSupported(dbType)`。该列表刻意限制在具备可执行套件覆盖的引擎：`postgres`、`mysql`、`mariadb`、`sqlite`、`sqlserver`、`oracle`。
 
 ```bash
+# 执行前在仓库外设置 GOARK_ORM_INTEGRATION_DSN。
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
-GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=disable' \
 GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
@@ -107,8 +107,8 @@ func TestORMDatabaseCompatibility(t *testing.T) {
 使用 `scripts/verify-real-db.ps1` 从隔离临时 module 运行标准 PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 和 Oracle 套件。该脚本只在临时 module 中导入具体驱动，保持 `goark.dev/orm` 依赖轻量，并在运行结束后删除临时 module。
 
 ```powershell
-$env:GOARK_ORM_POSTGRES_DSN = 'postgres://user:pass@127.0.0.1:5432/goark-orm-test?sslmode=disable'
-$env:GOARK_ORM_MYSQL_DSN = 'user:pass@tcp(127.0.0.1:3306)/goark-orm-test?parseTime=true'
+# 执行前在 shell 或 CI secret store 中设置 GOARK_ORM_POSTGRES_DSN、
+# GOARK_ORM_MYSQL_DSN 或其他受支持的 DSN 变量。
 powershell -ExecutionPolicy Bypass -File scripts/verify-real-db.ps1
 ```
 
@@ -137,8 +137,8 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-real-db.ps1
 使用 `scripts/verify-real-db-bench.ps1` 运行同样 driver-isolated 临时 module 的 benchmark harness。
 
 ```powershell
-$env:GOARK_ORM_POSTGRES_DSN = 'postgres://user:pass@127.0.0.1:5432/goark-orm-test?sslmode=disable'
-$env:GOARK_ORM_MYSQL_DSN = 'user:pass@tcp(127.0.0.1:3306)/goark-orm-test?parseTime=true'
+# 执行数据库 benchmark harness 前，在 shell 或 CI secret store 中设置目标
+# GOARK_ORM_*_DSN 变量。
 powershell -ExecutionPolicy Bypass -File scripts/verify-real-db-bench.ps1 -BenchTime 1s
 ```
 

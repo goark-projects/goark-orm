@@ -2,7 +2,7 @@
 
 Goark ORM 是面向 `database/sql` 的 Go 原生数据映射模块。它使用显式元数据、确定性代码生成、小型运行期契约和可复用真实数据库验证工具，服务于生产级 Go 应用。
 
-默认文档语言是英文：[README.md](README.md)。中文文档作为镜像维护在本文件和 `*.zh-CN.md` 指南中。
+默认文档语言是英文：[README.md](README.md)。中文文档作为镜像维护在本文件、`*.zh-CN.md` 指南和示例 README 中。
 
 ## 模块
 
@@ -287,13 +287,13 @@ func TestORMDatabaseCompatibility(t *testing.T) {
 ```
 
 ```bash
+# 执行前在仓库外设置 GOARK_ORM_INTEGRATION_DSN。
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
-GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=disable' \
 GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```
 
-矩阵覆盖 CRUD、分页、批处理、TypeHandler 往返、原生 JSON 列、UPSERT、生成主键回读、行锁 smoke path，以及具备可移植驱动行为的 callable statement 路径。详见 [docs/database-matrix.md](docs/database-matrix.md)。
+矩阵覆盖 CRUD、分页、批处理、TypeHandler 往返、原生 JSON 列、UPSERT、生成主键回读、行锁 smoke path，以及具备可移植驱动行为的 callable statement 路径。详见 [docs/database-matrix.zh-CN.md](docs/database-matrix.zh-CN.md)。
 
 ## 本地验证
 
@@ -318,6 +318,7 @@ GOWORK=off ./scripts/verify-release.sh
 - [中文文档索引](docs/README.zh-CN.md)
 - [功能参考](docs/features.zh-CN.md)
 - [配置参考](docs/configuration.zh-CN.md)
+- [注解、Tag 与 XML Mapper 参考](docs/annotations.zh-CN.md)
 - [案例指南](docs/examples.zh-CN.md)
 - [生产级 Demo](docs/production-demo.zh-CN.md)
 - [API 兼容性](docs/api-compatibility.zh-CN.md)
@@ -325,6 +326,8 @@ GOWORK=off ./scripts/verify-release.sh
 - [Provider 与 SQL Builder](docs/provider-builder.zh-CN.md)
 - [架构说明](docs/goark-orm-v1-design.zh-CN.md)
 - [Release Gates](docs/release-gates.zh-CN.md)
+- [版本变更说明](CHANGELOG.zh-CN.md)
+- [示例工作区](examples/README.zh-CN.md)
 
 ## 许可证
 

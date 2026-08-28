@@ -284,6 +284,58 @@ Field strategy values:
 
 ## Direct Go Configuration
 
+`Configuration` is the normalized runtime object used by `SQLSession`. JSON covers serializable declarations; Go object dependencies stay explicit in Go code.
+
+`Configuration` fields:
+
+| Field | JSON source | Default | Description |
+| --- | --- | --- | --- |
+| `Dialect` | `environment.dbType`, or `MyBatisEnvironment.Dialect` in Go | question-placeholder dialect | SQL placeholder, quoting, pagination, upsert, lock, and generated-key behavior. Direct Go `Dialect` takes priority over `dbType`. |
+| `DatabaseID` | `settings.databaseId`, `environment.databaseId`, then `databaseIdProvider` | empty | Statement selection id for database-specific XML or annotation statements. |
+| `GlobalConfig` | `global` or `globalConfig`, plus Go-only fields | `DefaultGlobalConfig()` | Global database/entity defaults, identifier generation, and fill behavior. |
+| `LocalCacheEnabled` | `settings.localCacheEnabled` | `true` | Enables first-level session cache. |
+| `LocalCacheScope` | `settings.localCacheScope` | `SESSION` | `SESSION` or `STATEMENT`. |
+| `CacheEnabled` | `settings.cacheEnabled` | `true` | Enables namespace second-level cache behavior globally. |
+| `MapUnderscoreToCamelCase` | `settings.mapUnderscoreToCamelCase` | `false` | Enables underscore-to-camel fallback mapping. |
+| `UseGeneratedKeys` | `settings.useGeneratedKeys` | `false` | Default generated-key preference for metadata that opts in. |
+| `LazyLoadingEnabled` | `settings.lazyLoadingEnabled` | `false` | Enables explicit lazy mapping support. |
+| `DefaultExecutorType` | `settings.defaultExecutorType` | `SIMPLE` | `SIMPLE`, `REUSE`, or `BATCH`. |
+| `PreparedStatementCacheSize` | `settings.preparedStatementCacheSize` | `256` | Bounded prepared-statement cache capacity for `REUSE`. |
+| `DefaultStatementTimeout` | `settings.defaultStatementTimeout` | `0` | Default statement timeout; statement options override it. |
+| `DefaultFetchSize` | `settings.defaultFetchSize` | `0` | Default fetch-size hint; statement options override it. |
+| `DefaultResultSetType` | `settings.defaultResultSetType` | default | Default result set type; statement options override it. |
+| `UseColumnLabel` | `settings.useColumnLabel` | `true` | Uses returned column labels on supported result paths. |
+| `NullableOnForEach` | `settings.nullableOnForEach` | `true` | Default nil or empty behavior for dynamic `foreach`. |
+| `ShrinkWhitespacesInSQL` | `settings.shrinkWhitespacesInSql` | `false` | Shrinks rendered dynamic SQL whitespace. |
+| `JDBCTypeForNull` | `settings.jdbcTypeForNull` | `OTHER` | JDBC-style null type metadata. |
+| `AutoMappingBehavior` | `settings.autoMappingBehavior` | `FULL` | `NONE`, `PARTIAL`, or `FULL`. |
+| `AutoMappingUnknownColumnBehavior` | `settings.autoMappingUnknownColumnBehavior` | `NONE` | `NONE`, `WARNING`, or `FAILING`. |
+| `SafeRowBoundsEnabled` | `settings.safeRowBoundsEnabled` | `false` | MyBatis-compatible validation-retained setting. |
+| `SafeResultHandlerEnabled` | `settings.safeResultHandlerEnabled` | `true` | MyBatis-compatible validation-retained setting. |
+| `AggressiveLazyLoading` | `settings.aggressiveLazyLoading` | `false` | MyBatis-compatible validation-retained setting. |
+| `LazyLoadTriggerMethods` | `settings.lazyLoadTriggerMethods` | `equals`, `clone`, `hashCode`, `toString` | Validated method-name metadata. |
+| `DefaultScriptingLanguage` | `settings.defaultScriptingLanguage` | empty | Validated scripting-language metadata; core does not load scripting engines. |
+| `DefaultEnumTypeHandler` | `settings.defaultEnumTypeHandler` | empty | Validated enum-handler metadata. |
+| `CallSettersOnNulls` | `settings.callSettersOnNulls` | `false` | MyBatis-compatible validation-retained setting. |
+| `ReturnInstanceForEmptyRow` | `settings.returnInstanceForEmptyRow` | `false` | MyBatis-compatible validation-retained setting. |
+| `LogPrefix` | `settings.logPrefix` | empty | Retained log prefix metadata. |
+| `LogImpl` | `settings.logImpl` | empty | Validated logger metadata; core does not instantiate loggers. |
+| `ProxyFactory` | `settings.proxyFactory` | empty | Validated metadata only; core does not create transparent proxies. |
+| `VFSImpl` | `settings.vfsImpl` | empty | Validated slash-capable token list. |
+| `UseActualParamName` | `settings.useActualParamName` | `true` | Retained parameter naming setting. |
+| `ConfigurationFactory` | `settings.configurationFactory` | empty | Validated metadata only. |
+| `DefaultSQLProviderType` | `settings.defaultSqlProviderType` | empty | Validated metadata only. |
+| `ArgNameBasedConstructorAutoMapping` | `settings.argNameBasedConstructorAutoMapping` | `false` | Retained constructor auto-mapping setting. |
+| `MetaObjectHandler` | Go-only | `GlobalConfig.MetaObjectHandler` | Auto-fill hook for insert/update semantics. |
+
+`GlobalConfig` fields:
+
+| Field | JSON source | Default | Description |
+| --- | --- | --- | --- |
+| `DbConfig` | `global.dbConfig` | `DefaultDbConfig()` | Serializable database naming, id, field-strategy, and logical-delete defaults. |
+| `IdentifierGenerator` | Go-only | nil | Custom id generator for `ASSIGN_ID` or caller-defined id strategies. |
+| `MetaObjectHandler` | Go-only | nil | Insert/update fill hook shared with `Configuration.MetaObjectHandler`. |
+
 Applications can skip JSON and build `Configuration` directly:
 
 ```go
@@ -336,6 +388,10 @@ if err != nil {
 | `Registry` | `*Registry` | Validated registry. |
 | `SessionFactory` | `*SQLSessionFactory` | Present when `DB` is provided. |
 | `Session` | `*SQLSession` | Present when `DB` is provided. Caller must close it. |
+| `TypeAliases` | `map[string]string` | Normalized alias map from configuration. |
+| `TypeHandlers` | `[]string` | Declared type-handler names after validation. |
+| `Mappers` | `[]MapperRef` | Copied mapper declarations. |
+| `Plugins` | `[]PluginRef` | Copied plugin declarations. |
 
 ## Boot Adapter Configuration
 
@@ -349,6 +405,7 @@ if err != nil {
 | `Registry` | `*orm.Registry` | new registry | Metadata registry. |
 | `DB` | `*sql.DB` | required | Caller-owned database pool. |
 | `RuntimeConfig` | `orm.RuntimeConfig` | empty | Runtime declaration model. |
+| `MyBatisConfig` | `orm.MyBatisConfig` | empty | Alias for the same declaration model; used only when `RuntimeConfig` is empty. |
 | `TypeHandlers` | map | empty | Custom type handlers. |
 | `Plugins` | map | empty | Custom plugins. |
 | `SessionOptions` | slice | empty | Extra session options. |

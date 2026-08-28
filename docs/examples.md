@@ -493,8 +493,8 @@ func TestORMDatabaseCompatibility(t *testing.T) {
 ```
 
 ```bash
+# Set GOARK_ORM_INTEGRATION_DSN outside the repository before running.
 GOARK_ORM_INTEGRATION_DRIVER=postgres \
-GOARK_ORM_INTEGRATION_DSN='postgres://user:pass@127.0.0.1:5432/goark?sslmode=disable' \
 GOARK_ORM_INTEGRATION_DBTYPE=postgres \
 GOWORK=off go test -run TestORMDatabaseCompatibility ./...
 ```

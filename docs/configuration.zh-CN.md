@@ -284,6 +284,58 @@ Database id 优先级：
 
 ## Go 代码直接配置
 
+`Configuration` 是 `SQLSession` 使用的规范化运行期对象。JSON 只覆盖可序列化声明；Go 对象依赖必须通过 Go 代码显式传入。
+
+`Configuration` 字段：
+
+| 字段 | JSON 来源 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `Dialect` | `environment.dbType`，或 Go 中的 `MyBatisEnvironment.Dialect` | question-placeholder dialect | SQL placeholder、quote、pagination、upsert、lock 和 generated-key 行为。Go 直接指定的 `Dialect` 优先于 `dbType`。 |
+| `DatabaseID` | `settings.databaseId`、`environment.databaseId`、然后是 `databaseIdProvider` | empty | 数据库专用 XML 或注解 statement 的选择 id。 |
+| `GlobalConfig` | `global` 或 `globalConfig`，以及 Go-only 字段 | `DefaultGlobalConfig()` | 全局数据库/实体默认值、ID 生成和填充行为。 |
+| `LocalCacheEnabled` | `settings.localCacheEnabled` | `true` | 启用一级 Session cache。 |
+| `LocalCacheScope` | `settings.localCacheScope` | `SESSION` | `SESSION` 或 `STATEMENT`。 |
+| `CacheEnabled` | `settings.cacheEnabled` | `true` | 全局启用 namespace 二级缓存行为。 |
+| `MapUnderscoreToCamelCase` | `settings.mapUnderscoreToCamelCase` | `false` | 启用下划线转驼峰 fallback 映射。 |
+| `UseGeneratedKeys` | `settings.useGeneratedKeys` | `false` | 对选择启用 generated keys 的元数据提供默认偏好。 |
+| `LazyLoadingEnabled` | `settings.lazyLoadingEnabled` | `false` | 启用显式 lazy mapping 支持。 |
+| `DefaultExecutorType` | `settings.defaultExecutorType` | `SIMPLE` | `SIMPLE`、`REUSE` 或 `BATCH`。 |
+| `PreparedStatementCacheSize` | `settings.preparedStatementCacheSize` | `256` | `REUSE` 使用的有界 prepared-statement cache 容量。 |
+| `DefaultStatementTimeout` | `settings.defaultStatementTimeout` | `0` | 默认 statement timeout；statement option 可覆盖。 |
+| `DefaultFetchSize` | `settings.defaultFetchSize` | `0` | 默认 fetch-size hint；statement option 可覆盖。 |
+| `DefaultResultSetType` | `settings.defaultResultSetType` | default | 默认 result set type；statement option 可覆盖。 |
+| `UseColumnLabel` | `settings.useColumnLabel` | `true` | 在支持的结果路径中使用返回的 column label。 |
+| `NullableOnForEach` | `settings.nullableOnForEach` | `true` | 动态 `foreach` 的默认 nil/empty 集合行为。 |
+| `ShrinkWhitespacesInSQL` | `settings.shrinkWhitespacesInSql` | `false` | 收缩渲染后的动态 SQL 空白。 |
+| `JDBCTypeForNull` | `settings.jdbcTypeForNull` | `OTHER` | JDBC 风格 null type 元数据。 |
+| `AutoMappingBehavior` | `settings.autoMappingBehavior` | `FULL` | `NONE`、`PARTIAL` 或 `FULL`。 |
+| `AutoMappingUnknownColumnBehavior` | `settings.autoMappingUnknownColumnBehavior` | `NONE` | `NONE`、`WARNING` 或 `FAILING`。 |
+| `SafeRowBoundsEnabled` | `settings.safeRowBoundsEnabled` | `false` | 保留 MyBatis-compatible 校验语义的设置。 |
+| `SafeResultHandlerEnabled` | `settings.safeResultHandlerEnabled` | `true` | 保留 MyBatis-compatible 校验语义的设置。 |
+| `AggressiveLazyLoading` | `settings.aggressiveLazyLoading` | `false` | 保留 MyBatis-compatible 校验语义的设置。 |
+| `LazyLoadTriggerMethods` | `settings.lazyLoadTriggerMethods` | `equals`, `clone`, `hashCode`, `toString` | 已校验的方法名元数据。 |
+| `DefaultScriptingLanguage` | `settings.defaultScriptingLanguage` | empty | 已校验脚本语言元数据；core 不加载脚本引擎。 |
+| `DefaultEnumTypeHandler` | `settings.defaultEnumTypeHandler` | empty | 已校验 enum handler 元数据。 |
+| `CallSettersOnNulls` | `settings.callSettersOnNulls` | `false` | 保留 MyBatis-compatible 校验语义的设置。 |
+| `ReturnInstanceForEmptyRow` | `settings.returnInstanceForEmptyRow` | `false` | 保留 MyBatis-compatible 校验语义的设置。 |
+| `LogPrefix` | `settings.logPrefix` | empty | 保留 log prefix 元数据。 |
+| `LogImpl` | `settings.logImpl` | empty | 已校验 logger 元数据；core 不实例化 logger。 |
+| `ProxyFactory` | `settings.proxyFactory` | empty | 仅保留已校验元数据；core 不创建透明代理。 |
+| `VFSImpl` | `settings.vfsImpl` | empty | 已校验、允许 slash 的 token list。 |
+| `UseActualParamName` | `settings.useActualParamName` | `true` | 保留参数命名设置。 |
+| `ConfigurationFactory` | `settings.configurationFactory` | empty | 仅保留已校验元数据。 |
+| `DefaultSQLProviderType` | `settings.defaultSqlProviderType` | empty | 仅保留已校验元数据。 |
+| `ArgNameBasedConstructorAutoMapping` | `settings.argNameBasedConstructorAutoMapping` | `false` | 保留 constructor auto-mapping 设置。 |
+| `MetaObjectHandler` | Go-only | `GlobalConfig.MetaObjectHandler` | insert/update 语义使用的自动填充 hook。 |
+
+`GlobalConfig` 字段：
+
+| 字段 | JSON 来源 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `DbConfig` | `global.dbConfig` | `DefaultDbConfig()` | 可序列化的数据库命名、ID、字段策略和逻辑删除默认值。 |
+| `IdentifierGenerator` | Go-only | nil | `ASSIGN_ID` 或调用方自定义 ID 策略使用的 ID 生成器。 |
+| `MetaObjectHandler` | Go-only | nil | 与 `Configuration.MetaObjectHandler` 共享的 insert/update 填充 hook。 |
+
 应用可以跳过 JSON，直接构造 `Configuration`：
 
 ```go
@@ -336,6 +388,10 @@ if err != nil {
 | `Registry` | `*Registry` | 已校验的 registry。 |
 | `SessionFactory` | `*SQLSessionFactory` | 提供 `DB` 时存在。 |
 | `Session` | `*SQLSession` | 提供 `DB` 时存在。调用方需要关闭。 |
+| `TypeAliases` | `map[string]string` | 配置声明中的规范化 alias map。 |
+| `TypeHandlers` | `[]string` | 校验后的已声明 type-handler 名称。 |
+| `Mappers` | `[]MapperRef` | 复制后的 mapper 声明。 |
+| `Plugins` | `[]PluginRef` | 复制后的 plugin 声明。 |
 
 ## Boot Adapter 配置
 
@@ -349,6 +405,7 @@ if err != nil {
 | `Registry` | `*orm.Registry` | new registry | 元数据 registry。 |
 | `DB` | `*sql.DB` | required | 调用方拥有的数据库连接池。 |
 | `RuntimeConfig` | `orm.RuntimeConfig` | empty | 运行期声明模型。 |
+| `MyBatisConfig` | `orm.MyBatisConfig` | empty | 同一声明模型的别名；只有 `RuntimeConfig` 为空时才使用。 |
 | `TypeHandlers` | map | empty | 自定义 TypeHandler。 |
 | `Plugins` | map | empty | 自定义 plugin。 |
 | `SessionOptions` | slice | empty | 额外 session options。 |

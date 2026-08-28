@@ -63,7 +63,7 @@ if err != nil {
 _ = users
 ```
 
-数据库矩阵验证见 [database-matrix.md](database-matrix.md) 和仓库脚本：
+数据库矩阵验证见 [database-matrix.zh-CN.md](database-matrix.zh-CN.md) 和仓库脚本：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/verify-real-db.ps1
