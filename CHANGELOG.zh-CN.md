@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+暂无未发布变更。
+
+## [v0.0.2] - 2026-08-29
+
+### 发布定位
+
+`v0.0.2` 是 Goark ORM 的文档体系、发布就绪和热路径强化版本。模块路径保持为 `goark.dev/orm`，根包公共门面继续保持 V1 公开契约。
+
+本版本重点提升生产落地可读性：文档体系改为英文优先且中英双语，示例以可执行 Go package 形式组织并补齐说明，发布验证继续覆盖生成元数据、运行期测试、race、benchmark 阈值和驱动隔离的数据库 harness。
+
 ### 文档
 
 - 围绕英文优先的中英双语指南重写文档体系。
@@ -9,6 +19,42 @@
 - 新增示例工作区、最小示例、Provider 示例和生产级 Demo 的双语 README。
 - 扩展生产级 Demo 文档，覆盖配置、运行期装配、服务边界、参数校验和验证命令。
 - 移除公共文档中形似凭据的内联 DSN 示例；真实数据库执行只说明通过环境变量注入，不在仓库保存示例密钥。
+
+### 修复
+
+- 修复运行期 MyBatis 风格配置属性解析时 `PluginRef.Order` 丢失的问题，确保 JSON 中声明的插件顺序能正确进入运行期装配。
+
+### 性能
+
+- 优化 `CompileSQL` 内置方言占位符生成路径，直接写入 PostgreSQL、SQL Server、Oracle 和问号占位符形式，减少热路径字符串格式化成本。
+- 增加 SQL Server 和 Oracle 编号占位符回归测试。
+
+### 发布前验证
+
+本版本发布前已通过以下本地门禁：
+
+```bash
+GOWORK=off go test -count=1 ./...
+GOWORK=off go vet ./...
+GOWORK=off go test -race -count=1 ./...
+gofmt -l .
+git diff --check
+GOWORK=off go run ./cmd/goark-orm generate orm --dir examples/minimal --check
+GOWORK=off go run ./cmd/goark-orm generate orm --dir examples/minimal --diff
+GOWORK=off go run ./cmd/goark-orm generate orm --config examples/production/goark-orm.json --check
+GOWORK=off go run ./cmd/goark-orm generate orm --config examples/production/goark-orm.json --diff
+powershell -ExecutionPolicy Bypass -File scripts\verify-bench.ps1 -EnforceTime
+powershell -ExecutionPolicy Bypass -File scripts\verify-real-db.ps1
+powershell -ExecutionPolicy Bypass -File scripts\verify-real-db-bench.ps1 -BenchTime 1s
+```
+
+本地真实数据库 harness 已编译通过。未配置 DSN 变量时，PostgreSQL、MySQL、MariaDB、SQLite、SQL Server 和 Oracle 用例会按设计跳过。需要完整真实数据库矩阵时，按 [docs/database-matrix.zh-CN.md](docs/database-matrix.zh-CN.md) 配置对应 DSN 变量后重新执行。
+
+### 安装
+
+```bash
+go get goark.dev/orm@v0.0.2
+```
 
 ## [v0.0.1] - 2026-08-28
 

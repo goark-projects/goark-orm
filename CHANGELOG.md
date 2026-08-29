@@ -4,6 +4,16 @@ English is the default changelog language. The Chinese mirror is maintained in [
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [v0.0.2] - 2026-08-29
+
+### Release Positioning
+
+`v0.0.2` is a documentation, release-readiness, and hot-path hardening release for Goark ORM. It keeps the module path as `goark.dev/orm` and preserves the V1 public contract exposed by the root facade package.
+
+The release focuses on making the framework easier to adopt in production: the documentation is now English-first and bilingual, the examples are documented as executable packages, and release verification remains tied to generated metadata, runtime tests, race checks, benchmark thresholds, and driver-isolated database harnesses.
+
 ### Documentation
 
 - Reworked the documentation system around English-first bilingual guides.
@@ -11,6 +21,42 @@ English is the default changelog language. The Chinese mirror is maintained in [
 - Added bilingual README files for the example workspace, minimal example, provider example, and production demo.
 - Expanded production-demo documentation to show configuration, runtime assembly, service boundaries, validation, and verification commands.
 - Removed inline credential-shaped DSN examples from public docs; real database runs now document environment-variable injection without storing sample secrets.
+
+### Fixed
+
+- Preserved `PluginRef.Order` while resolving runtime MyBatis-style configuration properties, so JSON-declared plugin order survives runtime assembly.
+
+### Performance
+
+- Optimized built-in dialect placeholder compilation in `CompileSQL` by writing PostgreSQL, SQL Server, Oracle, and question-placeholder forms directly on the hot path.
+- Added regression coverage for SQL Server and Oracle numbered placeholders.
+
+### Verified
+
+The release was validated with:
+
+```bash
+GOWORK=off go test -count=1 ./...
+GOWORK=off go vet ./...
+GOWORK=off go test -race -count=1 ./...
+gofmt -l .
+git diff --check
+GOWORK=off go run ./cmd/goark-orm generate orm --dir examples/minimal --check
+GOWORK=off go run ./cmd/goark-orm generate orm --dir examples/minimal --diff
+GOWORK=off go run ./cmd/goark-orm generate orm --config examples/production/goark-orm.json --check
+GOWORK=off go run ./cmd/goark-orm generate orm --config examples/production/goark-orm.json --diff
+powershell -ExecutionPolicy Bypass -File scripts\verify-bench.ps1 -EnforceTime
+powershell -ExecutionPolicy Bypass -File scripts\verify-real-db.ps1
+powershell -ExecutionPolicy Bypass -File scripts\verify-real-db-bench.ps1 -BenchTime 1s
+```
+
+The local real-database harness compiled successfully. When DSN variables are unset, PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, and Oracle cases skip by design. Configure the DSN variables documented in [docs/database-matrix.md](docs/database-matrix.md) to run the full live matrix.
+
+### Install
+
+```bash
+go get goark.dev/orm@v0.0.2
+```
 
 ## [v0.0.1] - 2026-08-28
 
